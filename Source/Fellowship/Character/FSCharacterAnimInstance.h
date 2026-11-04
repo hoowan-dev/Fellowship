@@ -21,6 +21,16 @@ class FELLOWSHIP_API UFSCharacterAnimInstance : public UAnimInstance
 	UPROPERTY(Transient, BlueprintReadOnly, Category = "Motion Matching", meta = (AllowPrivateAccess = "true"))
 	FTransformTrajectory Trajectory;
 
+	UPROPERTY(Transient, BlueprintReadOnly, Category = "Movement", meta = (AllowPrivateAccess = "true"))
+	bool bIsFalling = false;
+
+	// Falling with upward velocity: true during a jump's ascent, and also when launched off a ramp
+	UPROPERTY(Transient, BlueprintReadOnly, Category = "Movement", meta = (AllowPrivateAccess = "true"))
+	bool bIsRising = false;
+
+	UPROPERTY(Transient, BlueprintReadOnly, Category = "Movement", meta = (AllowPrivateAccess = "true"))
+	bool bHasMovementInput = false;
+
 	UPROPERTY(Transient)
 	TObjectPtr<const UFSCharacterMovementComponent> MovementComponent;
 

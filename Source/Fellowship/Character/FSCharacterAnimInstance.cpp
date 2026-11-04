@@ -21,6 +21,9 @@ void UFSCharacterAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 	if (MovementComponent)
 	{
 		Trajectory = MovementComponent->GetTrajectory();
+		bIsFalling = MovementComponent->IsFalling();
+		bIsRising = bIsFalling && MovementComponent->Velocity.Z > 0.0f;
+		bHasMovementInput = !MovementComponent->GetCurrentAcceleration().IsNearlyZero();
 	}
 }
 
