@@ -13,5 +13,7 @@ UCLASS()
 class FELLOWSHIP_API AFSGameMode : public AGameMode
 {
 	GENERATED_BODY()
-	
+
+public:
+	AFSGameMode();
 };

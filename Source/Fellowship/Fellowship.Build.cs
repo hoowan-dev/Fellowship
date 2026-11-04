@@ -7,6 +7,9 @@ public class Fellowship : ModuleRules
 	public Fellowship(ReadOnlyTargetRules Target) : base(Target)
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
+
+		// Allow includes relative to the module root, e.g. "Character/FSCharacter.h"
+		PublicIncludePaths.Add(ModuleDirectory);
 	
 		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "EnhancedInput" });
 

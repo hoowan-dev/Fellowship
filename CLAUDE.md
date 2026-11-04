@@ -35,7 +35,7 @@ There are no tests yet. If Automation tests are added, run headless with:
 
 - `Fellowship.uproject` — module list and plugins (`ModelingToolsEditorMode`, editor-only).
 - `Source/Fellowship.Target.cs`, `Source/FellowshipEditor.Target.cs` — build targets (BuildSettings V6, include order `Unreal5_7`). New modules must be added to `ExtraModuleNames` here and to `Modules` in the `.uproject`.
-- `Source/Fellowship/` subfolders (`Character/`, `Game/`, `Player/`) mirror `Content/Blueprints/`; put a C++ class in the folder matching its Blueprint subclass.
+- `Source/Fellowship/` subfolders (`Character/`, `Game/`, `Player/`) mirror `Content/Blueprints/`; put a C++ class in the folder matching its Blueprint subclass. The module root is on the include path (`Fellowship.Build.cs`), so cross-folder includes are written `#include "Character/FSCharacter.h"`.
 - `Source/Fellowship/Fellowship.Build.cs` — module deps. Public deps already include `EnhancedInput`; Slate and OnlineSubsystem are present as commented-out lines.
 - `Config/Default*.ini` — project settings. Rendering is configured for Lumen GI/reflections, hardware ray tracing, Virtual Shadow Maps, Substrate materials, DX12/SM6, no static lighting.
 - `Content/` — binary `.uasset`/`.umap` files; edit through the editor, not as text.
