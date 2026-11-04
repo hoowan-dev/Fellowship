@@ -12,13 +12,6 @@ class AFSPlayerController;
 class UInputAction;
 struct FInputActionValue;
 
-// Where the character's feet are at a given world time, for the trajectory debug display
-struct FFSTrajectorySample
-{
-	double Time = 0.0;
-	FVector Location = FVector::ZeroVector;
-};
-
 UCLASS()
 class FELLOWSHIP_API AFSCharacter : public ACharacter
 {
@@ -59,23 +52,6 @@ public:
 	float MaxLookPitch = 89.9f;
 
 public:
-
-	// Draws the path the character just took and the path it is predicted to take. Not available in Test or Shipping builds.
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Debug", meta = (AllowPrivateAccess = "true"))
-	bool bDrawDebugTrajectory = false;
-
-	// How many seconds of the path the character just took to draw
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Debug", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0", ForceUnits = "s"))
-	float TrajectoryPastTime = 1.0f;
-
-	// How many seconds of the path the character is predicted to take to draw
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Debug", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0", ForceUnits = "s"))
-	float TrajectoryFutureTime = 1.0f;
-
-	// Recent locations, oldest first. Only recorded while bDrawDebugTrajectory is on.
-	TArray<FFSTrajectorySample> TrajectoryHistory;
-
-public:
 	// Sets default values for this character's properties
 	AFSCharacter(const FObjectInitializer& ObjectInitializer = FObjectInitializer::Get());
 
@@ -89,9 +65,6 @@ protected:
 
 	void Move(const FInputActionValue& Value);
 	void Look(const FInputActionValue& Value);
-
-	// Draws one frame of the trajectory debug display
-	void DrawTrajectory();
 
 public:
 	// Called every frame
