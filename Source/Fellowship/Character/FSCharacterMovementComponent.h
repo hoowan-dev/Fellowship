@@ -114,6 +114,22 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Movement: Climbing", meta = (ClampMin = "0.0", UIMin = "0.0", ForceUnits = "s"))
 	float ClimbReattachDelay = 0.4f;
 
+	// How far ahead of the capsule a surface can be to start turning onto it at an inside corner.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Movement: Climbing", meta = (ClampMin = "0.0", UIMin = "0.0", ForceUnits = "cm"))
+	float ClimbCornerReach = 20.0f;
+
+	// How quickly the character turns around a corner. Once started, a turn always finishes.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Movement: Climbing", meta = (ClampMin = "1.0", UIMin = "1.0", ForceUnits = "deg/s"))
+	float ClimbCornerTurnRate = 240.0f;
+
+	// How close the character's standing feet have to get to walkable floor to climb off onto it.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Movement: Climbing", meta = (ClampMin = "0.0", UIMin = "0.0", ForceUnits = "cm"))
+	float ClimbDismountFloorDistance = 5.0f;
+
+	// How far above the floor the character's standing feet have to get before reaching the floor climbs off onto it. Keeps a grab made from the ground from ending straight away.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Movement: Climbing", meta = (ClampMin = "0.0", UIMin = "0.0", ForceUnits = "cm"))
+	float ClimbDismountArmHeight = 30.0f;
+
 	// In the air, draws the grab traces (green grabs, yellow is refused and says why, orange misses) and why a grab can't be attempted.
 	// While climbing, draws the sensing traces (green is used, red isn't), the capsule, the surface normal (blue) and up and right axes (green, red), and the speed and surface angle.
 	// Marks where the character grabbed on and let go, and why it let go. Not available in Shipping builds.
@@ -173,6 +189,49 @@ private:
 	bool IsClimbableNormal(const FVector& Normal) const;
 	static bool IsClimbableHit(const FHitResult& Hit);
 
+	// Whether the character's feet have come back down to the floor since climbing away from it
+	bool ShouldDismountOntoFloor();
+
+	// A turn from one surface onto another, moving along a path that's fixed when it starts
+	struct FClimbCorner
+	{
+		FVector StartLocation = FVector::ZeroVector;
+		FVector EndLocation = FVector::ZeroVector;
+		FVector StartNormal = FVector::ZeroVector;
+		FVector EndNormal = FVector::ZeroVector;
+
+		// The edge an outside corner swings around. Inside corners move straight to the end.
+		FVector Pivot = FVector::ZeroVector;
+		bool bOutside = false;
+
+		float Alpha = 0.0f;
+		float Duration = 0.0f;
+
+		FVector GetLocation(float InAlpha) const;
+		FVector GetNormal(float InAlpha) const;
+	};
+
+	// Starts a turn if input is pushing the character sideways into an inside corner or past an outside one
+	bool TryStartClimbCorner();
+	bool TryStartInsideClimbCorner(const FVector& MoveDirection);
+	bool TryStartOutsideClimbCorner(const FVector& MoveDirection);
+
+	// Starts the turn if the capsule fits along its whole path
+	bool StartClimbCorner(FClimbCorner Corner);
+
+	void UpdateClimbCorner(float DeltaTime);
+
+	bool ClimbLineTrace(FHitResult& OutHit, const FVector& Start, const FVector& End) const;
+	bool ClimbCapsuleSweep(FHitResult& OutHit, const FVector& Start, const FVector& End) const;
+
+	// Whether a surface can be turned onto from the current one, as opposed to being a continuation of it or doubling back on it
+	bool IsClimbCornerNormal(const FVector& Normal) const;
+
+	// The character's rotation after turning towards the current surface for this frame. Only its yaw follows the surface.
+	FQuat GetClimbFacingRotation(float DeltaTime) const;
+
+	void DrawDebugClimbing() const;
+
 	// Falls off the surface, recording the reason when debug drawing
 	void LoseClimbGrip(const TCHAR* Reason);
 
@@ -211,6 +270,12 @@ private:
 
 	// Unscaled half height to restore when climbing ends
 	float StandingCapsuleHalfHeight = 0.0f;
+
+	FClimbCorner ClimbCorner;
+	bool bInClimbCorner = false;
+
+	// Whether the feet have been far enough from the floor since grabbing on for reaching it to climb off
+	bool bClimbDismountArmed = false;
 
 	// The current airborne stretch, as drawn by DrawDebugJump
 	bool bDebugAirborne = false;

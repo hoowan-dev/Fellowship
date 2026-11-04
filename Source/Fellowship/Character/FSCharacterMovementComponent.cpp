@@ -16,6 +16,19 @@ namespace
 	constexpr float DebugMarkerLifetime = 5.0f;
 	constexpr float DebugMarkerRadius = 12.0f;
 
+	// How far ahead of the capsule's center the surface has to run out to count as reaching an outside corner
+	constexpr float ClimbCornerEdgeLead = 5.0f;
+
+	// How far behind the climbed surface to look for the face around an outside corner
+	constexpr float ClimbCornerProbeDepth = 10.0f;
+
+	// Smallest and largest cosine of the turn between two surfaces that counts as a corner, from 30 to 120 degrees
+	constexpr double ClimbCornerMaxNormalDot = 0.87;
+	constexpr double ClimbCornerMinNormalDot = -0.5;
+
+	// How directly input has to point sideways along the surface to take a corner
+	constexpr double ClimbCornerMinInputDot = 0.5;
+
 	void SetConsoleVariable(const TCHAR* Name, bool bValue)
 	{
 		// Only registered in builds with animation debugging. Set by console priority so the toggles also win over a value typed in the console.
@@ -217,6 +230,7 @@ void UFSCharacterMovementComponent::OnMovementModeChanged(EMovementMode Previous
 		{
 			UCapsuleComponent* Capsule = CharacterOwner->GetCapsuleComponent();
 			StandingCapsuleHalfHeight = Capsule->GetUnscaledCapsuleHalfHeight();
+			bClimbDismountArmed = false;
 
 			// Shrinks about the center, so the mesh and camera stay where they are
 			Capsule->SetCapsuleHalfHeight(StandingCapsuleHalfHeight * ClimbCapsuleHalfHeightScale, false);
@@ -225,6 +239,7 @@ void UFSCharacterMovementComponent::OnMovementModeChanged(EMovementMode Previous
 		{
 			RestoreStandingCapsule();
 			NextClimbAttachTime = GetWorld()->GetTimeSeconds() + ClimbReattachDelay;
+			bInClimbCorner = false;
 		}
 	}
 
@@ -293,6 +308,13 @@ void UFSCharacterMovementComponent::PhysClimbing(float DeltaTime)
 		return;
 	}
 
+	// Checked first because sensing stops finding a surface once the character is past an outside corner
+	if (bInClimbCorner || TryStartClimbCorner())
+	{
+		UpdateClimbCorner(DeltaTime);
+		return;
+	}
+
 	FVector SensedNormal;
 	if (!SenseClimbSurface(SensedNormal))
 	{
@@ -307,13 +329,7 @@ void UFSCharacterMovementComponent::PhysClimbing(float DeltaTime)
 		return;
 	}
 
-	// Only the capsule's yaw follows the surface. It stays upright because the rest of the movement code assumes it is.
-	FQuat Rotation = UpdatedComponent->GetComponentQuat();
-	const FVector FacingDirection = (-ClimbSurfaceNormal).GetSafeNormal2D();
-	if (!FacingDirection.IsZero())
-	{
-		Rotation = FMath::RInterpTo(UpdatedComponent->GetComponentRotation(), FacingDirection.Rotation(), DeltaTime, ClimbRotationInterpSpeed).Quaternion();
-	}
+	const FQuat Rotation = GetClimbFacingRotation(DeltaTime);
 
 	Acceleration = FVector::VectorPlaneProject(Acceleration, ClimbSurfaceNormal);
 	Velocity = FVector::VectorPlaneProject(Velocity, ClimbSurfaceNormal);
@@ -342,6 +358,238 @@ void UFSCharacterMovementComponent::PhysClimbing(float DeltaTime)
 		return;
 	}
 
+	if (ShouldDismountOntoFloor())
+	{
+		DrawDebugClimbEvent(TEXT("Dismounted: feet on floor"), FColor::Green);
+		SetMovementMode(MOVE_Walking);
+		return;
+	}
+
+	DrawDebugClimbing();
+}
+
+bool UFSCharacterMovementComponent::ShouldDismountOntoFloor()
+{
+	// Measured from where the feet are when standing, because the shrunken capsule's bottom is above them
+	const float StandingHalfHeight = StandingCapsuleHalfHeight * CharacterOwner->GetCapsuleComponent()->GetShapeScale();
+	const FVector Center = UpdatedComponent->GetComponentLocation();
+
+	FHitResult FloorHit;
+	ClimbLineTrace(FloorHit, Center, Center - FVector::UpVector * (StandingHalfHeight + ClimbDismountArmHeight));
+
+	if (!IsWalkable(FloorHit))
+	{
+		bClimbDismountArmed = true;
+		return false;
+	}
+
+	const double FeetHeight = FloorHit.Distance - StandingHalfHeight;
+	if (FeetHeight >= ClimbDismountArmHeight)
+	{
+		bClimbDismountArmed = true;
+	}
+
+	return bClimbDismountArmed && FeetHeight <= ClimbDismountFloorDistance;
+}
+
+FQuat UFSCharacterMovementComponent::GetClimbFacingRotation(float DeltaTime) const
+{
+	// The capsule stays upright because the rest of the movement code assumes it is
+	const FVector FacingDirection = (-ClimbSurfaceNormal).GetSafeNormal2D();
+	return FacingDirection.IsZero()
+		? UpdatedComponent->GetComponentQuat()
+		: FMath::RInterpTo(UpdatedComponent->GetComponentRotation(), FacingDirection.Rotation(), DeltaTime, ClimbRotationInterpSpeed).Quaternion();
+}
+
+bool UFSCharacterMovementComponent::ClimbLineTrace(FHitResult& OutHit, const FVector& Start, const FVector& End) const
+{
+	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(ClimbCorner), false, CharacterOwner);
+	FCollisionResponseParams ResponseParams;
+	UpdatedPrimitive->InitSweepCollisionParams(QueryParams, ResponseParams);
+
+	GetWorld()->LineTraceSingleByChannel(OutHit, Start, End, UpdatedComponent->GetCollisionObjectType(), QueryParams, ResponseParams);
+	return IsClimbableHit(OutHit);
+}
+
+bool UFSCharacterMovementComponent::ClimbCapsuleSweep(FHitResult& OutHit, const FVector& Start, const FVector& End) const
+{
+	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(ClimbCorner), false, CharacterOwner);
+	FCollisionResponseParams ResponseParams;
+	UpdatedPrimitive->InitSweepCollisionParams(QueryParams, ResponseParams);
+
+	GetWorld()->SweepSingleByChannel(OutHit, Start, End, FQuat::Identity, UpdatedComponent->GetCollisionObjectType(), UpdatedPrimitive->GetCollisionShape(), QueryParams, ResponseParams);
+	return IsClimbableHit(OutHit);
+}
+
+bool UFSCharacterMovementComponent::IsClimbCornerNormal(const FVector& Normal) const
+{
+	const double NormalDot = FVector::DotProduct(Normal, ClimbSurfaceNormal);
+	return IsClimbableNormal(Normal) && NormalDot <= ClimbCornerMaxNormalDot && NormalDot >= ClimbCornerMinNormalDot;
+}
+
+bool UFSCharacterMovementComponent::TryStartClimbCorner()
+{
+	const FVector Right = GetClimbRightDirection();
+	const double RightInput = FVector::DotProduct(Acceleration.GetSafeNormal(), Right);
+	if (FMath::Abs(RightInput) < ClimbCornerMinInputDot)
+	{
+		return false;
+	}
+
+	const FVector MoveDirection = Right * FMath::Sign(RightInput);
+	return TryStartInsideClimbCorner(MoveDirection) || TryStartOutsideClimbCorner(MoveDirection);
+}
+
+bool UFSCharacterMovementComponent::TryStartInsideClimbCorner(const FVector& MoveDirection)
+{
+	const FVector Center = UpdatedComponent->GetComponentLocation();
+	const FVector End = Center + MoveDirection * (CharacterOwner->GetCapsuleComponent()->GetScaledCapsuleRadius() + ClimbSurfaceGap + ClimbCornerReach);
+
+	FHitResult SurfaceHit;
+	if (!ClimbLineTrace(SurfaceHit, Center, End)
+		|| !IsClimbCornerNormal(SurfaceHit.ImpactNormal)
+		|| FVector::DotProduct(MoveDirection, SurfaceHit.ImpactNormal) > -0.5)
+	{
+		return false;
+	}
+
+	FHitResult CapsuleHit;
+	if (!ClimbCapsuleSweep(CapsuleHit, Center, End))
+	{
+		return false;
+	}
+
+	FClimbCorner Corner;
+	Corner.StartLocation = Center;
+	Corner.EndLocation = CapsuleHit.Location + SurfaceHit.ImpactNormal * ClimbSurfaceGap;
+	Corner.EndNormal = SurfaceHit.ImpactNormal;
+	return StartClimbCorner(Corner);
+}
+
+bool UFSCharacterMovementComponent::TryStartOutsideClimbCorner(const FVector& MoveDirection)
+{
+	const float Radius = CharacterOwner->GetCapsuleComponent()->GetScaledCapsuleRadius();
+	const float HalfHeight = CharacterOwner->GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
+	const FVector Center = UpdatedComponent->GetComponentLocation();
+	const FVector TraceDelta = -ClimbSurfaceNormal * (HalfHeight + ClimbSenseDistance);
+
+	// Still on the surface if it continues just ahead of the capsule's center
+	FHitResult SurfaceHit;
+	const FVector AheadStart = Center + MoveDirection * ClimbCornerEdgeLead;
+	if (ClimbLineTrace(SurfaceHit, AheadStart, AheadStart + TraceDelta) && FVector::DotProduct(SurfaceHit.ImpactNormal, ClimbSurfaceNormal) > 0.0f)
+	{
+		return false;
+	}
+
+	// Looks back from past the edge, behind the plane of the surface, for the face around the corner
+	FHitResult CenterHit;
+	const double SurfaceDistance = ClimbLineTrace(CenterHit, Center, Center + TraceDelta) ? CenterHit.Distance : Radius + ClimbSurfaceGap;
+	const float BackDistance = ClimbCornerEdgeLead + ClimbCornerReach + Radius;
+	const FVector BackStart = Center + MoveDirection * (ClimbCornerEdgeLead + ClimbCornerReach) - ClimbSurfaceNormal * (SurfaceDistance + ClimbCornerProbeDepth);
+
+	FHitResult FaceHit;
+	if (!ClimbLineTrace(FaceHit, BackStart, BackStart - MoveDirection * BackDistance)
+		|| !IsClimbCornerNormal(FaceHit.ImpactNormal)
+		|| FVector::DotProduct(MoveDirection, FaceHit.ImpactNormal) < 0.5)
+	{
+		return false;
+	}
+
+	const FVector NewNormal = FaceHit.ImpactNormal;
+	const FVector Edge = FaceHit.ImpactPoint + ClimbSurfaceNormal * ClimbCornerProbeDepth;
+
+	// Where the capsule rests against the new face, level with the character
+	const FVector ProbeStart = FVector(Edge.X, Edge.Y, Center.Z) + NewNormal * (Radius + ClimbSurfaceGap + 5.0f);
+	FHitResult CapsuleHit;
+	if (!ClimbCapsuleSweep(CapsuleHit, ProbeStart, ProbeStart - NewNormal * (ClimbSenseDistance + ClimbSurfaceGap + 5.0f)))
+	{
+		return false;
+	}
+
+	FClimbCorner Corner;
+	Corner.bOutside = true;
+	Corner.Pivot = FVector(Edge.X, Edge.Y, Center.Z);
+	Corner.StartLocation = Center;
+	Corner.EndLocation = CapsuleHit.Location + NewNormal * ClimbSurfaceGap;
+	Corner.EndNormal = NewNormal;
+	return StartClimbCorner(Corner);
+}
+
+bool UFSCharacterMovementComponent::StartClimbCorner(FClimbCorner Corner)
+{
+	Corner.StartNormal = ClimbSurfaceNormal;
+
+	const double TurnAngle = FMath::RadiansToDegrees(FMath::Acos(FMath::Clamp(FVector::DotProduct(Corner.StartNormal, Corner.EndNormal), -1.0, 1.0)));
+	Corner.Duration = FMath::Max(TurnAngle / ClimbCornerTurnRate, MIN_TICK_TIME);
+
+	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(ClimbCorner), false, CharacterOwner);
+	FCollisionResponseParams ResponseParams;
+	UpdatedPrimitive->InitSweepCollisionParams(QueryParams, ResponseParams);
+
+	// Slightly smaller than the capsule because it's meant to pass close to the surfaces
+	const FCollisionShape Shape = UpdatedPrimitive->GetCollisionShape(-1.0f);
+
+	for (const float Alpha : { 0.25f, 0.5f, 0.75f, 1.0f })
+	{
+		if (GetWorld()->OverlapBlockingTestByChannel(Corner.GetLocation(Alpha), FQuat::Identity, UpdatedComponent->GetCollisionObjectType(), Shape, QueryParams, ResponseParams))
+		{
+			return false;
+		}
+	}
+
+	ClimbCorner = Corner;
+	bInClimbCorner = true;
+
+	DrawDebugClimbEvent(Corner.bOutside ? TEXT("Outside corner") : TEXT("Inside corner"), FColor::Cyan);
+	return true;
+}
+
+void UFSCharacterMovementComponent::UpdateClimbCorner(float DeltaTime)
+{
+	ClimbCorner.Alpha = FMath::Min(ClimbCorner.Alpha + DeltaTime / ClimbCorner.Duration, 1.0f);
+	ClimbSurfaceNormal = ClimbCorner.GetNormal(ClimbCorner.Alpha);
+
+	bJustTeleported = false;
+	const FVector OldLocation = UpdatedComponent->GetComponentLocation();
+
+	FHitResult Hit;
+	SafeMoveUpdatedComponent(ClimbCorner.GetLocation(ClimbCorner.Alpha) - OldLocation, GetClimbFacingRotation(DeltaTime), true, Hit);
+
+	Velocity = ((UpdatedComponent->GetComponentLocation() - OldLocation) / DeltaTime).GetClampedToMaxSize(ClimbSpeed);
+
+	if (ClimbCorner.Alpha >= 1.0f)
+	{
+		bInClimbCorner = false;
+	}
+
+	DrawDebugClimbing();
+}
+
+FVector UFSCharacterMovementComponent::FClimbCorner::GetLocation(float InAlpha) const
+{
+	if (!bOutside)
+	{
+		return FMath::Lerp(StartLocation, EndLocation, InAlpha);
+	}
+
+	// Swings around the edge, keeping clear of it
+	const FVector StartOffset = (StartLocation - Pivot).GetSafeNormal2D();
+	const FVector EndOffset = (EndLocation - Pivot).GetSafeNormal2D();
+	const FQuat Turn = FQuat::Slerp(FQuat::Identity, FQuat::FindBetweenNormals(StartOffset, EndOffset), InAlpha);
+	const double Distance = FMath::Lerp(FVector::Dist2D(StartLocation, Pivot), FVector::Dist2D(EndLocation, Pivot), InAlpha);
+
+	FVector Location = Pivot + Turn.RotateVector(StartOffset) * Distance;
+	Location.Z = FMath::Lerp(StartLocation.Z, EndLocation.Z, InAlpha);
+	return Location;
+}
+
+FVector UFSCharacterMovementComponent::FClimbCorner::GetNormal(float InAlpha) const
+{
+	return FQuat::Slerp(FQuat::Identity, FQuat::FindBetweenNormals(StartNormal, EndNormal), InAlpha).RotateVector(StartNormal).GetSafeNormal();
+}
+
+void UFSCharacterMovementComponent::DrawDebugClimbing() const
+{
 #if ENABLE_DRAW_DEBUG
 	if (bDrawDebugClimb)
 	{

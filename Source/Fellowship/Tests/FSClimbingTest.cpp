@@ -316,4 +316,165 @@ bool FFSClimbingSlopeTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSClimbingOutsideCornerTest, "Fellowship.Climbing.TurnsAroundOutsideCorners", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FFSClimbingOutsideCornerTest::RunTest(const FString& Parameters)
+{
+	// A block with its near face at X = 100 and side faces at Y = -300 and Y = 300
+	FClimbingTestWorld Test;
+	Test.AddBox(FVector(200.0f, 0.0f, 1000.0f), FVector(100.0f, 300.0f, 1000.0f));
+	Test.JumpForward();
+	if (!TestTrue(TEXT("Climbing"), Test.Movement->IsClimbing()))
+	{
+		return false;
+	}
+
+	Test.Climb(1.0f, 0.0f, 1.0f);
+	Test.Step(0.5f, FVector::ZeroVector);
+
+	const double Height = Test.Location().Z;
+	Test.Climb(3.0f, 1.0f, 0.0f);
+
+	const double ExpectedY = 300.0 + Test.Character->GetCapsuleComponent()->GetScaledCapsuleRadius() + Test.Movement->ClimbSurfaceGap;
+	TestTrue(TEXT("Still climbing after the corner"), Test.Movement->IsClimbing());
+	TestTrue(TEXT("Surface normal points out of the side face"), Test.Movement->GetClimbSurfaceNormal().Equals(FVector::RightVector, 0.01f));
+	TestNearlyEqual(TEXT("Holds the gap from the side face"), Test.Location().Y, ExpectedY, 0.5);
+	TestTrue(TEXT("Carries on along the side face"), Test.Location().X > 100.0);
+	TestNearlyEqual(TEXT("Stays level going around the corner"), Test.Location().Z, Height, 1.0);
+	TestTrue(TEXT("Turns to face the side face"), FMath::IsNearlyEqual(FRotator::NormalizeAxis(Test.Character->GetActorRotation().Yaw), -90.0, 2.0));
+
+	// Reversing goes back around the same corner
+	Test.Climb(3.0f, -1.0f, 0.0f);
+	TestTrue(TEXT("Still climbing after coming back"), Test.Movement->IsClimbing());
+	TestTrue(TEXT("Back on the near face"), Test.Movement->GetClimbSurfaceNormal().Equals(-FVector::ForwardVector, 0.01f));
+	TestTrue(TEXT("Heading back along the near face"), Test.Location().Y < 300.0);
+
+	// Far enough to go all the way around the block, through all four corners
+	Test.Climb(20.0f, 1.0f, 0.0f);
+	TestTrue(TEXT("Still climbing after circling the block"), Test.Movement->IsClimbing());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSClimbingInsideCornerTest, "Fellowship.Climbing.TurnsAroundInsideCorners", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FFSClimbingInsideCornerTest::RunTest(const FString& Parameters)
+{
+	// A second wall across the first, with its face at Y = 300
+	FClimbingTestWorld Test;
+	Test.AddWall();
+	Test.AddBox(FVector(-1000.0f, 400.0f, 500.0f), FVector(1100.0f, 100.0f, 500.0f));
+	Test.JumpForward();
+	if (!TestTrue(TEXT("Climbing"), Test.Movement->IsClimbing()))
+	{
+		return false;
+	}
+
+	Test.Climb(1.0f, 0.0f, 1.0f);
+	Test.Step(0.5f, FVector::ZeroVector);
+
+	const double FirstWallX = Test.Location().X;
+	const double Height = Test.Location().Z;
+	Test.Climb(3.0f, 1.0f, 0.0f);
+
+	const double ExpectedY = 300.0 - Test.Character->GetCapsuleComponent()->GetScaledCapsuleRadius() - Test.Movement->ClimbSurfaceGap;
+	TestTrue(TEXT("Still climbing after the corner"), Test.Movement->IsClimbing());
+	TestTrue(TEXT("Surface normal points out of the second wall"), Test.Movement->GetClimbSurfaceNormal().Equals(-FVector::RightVector, 0.01f));
+	TestNearlyEqual(TEXT("Holds the gap from the second wall"), Test.Location().Y, ExpectedY, 0.5);
+	TestTrue(TEXT("Carries on along the second wall"), Test.Location().X < FirstWallX - 20.0);
+	TestNearlyEqual(TEXT("Stays level going around the corner"), Test.Location().Z, Height, 1.0);
+
+	// Reversing goes back around the same corner
+	Test.Climb(3.0f, -1.0f, 0.0f);
+	TestTrue(TEXT("Still climbing after coming back"), Test.Movement->IsClimbing());
+	TestTrue(TEXT("Back on the first wall"), Test.Movement->GetClimbSurfaceNormal().Equals(-FVector::ForwardVector, 0.01f));
+	TestNearlyEqual(TEXT("Holds the gap from the first wall"), Test.Location().X, FirstWallX, 0.5);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSClimbingCornerLimitsTest, "Fellowship.Climbing.OnlyTurnsOntoClimbableSurfaces", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FFSClimbingCornerLimitsTest::RunTest(const FString& Parameters)
+{
+	{
+		// Without input the character stays put next to the corner
+		FClimbingTestWorld Test;
+		Test.AddBox(FVector(200.0f, 0.0f, 1000.0f), FVector(100.0f, 20.0f, 1000.0f));
+		Test.JumpForward();
+		const FVector Grabbed = Test.Location();
+		Test.Step(1.0f, FVector::ZeroVector);
+		TestTrue(TEXT("Climbing next to the corner"), Test.Movement->IsClimbing());
+		TestTrue(TEXT("Doesn't turn without input"), Test.Movement->GetClimbSurfaceNormal().Equals(-FVector::ForwardVector, 0.01f));
+		TestTrue(TEXT("Doesn't move without input"), Test.Location().Equals(Grabbed, 40.0f));
+	}
+	{
+		// Up input doesn't take a corner
+		FClimbingTestWorld Test;
+		Test.AddWall();
+		Test.AddBox(FVector(-1000.0f, 400.0f, 500.0f), FVector(1100.0f, 100.0f, 500.0f));
+		Test.JumpForward();
+		Test.Climb(1.0f, 1.0f, 0.0f);
+		Test.Climb(1.0f, 0.0f, 1.0f);
+		TestTrue(TEXT("Stays on the first wall going up"), Test.Movement->GetClimbSurfaceNormal().Equals(-FVector::ForwardVector, 0.01f));
+	}
+	{
+		// A movable wall can't be climbed, so it just blocks the way
+		FClimbingTestWorld Test;
+		Test.AddWall();
+		Test.AddBox(FVector(-1000.0f, 400.0f, 500.0f), FVector(1100.0f, 100.0f, 500.0f), FRotator::ZeroRotator, EComponentMobility::Movable);
+		Test.JumpForward();
+		Test.Climb(4.0f, 1.0f, 0.0f);
+		TestTrue(TEXT("Still climbing against the movable wall"), Test.Movement->IsClimbing());
+		TestTrue(TEXT("Stays on the first wall"), Test.Movement->GetClimbSurfaceNormal().Equals(-FVector::ForwardVector, 0.01f));
+		TestTrue(TEXT("Stopped by the movable wall"), Test.Location().Y < 300.0);
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSClimbingDismountTest, "Fellowship.Climbing.DismountsWhenFeetReachFloor", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FFSClimbingDismountTest::RunTest(const FString& Parameters)
+{
+	{
+		FClimbingTestWorld Test;
+		Test.AddWall();
+		Test.JumpForward();
+		Test.Climb(2.0f, 0.0f, 1.0f);
+		if (TestTrue(TEXT("Climbing after going up"), Test.Movement->IsClimbing()))
+		{
+			Test.Climb(4.0f, 0.0f, -1.0f);
+			TestFalse(TEXT("Not climbing after coming back down"), Test.Movement->IsClimbing());
+			TestTrue(TEXT("Walking after coming back down"), Test.Movement->IsMovingOnGround());
+			TestNearlyEqual(TEXT("Capsule restored"), Test.Character->GetCapsuleComponent()->GetUnscaledCapsuleHalfHeight(), StandingHalfHeight, 0.01f);
+			TestTrue(TEXT("Standing on the floor"), Test.Location().Z >= StandingHalfHeight && Test.Location().Z < StandingHalfHeight + 5.0f);
+
+			Test.Step(1.0f, FVector::ForwardVector);
+			TestFalse(TEXT("Walking into the wall doesn't grab it again"), Test.Movement->IsClimbing());
+		}
+	}
+	{
+		// Jumping into a wall right next to it grabs on with the feet barely off the floor
+		FClimbingTestWorld Test;
+		Test.AddWall();
+		Test.JumpForward();
+		TestTrue(TEXT("Grabbed from the ground"), Test.Movement->IsClimbing());
+		TestTrue(TEXT("Feet are still near the floor"), Test.Location().Z < StandingHalfHeight + Test.Movement->ClimbDismountArmHeight);
+
+		Test.Step(2.0f, FVector::ZeroVector);
+		TestTrue(TEXT("Stays on the wall after grabbing from the ground"), Test.Movement->IsClimbing());
+
+		Test.Climb(1.0f, 0.0f, -1.0f);
+		TestTrue(TEXT("Doesn't dismount before having climbed away from the floor"), Test.Movement->IsClimbing());
+	}
+	{
+		// Grabbing on from high up has already left the floor
+		FClimbingTestWorld Test;
+		Test.AddWall();
+		Test.Character->SetActorLocation(FVector(40.0f, 0.0f, 400.0f));
+		Test.Movement->SetMovementMode(MOVE_Falling);
+		Test.Step(0.3f, FVector::ForwardVector);
+		if (TestTrue(TEXT("Grabbed in mid air"), Test.Movement->IsClimbing()))
+		{
+			Test.Climb(4.0f, 0.0f, -1.0f);
+			TestTrue(TEXT("Dismounts after grabbing from high up"), Test.Movement->IsMovingOnGround());
+		}
+	}
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS
