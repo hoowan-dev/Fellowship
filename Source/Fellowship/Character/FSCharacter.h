@@ -37,13 +37,25 @@ class FELLOWSHIP_API AFSCharacter : public ACharacter
 	UPROPERTY(EditDefaultsOnly, Category = "Input")
 	TObjectPtr<UInputAction> JumpAction;
 
+	// Multiplier applied to look input (mouse sensitivity / stick speed)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera", meta = (AllowPrivateAccess = "true", ClampMin = "0.0"))
+	float LookSpeed = 1.0f;
+
+	// Maximum angle in degrees the camera can look up or down from horizontal
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, BlueprintSetter = SetMaxLookPitch, Category = "Camera", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", ClampMax = "89.9"))
+	float MaxLookPitch = 89.9f;
+
 public:
 	// Sets default values for this character's properties
-	AFSCharacter();
+	AFSCharacter(const FObjectInitializer& ObjectInitializer = FObjectInitializer::Get());
 
 protected:
 	// Called when the game starts or when spawned
 	virtual void BeginPlay() override;
+	virtual void NotifyControllerChanged() override;
+
+	// Pushes MaxLookPitch to the possessing player's camera manager
+	void ApplyLookPitchLimits() const;
 
 	void Move(const FInputActionValue& Value);
 	void Look(const FInputActionValue& Value);
@@ -61,5 +73,8 @@ public:
 	// Controller possessing this character, if it is an FSPlayerController
 	UFUNCTION(BlueprintPure, Category = "Character")
 	AFSPlayerController* GetFSPlayerController() const;
+
+	UFUNCTION(BlueprintSetter)
+	void SetMaxLookPitch(float NewMaxLookPitch);
 
 };

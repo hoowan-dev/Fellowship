@@ -4,15 +4,26 @@
 #include "FSCharacter.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "Camera/CameraComponent.h"
+#include "FSCharacterMovementComponent.h"
 #include "Player/FSPlayerController.h"
+#include "Camera/PlayerCameraManager.h"
 #include "EnhancedInputComponent.h"
 #include "InputActionValue.h"
 
 // Sets default values
-AFSCharacter::AFSCharacter()
+AFSCharacter::AFSCharacter(const FObjectInitializer& ObjectInitializer)
+	: Super(ObjectInitializer.SetDefaultSubobjectClass<UFSCharacterMovementComponent>(ACharacter::CharacterMovementComponentName))
 {
  	// Set this character to call Tick() every frame.  You can turn this off to improve performance if you don't need it.
 	PrimaryActorTick.bCanEverTick = true;
+
+	// Camera rotation comes from the controller; the character only turns to face its movement direction
+	bUseControllerRotationPitch = false;
+	bUseControllerRotationYaw = false;
+	bUseControllerRotationRoll = false;
+
+	// Turn speed is eased by UFSCharacterMovementComponent::FacingInterpSpeed
+	GetCharacterMovement()->bOrientRotationToMovement = true;
 
 	// Camera boom pulls in towards the player if there is a collision
 	CameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraBoom"));
@@ -44,6 +55,30 @@ void AFSCharacter::Tick(float DeltaTime)
 AFSPlayerController* AFSCharacter::GetFSPlayerController() const
 {
 	return GetController<AFSPlayerController>();
+}
+
+void AFSCharacter::SetMaxLookPitch(float NewMaxLookPitch)
+{
+	MaxLookPitch = FMath::Clamp(NewMaxLookPitch, 0.0f, 89.9f);
+	ApplyLookPitchLimits();
+}
+
+void AFSCharacter::NotifyControllerChanged()
+{
+	Super::NotifyControllerChanged();
+
+	ApplyLookPitchLimits();
+}
+
+void AFSCharacter::ApplyLookPitchLimits() const
+{
+	// The camera manager clamps pitch every frame when processing view rotation
+	const APlayerController* PlayerController = GetController<APlayerController>();
+	if (PlayerController && PlayerController->PlayerCameraManager)
+	{
+		PlayerController->PlayerCameraManager->ViewPitchMin = -MaxLookPitch;
+		PlayerController->PlayerCameraManager->ViewPitchMax = MaxLookPitch;
+	}
 }
 
 // Called to bind functionality to input
@@ -90,7 +125,7 @@ void AFSCharacter::Look(const FInputActionValue& Value)
 {
 	const FVector2D Input = Value.Get<FVector2D>();
 
-	AddControllerYawInput(Input.X);
-	AddControllerPitchInput(Input.Y);
+	AddControllerYawInput(Input.X * LookSpeed);
+	AddControllerPitchInput(Input.Y * LookSpeed);
 }
 

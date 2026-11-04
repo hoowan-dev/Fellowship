@@ -19,7 +19,7 @@ Builds go through UnrealBuildTool via the engine's `Build.bat`, run from the eng
 - Targets: `FellowshipEditor` (editor) and `Fellowship` (standalone game). Configurations: `Debug`, `DebugGame`, `Development`, `Test`, `Shipping`.
 - Clean: `Engine\Build\BatchFiles\Clean.bat` with the same arguments. Rebuild: `Rebuild.bat`.
 - The same commands exist as VS Code tasks in `Fellowship.code-workspace` (e.g. "FellowshipEditor Win64 Development Build").
-- If the editor is open with Live Coding enabled, a command-line build of the editor target will fail; compile from the editor (Ctrl+Alt+F11) or close it first.
+- If the editor is open with Live Coding enabled, a command-line build of the editor target will fail; compile from the editor (Ctrl+Alt+F11) or close it first. `Scripts\BuildAndRelaunch.ps1` closes the editor (with its save prompt), builds Development, and reopens the project; `Scripts\Launch.ps1` just opens it.
 - After adding/removing source files or modules, regenerate project files / compile commands:
   ```powershell
   & "C:\Program Files\Epic Games\UE_5.7\Engine\Build\BatchFiles\Build.bat" -projectfiles -project="C:\dev\Fellowship\Fellowship.uproject" -game -vscode
