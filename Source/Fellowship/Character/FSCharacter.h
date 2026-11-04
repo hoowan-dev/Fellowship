@@ -66,6 +66,9 @@ protected:
 	void Move(const FInputActionValue& Value);
 	void Look(const FInputActionValue& Value);
 
+	// Lets go of the surface while climbing, otherwise jumps
+	void JumpOrLetGo();
+
 public:
 	// Called every frame
 	virtual void Tick(float DeltaTime) override;

@@ -103,7 +103,7 @@ void AFSCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompone
 
 	if (JumpAction)
 	{
-		EnhancedInput->BindAction(JumpAction, ETriggerEvent::Started, this, &ACharacter::Jump);
+		EnhancedInput->BindAction(JumpAction, ETriggerEvent::Started, this, &AFSCharacter::JumpOrLetGo);
 		EnhancedInput->BindAction(JumpAction, ETriggerEvent::Completed, this, &ACharacter::StopJumping);
 	}
 }
@@ -111,6 +111,15 @@ void AFSCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompone
 void AFSCharacter::Move(const FInputActionValue& Value)
 {
 	const FVector2D Input = Value.Get<FVector2D>();
+
+	// Forward climbs up the surface whichever way the camera is facing
+	const UFSCharacterMovementComponent* Movement = GetCharacterMovement<UFSCharacterMovementComponent>();
+	if (Movement && Movement->IsClimbing())
+	{
+		AddMovementInput(Movement->GetClimbUpDirection(), Input.Y);
+		AddMovementInput(Movement->GetClimbRightDirection(), Input.X);
+		return;
+	}
 
 	// Move relative to where the camera is facing, ignoring pitch
 	const FRotator YawRotation(0.0f, GetControlRotation().Yaw, 0.0f);
@@ -126,5 +135,17 @@ void AFSCharacter::Look(const FInputActionValue& Value)
 
 	AddControllerYawInput(Input.X * LookSpeed);
 	AddControllerPitchInput(Input.Y * LookSpeed);
+}
+
+void AFSCharacter::JumpOrLetGo()
+{
+	UFSCharacterMovementComponent* Movement = GetCharacterMovement<UFSCharacterMovementComponent>();
+	if (Movement && Movement->IsClimbing())
+	{
+		Movement->StopClimbing();
+		return;
+	}
+
+	Jump();
 }
 

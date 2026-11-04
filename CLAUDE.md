@@ -28,7 +28,7 @@ Builds go through UnrealBuildTool via the engine's `Build.bat`, run from the eng
 
 Run the editor: `"C:\Program Files\Epic Games\UE_5.7\Engine\Binaries\Win64\UnrealEditor.exe" "C:\dev\Fellowship\Fellowship.uproject"`
 
-There are no tests yet. If Automation tests are added, run headless with:
+Automation tests live in `Source/Fellowship/Tests/`. Run them headless (`Fellowship` runs all of them) with:
 `UnrealEditor-Cmd.exe "C:\dev\Fellowship\Fellowship.uproject" -ExecCmds="Automation RunTests <TestName>;Quit" -unattended -nullrhi -nopause`
 
 ## Structure

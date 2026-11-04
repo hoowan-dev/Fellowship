@@ -7,6 +7,14 @@
 #include "Animation/TrajectoryTypes.h"
 #include "FSCharacterMovementComponent.generated.h"
 
+// Values of CustomMovementMode while the movement mode is MOVE_Custom
+UENUM(BlueprintType)
+enum class EFSCustomMovementMode : uint8
+{
+	None,
+	Climbing
+};
+
 /**
  *
  */
@@ -30,11 +38,11 @@ public:
 	// Draws the motion matching query: the current trajectory and pose as the Pose Search Schema's channels see them, the same way the Pose Search Database editor does.
 	// Drawn by the Motion Matching node, so it needs a valid search. Applies to every character and is not available in Test or Shipping builds.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Movement: Trajectory")
-	bool bDrawDebugQuery = false;
+	bool bDrawDebugQuery = true;
 
 	// Draws the database pose motion matching selected, for comparing with the query. Same requirements as Draw Debug Query.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Movement: Trajectory")
-	bool bDrawDebugMatch = false;
+	bool bDrawDebugMatch = true;
 
 	// How many seconds of the path the character just took to keep in the trajectory.
 	// Must reach the oldest sample time of the Pose Search Schema's Trajectory channel.
@@ -46,9 +54,98 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Movement: Trajectory", meta = (ClampMin = "0.0", UIMin = "0.0", ForceUnits = "s"))
 	float TrajectoryFutureTime = 1.0f;
 
+	// Fastest speed along a climbed surface.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Movement: Climbing", meta = (ClampMin = "0.0", UIMin = "0.0", ForceUnits = "cm/s"))
+	float ClimbSpeed = 150.0f;
+
+	// How quickly the character speeds up along a climbed surface.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Movement: Climbing", meta = (ClampMin = "0.0", UIMin = "0.0", ForceUnits = "cm/s^2"))
+	float ClimbAcceleration = 1024.0f;
+
+	// How quickly the character slows down along a climbed surface when there is no input.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Movement: Climbing", meta = (ClampMin = "0.0", UIMin = "0.0", ForceUnits = "cm/s^2"))
+	float ClimbBrakingDeceleration = 1024.0f;
+
+	// How readily velocity turns towards the input direction while climbing. Higher is snappier.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Movement: Climbing", meta = (ClampMin = "0.0", UIMin = "0.0"))
+	float ClimbFriction = 10.0f;
+
+	// How far past the capsule's edge a surface can be to start climbing it.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Movement: Climbing", meta = (ClampMin = "0.0", UIMin = "0.0", ForceUnits = "cm"))
+	float ClimbAttachDistance = 30.0f;
+
+	// How far input can point away from straight into a surface and still start climbing it.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Movement: Climbing", meta = (ClampMin = "0.0", ClampMax = "90.0", UIMin = "0.0", UIMax = "90.0", ForceUnits = "deg"))
+	float ClimbAttachInputAngle = 60.0f;
+
+	// Falling faster than this prevents grabbing a surface.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Movement: Climbing", meta = (ClampMin = "0.0", UIMin = "0.0", ForceUnits = "cm/s"))
+	float ClimbMaxAttachFallSpeed = 1500.0f;
+
+	// How far past vertical a surface can lean over the character and still be climbed.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Movement: Climbing", meta = (ClampMin = "0.0", ClampMax = "80.0", UIMin = "0.0", UIMax = "80.0", ForceUnits = "deg"))
+	float ClimbMaxOverhangAngle = 30.0f;
+
+	// How far past the capsule the surface can fall away before the character loses its grip.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Movement: Climbing", meta = (ClampMin = "0.0", UIMin = "0.0", ForceUnits = "cm"))
+	float ClimbSenseDistance = 40.0f;
+
+	// Space kept between the capsule and the surface, so bumps don't catch the capsule on every move.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Movement: Climbing", meta = (ClampMin = "0.0", UIMin = "0.0", ForceUnits = "cm"))
+	float ClimbSurfaceGap = 2.0f;
+
+	// Fastest the character moves towards or away from the surface to hold the gap.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Movement: Climbing", meta = (ClampMin = "0.0", UIMin = "0.0", ForceUnits = "cm/s"))
+	float ClimbSnapSpeed = 300.0f;
+
+	// Capsule half height while climbing, as a fraction of its standing half height. It can't get shorter than a sphere.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Movement: Climbing", meta = (ClampMin = "0.0", ClampMax = "1.0", UIMin = "0.0", UIMax = "1.0"))
+	float ClimbCapsuleHalfHeightScale = 0.75f;
+
+	// How quickly the sensed surface direction follows changes in the surface. Lower is steadier on rough geometry.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Movement: Climbing", meta = (ClampMin = "0.0", UIMin = "0.0"))
+	float ClimbNormalInterpSpeed = 10.0f;
+
+	// How quickly the character turns to face the surface.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Movement: Climbing", meta = (ClampMin = "0.0", UIMin = "0.0"))
+	float ClimbRotationInterpSpeed = 10.0f;
+
+	// How long after leaving a surface before the character can grab one again.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Movement: Climbing", meta = (ClampMin = "0.0", UIMin = "0.0", ForceUnits = "s"))
+	float ClimbReattachDelay = 0.4f;
+
+	// In the air, draws the grab traces (green grabs, yellow is refused and says why, orange misses) and why a grab can't be attempted.
+	// While climbing, draws the sensing traces (green is used, red isn't), the capsule, the surface normal (blue) and up and right axes (green, red), and the speed and surface angle.
+	// Marks where the character grabbed on and let go, and why it let go. Not available in Shipping builds.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Movement: Climbing")
+	bool bDrawDebugClimb = true;
+
+	// While airborne, draws the path taken (cyan for a jump, magenta for a fall), the predicted path (yellow) and the vertical speed.
+	// Marks the takeoff, apex and landing, with the height gained, distance and air time. Not available in Shipping builds.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Movement: Jumping")
+	bool bDrawDebugJump = false;
+
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual float GetMaxAcceleration() const override;
+	virtual float GetMaxSpeed() const override;
+	virtual float GetMaxBrakingDeceleration() const override;
+
+	UFUNCTION(BlueprintPure, Category = "Character Movement: Climbing")
+	bool IsClimbing() const;
+
+	// Lets go of the surface and starts falling. Does nothing when not climbing.
+	UFUNCTION(BlueprintCallable, Category = "Character Movement: Climbing")
+	void StopClimbing();
+
+	// Smoothed direction pointing out of the climbed surface
+	FVector GetClimbSurfaceNormal() const { return ClimbSurfaceNormal; }
+
+	// Direction along the climbed surface that is to the character's right as it faces the surface
+	FVector GetClimbRightDirection() const;
+
+	// Direction along the climbed surface that points as far upwards as the surface allows
+	FVector GetClimbUpDirection() const;
 
 	// Where the skeletal mesh has been and is predicted to go if the current input is held, updated every tick after movement.
 	// In the format the Pose History node expects: world space, oldest first, with time 0 being the previous frame.
@@ -56,8 +153,40 @@ public:
 
 protected:
 	virtual FRotator ComputeOrientToMovementRotation(const FRotator& CurrentRotation, float DeltaTime, FRotator& DeltaRotation) const override;
+	virtual void UpdateCharacterStateBeforeMovement(float DeltaSeconds) override;
+	virtual void OnMovementModeChanged(EMovementMode PreviousMovementMode, uint8 PreviousCustomMode) override;
+	virtual void PhysCustom(float DeltaTime, int32 Iterations) override;
+	virtual void PhysicsRotation(float DeltaTime) override;
 
 private:
+	// Starts climbing if input is pushing the airborne character into a climbable surface
+	void TryStartClimbing();
+
+	void PhysClimbing(float DeltaTime);
+
+	// Averages the normals of traces around the capsule. Returns false if none of them found a climbable surface.
+	bool SenseClimbSurface(FVector& OutNormal) const;
+
+	// Moves towards or away from the surface to hold the gap. Returns false if the surface has fallen out of reach.
+	bool SnapToClimbSurface(float DeltaTime, const FQuat& Rotation);
+
+	bool IsClimbableNormal(const FVector& Normal) const;
+	static bool IsClimbableHit(const FHitResult& Hit);
+
+	// Falls off the surface, recording the reason when debug drawing
+	void LoseClimbGrip(const TCHAR* Reason);
+
+	// Draws text above the character for this frame
+	void DrawDebugClimbStatus(const TCHAR* Status, const FColor& Color) const;
+
+	// Marks where the character is for a few seconds
+	void DrawDebugClimbEvent(const TCHAR* Event, const FColor& Color) const;
+
+	void DrawDebugJump(float DeltaTime);
+
+	// Restores the standing capsule, moving clear of the surface if the taller capsule wouldn't fit where it is
+	void RestoreStandingCapsule();
+
 	void UpdateTrajectory(float DeltaTime);
 
 	// Adds the current sample, then the predicted ones. Falling predictions hold at the first blocking hit; ground predictions stay level and ignore collision.
@@ -74,4 +203,20 @@ private:
 
 	bool bAppliedDrawDebugQuery = false;
 	bool bAppliedDrawDebugMatch = false;
+
+	FVector ClimbSurfaceNormal = FVector::ZeroVector;
+
+	// World time at which the character can next grab a surface
+	double NextClimbAttachTime = 0.0;
+
+	// Unscaled half height to restore when climbing ends
+	float StandingCapsuleHalfHeight = 0.0f;
+
+	// The current airborne stretch, as drawn by DrawDebugJump
+	bool bDebugAirborne = false;
+	bool bDebugJumped = false;
+	float DebugAirTime = 0.0f;
+	FVector DebugAirStart = FVector::ZeroVector;
+	FVector DebugAirLast = FVector::ZeroVector;
+	FVector DebugAirApex = FVector::ZeroVector;
 };
