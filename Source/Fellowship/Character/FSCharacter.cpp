@@ -9,6 +9,58 @@
 #include "Camera/PlayerCameraManager.h"
 #include "EnhancedInputComponent.h"
 #include "InputActionValue.h"
+#include "DrawDebugHelpers.h"
+
+namespace
+{
+	constexpr float TrajectoryMaxPredictionStepTime = 0.05f;
+	constexpr float TrajectoryLineThickness = 1.5f;
+	constexpr double TrajectoryMarkInterval = 0.25;
+	constexpr float TrajectoryMarkHalfLength = 10.0f;
+
+	// Keeps the lines from z-fighting with the floor the character is standing on
+	const FVector TrajectoryDrawOffset(0.0f, 0.0f, 2.0f);
+
+	// Draws lines between consecutive samples, crossed by a perpendicular mark at each multiple of TrajectoryMarkInterval from Now.
+	// FallbackSide orients the marks on vertical segments, which have no horizontal perpendicular.
+	void DrawTrajectorySegments(const UWorld* World, TConstArrayView<FFSTrajectorySample> Samples, double Now, const FColor& Color, const FVector& FallbackSide)
+	{
+		// Keeps a mark that lands exactly on a sample from flickering in and out with floating point error
+		constexpr double MarkTolerance = 0.001;
+
+		for (int32 Index = 1; Index < Samples.Num(); ++Index)
+		{
+			const FFSTrajectorySample& Start = Samples[Index - 1];
+			const FFSTrajectorySample& End = Samples[Index];
+			const FVector StartLocation = Start.Location + TrajectoryDrawOffset;
+			const FVector EndLocation = End.Location + TrajectoryDrawOffset;
+
+			DrawDebugLine(World, StartLocation, EndLocation, Color, false, -1.0f, 0, TrajectoryLineThickness);
+
+			// A segment with no length has no direction to be perpendicular to
+			const FVector Direction = (EndLocation - StartLocation).GetSafeNormal();
+			if (Direction.IsZero())
+			{
+				continue;
+			}
+
+			FVector Side = (Direction ^ FVector::UpVector).GetSafeNormal();
+			if (Side.IsZero())
+			{
+				Side = FallbackSide;
+			}
+
+			const int32 FirstMark = FMath::CeilToInt32((Start.Time - Now) / TrajectoryMarkInterval - MarkTolerance);
+			const int32 LastMark = FMath::FloorToInt32((End.Time - Now) / TrajectoryMarkInterval + MarkTolerance);
+			for (int32 Mark = FirstMark; Mark <= LastMark; ++Mark)
+			{
+				const double Alpha = FMath::GetRangePct(Start.Time, End.Time, Now + Mark * TrajectoryMarkInterval);
+				const FVector MarkLocation = FMath::Lerp(StartLocation, EndLocation, Alpha);
+				DrawDebugLine(World, MarkLocation - Side * TrajectoryMarkHalfLength, MarkLocation + Side * TrajectoryMarkHalfLength, FColor::Red, false, -1.0f, 0, TrajectoryLineThickness);
+			}
+		}
+	}
+}
 
 // Sets default values
 AFSCharacter::AFSCharacter(const FObjectInitializer& ObjectInitializer)
@@ -49,7 +101,54 @@ void AFSCharacter::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 
-	
+#if ENABLE_DRAW_DEBUG
+	if (bDrawDebugTrajectory)
+	{
+		DrawTrajectory();
+	}
+	else
+	{
+		TrajectoryHistory.Reset();
+	}
+#endif
+}
+
+void AFSCharacter::DrawTrajectory()
+{
+	UFSCharacterMovementComponent* Movement = GetCharacterMovement<UFSCharacterMovementComponent>();
+	const UWorld* World = GetWorld();
+	const double Now = World->GetTimeSeconds();
+
+	TrajectoryHistory.Add({ Now, Movement->GetActorFeetLocation() });
+
+	// Keeps the newest sample older than the cutoff so the trail reaches the full timespan
+	const double HistoryCutoff = Now - TrajectoryPastTime;
+	int32 NumExpired = 0;
+	while (NumExpired + 1 < TrajectoryHistory.Num() && TrajectoryHistory[NumExpired + 1].Time <= HistoryCutoff)
+	{
+		++NumExpired;
+	}
+	TrajectoryHistory.RemoveAt(0, NumExpired, EAllowShrinking::No);
+
+	DrawTrajectorySegments(World, TrajectoryHistory, Now, FColor::Cyan, GetActorRightVector());
+
+	if (TrajectoryFutureTime > 0.0f)
+	{
+		// Rounds the step down so the prediction ends exactly at TrajectoryFutureTime
+		const float StepTime = TrajectoryFutureTime / FMath::CeilToInt32(TrajectoryFutureTime / TrajectoryMaxPredictionStepTime);
+
+		TArray<FVector> PredictedLocations;
+		Movement->PredictTrajectory(TrajectoryFutureTime, StepTime, PredictedLocations);
+
+		TArray<FFSTrajectorySample> PredictedSamples;
+		PredictedSamples.Reserve(PredictedLocations.Num());
+		for (int32 Index = 0; Index < PredictedLocations.Num(); ++Index)
+		{
+			PredictedSamples.Add({ Now + Index * StepTime, PredictedLocations[Index] });
+		}
+
+		DrawTrajectorySegments(World, PredictedSamples, Now, FColor::Green, GetActorRightVector());
+	}
 }
 
 AFSPlayerController* AFSCharacter::GetFSPlayerController() const

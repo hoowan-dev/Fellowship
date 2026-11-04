@@ -12,10 +12,19 @@ class AFSPlayerController;
 class UInputAction;
 struct FInputActionValue;
 
+// Where the character's feet are at a given world time, for the trajectory debug display
+struct FFSTrajectorySample
+{
+	double Time = 0.0;
+	FVector Location = FVector::ZeroVector;
+};
+
 UCLASS()
 class FELLOWSHIP_API AFSCharacter : public ACharacter
 {
 	GENERATED_BODY()
+
+public:
 
 	// Camera boom positioning the camera behind the character
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera", meta = (AllowPrivateAccess = "true"))
@@ -24,6 +33,8 @@ class FELLOWSHIP_API AFSCharacter : public ACharacter
 	// Follow camera attached to the end of the boom
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UCameraComponent> FollowCamera;
+
+public:
 
 	// Axis2D: X = right, Y = forward
 	UPROPERTY(EditDefaultsOnly, Category = "Input")
@@ -37,6 +48,8 @@ class FELLOWSHIP_API AFSCharacter : public ACharacter
 	UPROPERTY(EditDefaultsOnly, Category = "Input")
 	TObjectPtr<UInputAction> JumpAction;
 
+public:
+
 	// Multiplier applied to look input (mouse sensitivity / stick speed)
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera", meta = (AllowPrivateAccess = "true", ClampMin = "0.0"))
 	float LookSpeed = 1.0f;
@@ -44,6 +57,23 @@ class FELLOWSHIP_API AFSCharacter : public ACharacter
 	// Maximum angle in degrees the camera can look up or down from horizontal
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, BlueprintSetter = SetMaxLookPitch, Category = "Camera", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", ClampMax = "89.9"))
 	float MaxLookPitch = 89.9f;
+
+public:
+
+	// Draws the path the character just took and the path it is predicted to take. Not available in Test or Shipping builds.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Debug", meta = (AllowPrivateAccess = "true"))
+	bool bDrawDebugTrajectory = false;
+
+	// How many seconds of the path the character just took to draw
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Debug", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0", ForceUnits = "s"))
+	float TrajectoryPastTime = 1.0f;
+
+	// How many seconds of the path the character is predicted to take to draw
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Debug", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", UIMin = "0.0", ForceUnits = "s"))
+	float TrajectoryFutureTime = 1.0f;
+
+	// Recent locations, oldest first. Only recorded while bDrawDebugTrajectory is on.
+	TArray<FFSTrajectorySample> TrajectoryHistory;
 
 public:
 	// Sets default values for this character's properties
@@ -60,7 +90,10 @@ protected:
 	void Move(const FInputActionValue& Value);
 	void Look(const FInputActionValue& Value);
 
-public:	
+	// Draws one frame of the trajectory debug display
+	void DrawTrajectory();
+
+public:
 	// Called every frame
 	virtual void Tick(float DeltaTime) override;
 
