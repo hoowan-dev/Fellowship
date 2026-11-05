@@ -4,6 +4,7 @@
 Sets up the assets for the backpack inventory:
   - Creates IA_ToggleInventory and IMC_Inventory, and maps Tab to the action in IMC_Inventory and IMC_Default (Escape closes it too)
   - Creates (or rebuilds) M_InventoryGridCell and M_InventoryItemBorder in /Game/Materials/Inventory, keeping their parameter values
+  - Creates MI_InventoryHandSlot from M_InventoryGridCell, for the large cells over the hands
   - Creates BP_FSInventoryRig and points it at those materials, and at the backpack mesh if it doesn't have one
   - Points BP_FSPlayerController at all of the above
   - Creates IA_Interact, mapped to E and the left face button in IMC_Default
@@ -30,6 +31,7 @@ MAPPING_CONTEXT_NAME = "IMC_Inventory"
 DEFAULT_MAPPING_CONTEXT_PATH = f"{INPUT_FOLDER}/IMC_Default"
 MATERIAL_NAME = "M_InventoryGridCell"
 BORDER_MATERIAL_NAME = "M_InventoryItemBorder"
+HAND_SLOT_MATERIAL_NAME = "MI_InventoryHandSlot"
 RIG_BLUEPRINT_NAME = "BP_FSInventoryRig"
 PICKUP_BLUEPRINT_NAME = "BP_FSItemPickup"
 PLAYER_CONTROLLER_PATH = "/Game/Blueprints/Player/BP_FSPlayerController"
@@ -49,6 +51,10 @@ CAN_SWAP_COLOR = unreal.LinearColor(0.95, 0.75, 0.005, 1.0)
 OPEN_COLOR = unreal.LinearColor(0.015, 0.015, 0.02, 1.0)
 TAKEN_COLOR = unreal.LinearColor(0.14, 0.1, 0.045, 1.0)
 BORDER_COLOR = unreal.LinearColor(1.0, 0.75, 0.3, 1.0)
+# The hand has to show through its cell. The cell is 4 times the size of a grid cell, and has no neighbour
+# doubling its lines as a grid cell does, so a line half as thick for its size matches the grid's.
+HAND_SLOT_OPEN_OPACITY = 0.25
+HAND_SLOT_LINE_THICKNESS = LINE_THICKNESS / 2.0
 OPEN_OPACITY = 0.85
 TAKEN_OPACITY = 0.95
 HOVER_OPACITY = 0.97
@@ -206,7 +212,10 @@ def build_grid_material():
     across = add_expression(material, unreal.MaterialExpressionComponentMask, -1000, -100, r=True, g=False, b=False, a=False)
     down = add_expression(material, unreal.MaterialExpressionComponentMask, -1000, 100, r=False, g=True, b=False, a=False)
     nearest_edge = add_expression(material, unreal.MaterialExpressionMax, -800, 0)
-    past_line_start = add_expression(material, unreal.MaterialExpressionSubtract, -600, 0, const_b=0.5 * (1.0 - LINE_THICKNESS))
+    line_thickness = add_scalar(material, saved_values, "LineThickness", LINE_THICKNESS, -1000, 300)
+    line_inner_fraction = add_expression(material, unreal.MaterialExpressionOneMinus, -800, 300)
+    line_start = add_expression(material, unreal.MaterialExpressionMultiply, -700, 300, const_b=0.5)
+    past_line_start = add_expression(material, unreal.MaterialExpressionSubtract, -600, 0)
     # A steep ramp, so the line has a sharp edge
     sharpened = add_expression(material, unreal.MaterialExpressionMultiply, -400, 0, const_b=1000.0)
     on_line = add_expression(material, unreal.MaterialExpressionSaturate, -200, 0)
@@ -250,7 +259,10 @@ def build_grid_material():
     connect(distance, "", down, "")
     connect(across, "", nearest_edge, "A")
     connect(down, "", nearest_edge, "B")
+    connect(line_thickness, "", line_inner_fraction, "")
+    connect(line_inner_fraction, "", line_start, "A")
     connect(nearest_edge, "", past_line_start, "A")
+    connect(line_start, "", past_line_start, "B")
     connect(past_line_start, "", sharpened, "A")
     connect(sharpened, "", on_line, "")
 
@@ -297,7 +309,22 @@ def build_grid_material():
     return material
 
 
-def setup_rig_blueprint(material, border_material):
+def setup_hand_slot_material(parent):
+    """Its parameter values are only set when it's created, so that ones set by hand are kept."""
+    path = f"{MATERIAL_FOLDER}/{HAND_SLOT_MATERIAL_NAME}"
+    if assets.does_asset_exist(path):
+        return assets.load_asset(path)
+
+    instance = tools.create_asset(HAND_SLOT_MATERIAL_NAME, MATERIAL_FOLDER, unreal.MaterialInstanceConstant, unreal.MaterialInstanceConstantFactoryNew())
+    library.set_material_instance_parent(instance, parent)
+    library.set_material_instance_scalar_parameter_value(instance, "OpenOpacity", HAND_SLOT_OPEN_OPACITY)
+    library.set_material_instance_scalar_parameter_value(instance, "LineThickness", HAND_SLOT_LINE_THICKNESS)
+    library.update_material_instance(instance)
+    save(instance)
+    return instance
+
+
+def setup_rig_blueprint(material, border_material, hand_slot_material):
     path = f"{BLUEPRINT_FOLDER}/{RIG_BLUEPRINT_NAME}"
     if assets.does_asset_exist(path):
         blueprint = assets.load_asset(path)
@@ -312,6 +339,7 @@ def setup_rig_blueprint(material, border_material):
         defaults.set_editor_property("pack_mesh_asset", assets.load_asset(PACK_MESH_PATH))
     defaults.set_editor_property("grid_cell_material", material)
     defaults.set_editor_property("item_border_material", border_material)
+    defaults.set_editor_property("hand_slot_material", hand_slot_material)
     compile_and_save(blueprint)
     return rig_class
 
@@ -332,7 +360,8 @@ def setup_player_controller(action, interact_action, select_action, rotate_actio
 action, interact_action, select_action, rotate_action, mapping_context = setup_input()
 material = build_grid_material()
 border_material = build_border_material()
-rig_class = setup_rig_blueprint(material, border_material)
+hand_slot_material = setup_hand_slot_material(material)
+rig_class = setup_rig_blueprint(material, border_material, hand_slot_material)
 pickup_class = setup_pickup_blueprint()
 setup_player_controller(action, interact_action, select_action, rotate_action, mapping_context, rig_class, pickup_class)
 unreal.log("Inventory assets are set up")
