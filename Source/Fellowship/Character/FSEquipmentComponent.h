@@ -36,6 +36,15 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category = "Equipment|Sockets")
 	FName LeftHandSocket = TEXT("weapon_l");
 
+	// Where a mesh sits relative to the right hand's socket. Meshes point along +Z from their grip, which would run through the palm, so the default rolls the blade around to point out of the fist.
+	// An item's Held Transform is applied on top of this.
+	UPROPERTY(EditDefaultsOnly, Category = "Equipment|Sockets")
+	FTransform RightHeldOffset = FTransform(FRotator(0.0, 0.0, -90.0));
+
+	// The same for the left hand's socket. The roll is the opposite way because the skeleton's left weapon bone has its axes flipped from the right's.
+	UPROPERTY(EditDefaultsOnly, Category = "Equipment|Sockets")
+	FTransform LeftHeldOffset = FTransform(FRotator(0.0, 0.0, 90.0));
+
 	// On the back, for what the right hand holds
 	UPROPERTY(EditDefaultsOnly, Category = "Equipment|Sockets")
 	FName RightSheathSocket = TEXT("BackPack");

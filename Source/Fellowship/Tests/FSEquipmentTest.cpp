@@ -26,7 +26,7 @@
 
 namespace
 {
-	constexpr EAutomationTestFlags TestFlags = EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter;
+	constexpr EAutomationTestFlags EquipmentTestFlags = EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter;
 
 	UFSItemDefinition* MakeWeapon(EFSWeaponType Type)
 	{
@@ -114,7 +114,7 @@ namespace
 	};
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSHandSwapTest, "Fellowship.Equipment.Hands.SwapWithTheCarriedItem", TestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSHandSwapTest, "Fellowship.Equipment.Hands.SwapWithTheCarriedItem", EquipmentTestFlags)
 
 bool FFSHandSwapTest::RunTest(const FString& Parameters)
 {
@@ -151,7 +151,7 @@ bool FFSHandSwapTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSHandControllerTest, "Fellowship.Equipment.Hands.AreSelectedInTheOpenInventory", TestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSHandControllerTest, "Fellowship.Equipment.Hands.AreSelectedInTheOpenInventory", EquipmentTestFlags)
 
 bool FFSHandControllerTest::RunTest(const FString& Parameters)
 {
@@ -177,7 +177,7 @@ bool FFSHandControllerTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSEquipmentAttachTest, "Fellowship.Equipment.Weapons.MoveBetweenTheBackAndTheHands", TestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSEquipmentAttachTest, "Fellowship.Equipment.Weapons.MoveBetweenTheBackAndTheHands", EquipmentTestFlags)
 
 bool FFSEquipmentAttachTest::RunTest(const FString& Parameters)
 {
@@ -186,6 +186,7 @@ bool FFSEquipmentAttachTest::RunTest(const FString& Parameters)
 	Sword->HeldTransform.SetLocation(FVector(1.0, 2.0, 3.0));
 	Sword->SheathedTransform.SetLocation(FVector(4.0, 5.0, 6.0));
 	Test.Equipment->RightSheathOffset = FTransform(FVector(10.0, 0.0, 0.0));
+	Test.Equipment->RightHeldOffset = FTransform(FVector(0.0, 10.0, 0.0));
 
 	Test.Hold(Sword, EFSHand::Right);
 	UStaticMeshComponent* Mesh = Test.Equipment->GetHandMesh(EFSHand::Right);
@@ -202,7 +203,7 @@ bool FFSEquipmentAttachTest::RunTest(const FString& Parameters)
 
 	TestTrue(TEXT("Drawing works"), Test.Equipment->Draw());
 	TestTrue(TEXT("In the hand"), Mesh->GetAttachSocketName() == Test.Equipment->RightHandSocket);
-	TestEqual(TEXT("At the held offset"), Mesh->GetRelativeLocation(), FVector(1.0, 2.0, 3.0));
+	TestEqual(TEXT("At the hand's offset plus the item's"), Mesh->GetRelativeLocation(), FVector(1.0, 12.0, 3.0));
 
 	Test.Equipment->ToggleDrawn();
 	TestTrue(TEXT("Toggling puts it back"), Mesh->GetAttachSocketName() == Test.Equipment->RightSheathSocket);
@@ -213,7 +214,26 @@ bool FFSEquipmentAttachTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSEquipmentEmptyHandsTest, "Fellowship.Equipment.Weapons.NeedSomethingHeldToDraw", TestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSEquipmentGripTest, "Fellowship.Equipment.Weapons.PointOutOfTheFistInEitherHand", EquipmentTestFlags)
+
+bool FFSEquipmentGripTest::RunTest(const FString& Parameters)
+{
+	FEquipmentTestWorld Test;
+	Test.Hold(MakeWeapon(EFSWeaponType::Sword), EFSHand::Right);
+	Test.Hold(MakeWeapon(EFSWeaponType::Sword), EFSHand::Left);
+	Test.Equipment->Draw();
+
+	// The weapon bones' axes are flipped from each other, so pointing the same way out of each fist takes opposite rolls
+	const FVector RightBlade = Test.Equipment->GetHandMesh(EFSHand::Right)->GetRelativeRotation().RotateVector(FVector::UpVector);
+	const FVector LeftBlade = Test.Equipment->GetHandMesh(EFSHand::Left)->GetRelativeRotation().RotateVector(FVector::UpVector);
+
+	TestTrue(TEXT("The right blade runs along the bone's -Y"), RightBlade.Equals(FVector(0.0, -1.0, 0.0), 0.001));
+	TestTrue(TEXT("The left blade runs along the bone's +Y"), LeftBlade.Equals(FVector(0.0, 1.0, 0.0), 0.001));
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSEquipmentEmptyHandsTest, "Fellowship.Equipment.Weapons.NeedSomethingHeldToDraw", EquipmentTestFlags)
 
 bool FFSEquipmentEmptyHandsTest::RunTest(const FString& Parameters)
 {
@@ -238,7 +258,7 @@ bool FFSEquipmentEmptyHandsTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSEquipmentStanceTest, "Fellowship.Equipment.Stance.ComesFromBothHandsWhileDrawn", TestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSEquipmentStanceTest, "Fellowship.Equipment.Stance.ComesFromBothHandsWhileDrawn", EquipmentTestFlags)
 
 bool FFSEquipmentStanceTest::RunTest(const FString& Parameters)
 {
@@ -271,7 +291,7 @@ bool FFSEquipmentStanceTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSEquipmentClimbingTest, "Fellowship.Equipment.Weapons.AreSheathedByClimbing", TestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSEquipmentClimbingTest, "Fellowship.Equipment.Weapons.AreSheathedByClimbing", EquipmentTestFlags)
 
 bool FFSEquipmentClimbingTest::RunTest(const FString& Parameters)
 {
@@ -294,7 +314,7 @@ bool FFSEquipmentClimbingTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSEquipmentInventoryViewTest, "Fellowship.Equipment.Weapons.HideInTheInventoryView", TestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSEquipmentInventoryViewTest, "Fellowship.Equipment.Weapons.HideInTheInventoryView", EquipmentTestFlags)
 
 bool FFSEquipmentInventoryViewTest::RunTest(const FString& Parameters)
 {
@@ -317,7 +337,7 @@ bool FFSEquipmentInventoryViewTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSEquipmentAssetsTest, "Fellowship.Equipment.Assets.DrawingASwordSwitchesTheCharactersAnimation", TestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSEquipmentAssetsTest, "Fellowship.Equipment.Assets.DrawingASwordSwitchesTheCharactersAnimation", EquipmentTestFlags)
 
 // Uses the real character and items, because a stance only works once all of its assets agree
 bool FFSEquipmentAssetsTest::RunTest(const FString& Parameters)
@@ -328,9 +348,11 @@ bool FFSEquipmentAssetsTest::RunTest(const FString& Parameters)
 	UFSItemDefinition* Stick = LoadObject<UFSItemDefinition>(nullptr, TEXT("/Game/Blueprints/Inventory/Items/DA_OHS_1_Stick.DA_OHS_1_Stick"));
 	const UPoseSearchDatabase* Unarmed = LoadObject<UPoseSearchDatabase>(nullptr, TEXT("/Game/Blueprints/Character/Animation/PSD_Character.PSD_Character"));
 	const UPoseSearchDatabase* SingleSword = LoadObject<UPoseSearchDatabase>(nullptr, TEXT("/Game/Blueprints/Character/Animation/PSD_SingleSword.PSD_SingleSword"));
+	const UPoseSearchDatabase* DoubleSword = LoadObject<UPoseSearchDatabase>(nullptr, TEXT("/Game/Blueprints/Character/Animation/PSD_DoubleSword.PSD_DoubleSword"));
 
 	if (!TestNotNull(TEXT("The character exists"), CharacterClass) || !TestNotNull(TEXT("The stick exists"), Stick)
-		|| !TestNotNull(TEXT("The unarmed database exists"), Unarmed) || !TestNotNull(TEXT("The sword database exists"), SingleSword))
+		|| !TestNotNull(TEXT("The unarmed database exists"), Unarmed) || !TestNotNull(TEXT("The sword database exists"), SingleSword)
+		|| !TestNotNull(TEXT("The dual sword database exists"), DoubleSword))
 	{
 		return false;
 	}
@@ -361,9 +383,21 @@ bool FFSEquipmentAssetsTest::RunTest(const FString& Parameters)
 	Mesh->TickAnimation(0.01f, false);
 	TestTrue(TEXT("Drawn, it searches the sword database"), AnimInstance->GetMotionMatchingDatabase() == SingleSword);
 
+	Test.Hold(Stick, EFSHand::Left);
+	Mesh->TickAnimation(0.01f, false);
+	TestTrue(TEXT("A sword in each hand searches the dual sword database"), AnimInstance->GetMotionMatchingDatabase() == DoubleSword);
+	TestTrue(TEXT("With the second in the left hand"), Equipment->GetHandMesh(EFSHand::Left)->GetAttachSocketName() == Equipment->LeftHandSocket);
+
 	Equipment->Sheathe();
+	TestTrue(TEXT("Both go to the back"), Equipment->GetHandMesh(EFSHand::Left)->GetAttachSocketName() == Equipment->LeftSheathSocket);
 	Mesh->TickAnimation(0.01f, false);
 	TestTrue(TEXT("Sheathing goes back to unarmed"), AnimInstance->GetMotionMatchingDatabase() == Unarmed);
+
+	// Takes the right hand's sword onto the cursor, leaving one in the left
+	Test.Inventory->SwapCarriedItemWithHand(EFSHand::Right);
+	TestTrue(TEXT("A sword in just the left hand can be drawn"), Equipment->Draw());
+	Mesh->TickAnimation(0.01f, false);
+	TestTrue(TEXT("And uses the dual sword database"), AnimInstance->GetMotionMatchingDatabase() == DoubleSword);
 
 	return true;
 }

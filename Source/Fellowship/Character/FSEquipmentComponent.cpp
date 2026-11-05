@@ -150,7 +150,9 @@ void UFSEquipmentComponent::RefreshMesh(EFSHand Hand)
 
 	HandMesh->SetStaticMesh(Mesh);
 	HandMesh->AttachToComponent(CharacterMesh, FAttachmentTransformRules::SnapToTargetNotIncludingScale, Socket);
-	HandMesh->SetRelativeTransform(bDrawn ? Item->HeldTransform : Item->SheathedTransform * (bRight ? RightSheathOffset : LeftSheathOffset));
+	const FTransform& ItemTransform = bDrawn ? Item->HeldTransform : Item->SheathedTransform;
+	const FTransform& HandTransform = bDrawn ? (bRight ? RightHeldOffset : LeftHeldOffset) : (bRight ? RightSheathOffset : LeftSheathOffset);
+	HandMesh->SetRelativeTransform(ItemTransform * HandTransform);
 	HandMesh->SetVisibility(!bMeshesHidden);
 }
 
