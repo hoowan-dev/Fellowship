@@ -6,6 +6,7 @@
 #include "Camera/CameraComponent.h"
 #include "FSCharacterMovementComponent.h"
 #include "Character/FSEquipmentComponent.h"
+#include "Character/FSStatsComponent.h"
 #include "Inventory/FSItemPickup.h"
 #include "Player/FSPlayerController.h"
 #include "Player/FSPlayerState.h"
@@ -40,6 +41,7 @@ AFSCharacter::AFSCharacter(const FObjectInitializer& ObjectInitializer)
 	FollowCamera->bUsePawnControlRotation = false;
 
 	Equipment = CreateDefaultSubobject<UFSEquipmentComponent>(TEXT("Equipment"));
+	Stats = CreateDefaultSubobject<UFSStatsComponent>(TEXT("Stats"));
 }
 
 // Called when the game starts or when spawned

@@ -39,8 +39,14 @@ private:
 	// Draws the name of the item under the mouse above the cursor
 	void DrawHoveredItemName();
 
+	// Draws a bar for each of the character's stats in the bottom right corner of the screen, stacked to the same height as the event log
+	void DrawStatBars();
+
 	// Draws the most recent events in the bottom left corner of the screen, newest at the bottom
 	void DrawEventLog();
+
+	// Draws a shaded border around a rectangle
+	void DrawShadedBorder(float Left, float Top, float Width, float Height);
 
 	// Draws text centred on a point of the screen, optionally with a dark box behind it
 	void DrawCentredText(const FString& Text, const FVector2D& Centre, bool bBackdrop = false);

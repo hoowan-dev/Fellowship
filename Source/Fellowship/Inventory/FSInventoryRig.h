@@ -207,10 +207,6 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Cursor Light")
 	FLinearColor CursorLightColor = FLinearColor(1.0f, 0.85f, 0.65f);
 
-	// Falls back on the grid's cell material if this isn't set
-	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Hands")
-	TObjectPtr<UMaterialInterface> HandSlotMaterial;
-
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Hands", meta = (ClampMin = "0.1", Units = cm))
 	float HandSlotSize = 12.0f;
 

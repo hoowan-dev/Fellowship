@@ -675,6 +675,37 @@ bool FFSItemDropTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSHandSlotAppearanceTest, "Fellowship.Inventory.Rig.HandSlotsLookLikeGridCells", TestFlags)
+
+bool FFSHandSlotAppearanceTest::RunTest(const FString& Parameters)
+{
+	FInventoryTestWorld Test;
+	AFSInventoryRig* Rig = Test.World->SpawnActor<AFSInventoryRig>();
+	const UInstancedStaticMeshComponent* HandSlots = Rig->GetHandSlots();
+
+	const auto IsSlotTaken = [HandSlots](int32 HandSlot)
+	{
+		return HandSlots->PerInstanceSMCustomData[HandSlot * AFSInventoryRig::CellDataCount + AFSInventoryRig::CellTakenData] > 0.0f;
+	};
+
+	TestTrue(TEXT("They use the same material"), HandSlots->GetMaterial(0) == Rig->GetGrid()->GetMaterial(0));
+
+	Rig->ShowInventory(*Test.Inventory);
+	TestFalse(TEXT("An empty hand looks like an empty cell"), IsSlotTaken(AFSInventoryRig::LeftHandSlot));
+
+	Test.Inventory->CarryNewItem(MakeItem(SwordSize));
+	Test.Inventory->SwapCarriedItemWithHand(EFSHand::Left);
+	Rig->ShowInventory(*Test.Inventory);
+	TestTrue(TEXT("A full hand looks like a taken cell"), IsSlotTaken(AFSInventoryRig::LeftHandSlot));
+	TestFalse(TEXT("The other hand is unaffected"), IsSlotTaken(AFSInventoryRig::RightHandSlot));
+
+	Test.Inventory->SwapCarriedItemWithHand(EFSHand::Left);
+	Rig->ShowInventory(*Test.Inventory);
+	TestFalse(TEXT("Emptying a hand clears it"), IsSlotTaken(AFSInventoryRig::LeftHandSlot));
+
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSEquipmentDisplayVisibilityTest, "Fellowship.Equipment.Display.MakesWayForTheInventory", TestFlags)
 
 bool FFSEquipmentDisplayVisibilityTest::RunTest(const FString& Parameters)

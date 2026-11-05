@@ -4,6 +4,7 @@
 #include "FSHUD.h"
 #include "CanvasItem.h"
 #include "Character/FSCharacter.h"
+#include "Character/FSStatsComponent.h"
 #include "Engine/Canvas.h"
 #include "Engine/Engine.h"
 #include "Engine/Font.h"
@@ -27,18 +28,46 @@ namespace
 	constexpr float BackdropPadding = 4.0f;
 	const FLinearColor BackdropColor(0.0f, 0.0f, 0.0f, 0.7f);
 
-	// How far the event log sits from the edges of the screen
-	constexpr float EventLogMargin = 20.0f;
+	// How far the stat bars and event log sit from the edges of the screen
+	constexpr float CornerMargin = 20.0f;
+
 	constexpr int32 EventLogVisibleLines = 8;
 
-	// The space inside the event log's border
-	constexpr float EventLogWidth = 420.0f;
+	// The width inside the borders of the event log and the stat bars, which match
+	constexpr float CornerPanelWidth = 260.0f;
+
+	// The space between the event log's border and its text
 	constexpr float EventLogPadding = 8.0f;
 
 	// The top and left edges are lit and the bottom and right are in shadow, which raises the border off the screen
 	constexpr float BorderThickness = 3.0f;
 	const FLinearColor BorderLitColor(1.0f, 1.0f, 1.0f, 0.35f);
 	const FLinearColor BorderShadowColor(0.0f, 0.0f, 0.0f, 0.6f);
+
+	// The height inside a stat bar's border. The gaps between the bars are whatever spreads them over the height of the event log.
+	constexpr float StatBarHeight = 16.0f;
+
+	const FLinearColor StatBarEmptyColor(0.0f, 0.0f, 0.0f, 0.6f);
+
+	struct FStatBar
+	{
+		EFSStat Stat;
+		FLinearColor Color;
+	};
+
+	// From top to bottom
+	const FStatBar StatBars[] =
+	{
+		{ EFSStat::Health, FLinearColor(0.75f, 0.03f, 0.03f) },
+		{ EFSStat::Magic, FLinearColor(0.04f, 0.15f, 0.8f) },
+		{ EFSStat::Stamina, FLinearColor(0.04f, 0.55f, 0.08f) }
+	};
+
+	// The height of the space inside the event log's border
+	float GetEventLogHeight(const UFont& Font)
+	{
+		return EventLogVisibleLines * Font.GetMaxCharHeight() + EventLogPadding * 2.0f;
+	}
 
 	// From the bottom of a circle to the middle of the name beneath it
 	constexpr float EquipmentSlotNameOffset = 16.0f;
@@ -62,6 +91,7 @@ void AFSHUD::DrawHUD()
 	DrawEquipmentSlots();
 	DrawPickupPrompt();
 	DrawHoveredItemName();
+	DrawStatBars();
 	DrawEventLog();
 }
 
@@ -192,6 +222,50 @@ void AFSHUD::DrawHoveredItemName()
 	}
 }
 
+void AFSHUD::DrawStatBars()
+{
+	const AFSPlayerController* PlayerController = Cast<AFSPlayerController>(GetOwningPlayerController());
+	const AFSCharacter* Character = PlayerController ? PlayerController->GetFSCharacter() : nullptr;
+	const UFSStatsComponent* Stats = Character ? Character->GetStats() : nullptr;
+	if (!Stats)
+	{
+		return;
+	}
+
+	// From the top of the first bar's border to the bottom of the last one's, the same as the event log's border
+	const float TotalHeight = GetEventLogHeight(*GEngine->GetMediumFont()) + BorderThickness * 2.0f;
+
+	const int32 BarCount = UE_ARRAY_COUNT(StatBars);
+	const float BarOuterHeight = StatBarHeight + BorderThickness * 2.0f;
+	const float BarSpacing = (TotalHeight - BarOuterHeight) / (BarCount - 1);
+
+	const float Left = Canvas->SizeX - CornerMargin - BorderThickness - CornerPanelWidth;
+	float Top = Canvas->SizeY - CornerMargin - TotalHeight + BorderThickness;
+
+	for (const FStatBar& Bar : StatBars)
+	{
+		const float FilledWidth = CornerPanelWidth * Stats->GetFraction(Bar.Stat);
+
+		DrawRect(Bar.Color, Left, Top, FilledWidth, StatBarHeight);
+		DrawRect(StatBarEmptyColor, Left + FilledWidth, Top, CornerPanelWidth - FilledWidth, StatBarHeight);
+		DrawShadedBorder(Left, Top, CornerPanelWidth, StatBarHeight);
+
+		Top += BarSpacing;
+	}
+}
+
+void AFSHUD::DrawShadedBorder(float Left, float Top, float Width, float Height)
+{
+	const float Right = Left + Width;
+	const float Bottom = Top + Height;
+
+	// The edges don't overlap, because the corners would come out darker where translucent rectangles cross
+	DrawRect(BorderLitColor, Left - BorderThickness, Top - BorderThickness, Width + BorderThickness * 2.0f, BorderThickness);
+	DrawRect(BorderLitColor, Left - BorderThickness, Top, BorderThickness, Height + BorderThickness);
+	DrawRect(BorderShadowColor, Left, Bottom, Width + BorderThickness, BorderThickness);
+	DrawRect(BorderShadowColor, Right, Top, BorderThickness, Height);
+}
+
 void AFSHUD::DrawEventLog()
 {
 	const UFSEventLog* EventLog = GetWorld()->GetSubsystem<UFSEventLog>();
@@ -205,17 +279,12 @@ void AFSHUD::DrawEventLog()
 	const int32 OldestVisible = FMath::Max(0, Events.Num() - EventLogVisibleLines);
 	const float LineHeight = Font->GetMaxCharHeight();
 
-	const float Height = EventLogVisibleLines * LineHeight + EventLogPadding * 2.0f;
-	const float Left = EventLogMargin + BorderThickness;
-	const float Right = Left + EventLogWidth;
-	const float Bottom = Canvas->SizeY - EventLogMargin - BorderThickness;
+	const float Height = GetEventLogHeight(*Font);
+	const float Left = CornerMargin + BorderThickness;
+	const float Bottom = Canvas->SizeY - CornerMargin - BorderThickness;
 	const float Top = Bottom - Height;
 
-	// The edges don't overlap, because the corners would come out darker where translucent rectangles cross
-	DrawRect(BorderLitColor, Left - BorderThickness, Top - BorderThickness, EventLogWidth + BorderThickness * 2.0f, BorderThickness);
-	DrawRect(BorderLitColor, Left - BorderThickness, Top, BorderThickness, Height + BorderThickness);
-	DrawRect(BorderShadowColor, Left, Bottom, EventLogWidth + BorderThickness, BorderThickness);
-	DrawRect(BorderShadowColor, Right, Top, BorderThickness, Height);
+	DrawShadedBorder(Left, Top, CornerPanelWidth, Height);
 
 	float LineY = Bottom - EventLogPadding;
 

@@ -11,6 +11,7 @@ class UCameraComponent;
 class AFSItemPickup;
 class AFSPlayerController;
 class UFSEquipmentComponent;
+class UFSStatsComponent;
 class UInputAction;
 struct FInputActionValue;
 
@@ -32,6 +33,9 @@ public:
 	// Shows what the hands hold, drawn or on the back
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Equipment", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UFSEquipmentComponent> Equipment;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Stats", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UFSStatsComponent> Stats;
 
 public:
 
@@ -98,6 +102,7 @@ public:
 	FORCEINLINE USpringArmComponent* GetCameraBoom() const { return CameraBoom; }
 	FORCEINLINE UCameraComponent* GetFollowCamera() const { return FollowCamera; }
 	FORCEINLINE UFSEquipmentComponent* GetEquipment() const { return Equipment; }
+	FORCEINLINE UFSStatsComponent* GetStats() const { return Stats; }
 
 	// Controller possessing this character, if it is an FSPlayerController
 	UFUNCTION(BlueprintPure, Category = "Character")

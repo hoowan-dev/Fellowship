@@ -220,10 +220,9 @@ void AFSInventoryRig::BuildGrid()
 
 void AFSInventoryRig::BuildHandSlots()
 {
-	UMaterialInterface* Material = HandSlotMaterial ? HandSlotMaterial : GridCellMaterial;
-	if (Material)
+	if (GridCellMaterial)
 	{
-		HandSlots->SetMaterial(0, Material);
+		HandSlots->SetMaterial(0, GridCellMaterial);
 	}
 
 	HandSlots->ClearInstances();
@@ -407,6 +406,8 @@ void AFSInventoryRig::ShowInventory(const UFSInventoryComponent& Inventory)
 
 		HandItemMesh->SetStaticMesh(Item.Definition ? Item.Definition->Mesh.Get() : nullptr);
 		HandItemMesh->SetRelativeTransform(GetHandItemTransform(Item, HandSlot));
+
+		HandSlots->SetCustomDataValue(HandSlot, CellTakenData, Item.Definition ? 1.0f : 0.0f, true);
 	}
 }
 
