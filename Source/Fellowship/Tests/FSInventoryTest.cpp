@@ -706,6 +706,46 @@ bool FFSHandSlotAppearanceTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSQuickSlotAppearanceTest, "Fellowship.Inventory.Rig.QuickSlotsLookLikeGridCells", TestFlags)
+
+bool FFSQuickSlotAppearanceTest::RunTest(const FString& Parameters)
+{
+	FInventoryTestWorld Test;
+	AFSInventoryRig* Rig = Test.World->SpawnActor<AFSInventoryRig>();
+	const UInstancedStaticMeshComponent* QuickSlots = Rig->GetQuickSlots();
+
+	const auto IsSlotTaken = [QuickSlots](int32 QuickSlot)
+	{
+		return QuickSlots->PerInstanceSMCustomData[QuickSlot * AFSInventoryRig::CellDataCount + AFSInventoryRig::CellTakenData] > 0.0f;
+	};
+
+	UStaticMesh* Cube = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
+	UStaticMeshComponent* LeftMesh = Rig->GetQuickSlotItemMesh(AFSInventoryRig::LeftQuickSlot);
+
+	TestTrue(TEXT("They use the same material"), QuickSlots->GetMaterial(0) == Rig->GetGrid()->GetMaterial(0));
+
+	Rig->ShowInventory(*Test.Inventory);
+	TestFalse(TEXT("An empty slot looks like an empty cell"), IsSlotTaken(AFSInventoryRig::LeftQuickSlot));
+	TestTrue(TEXT("And has no mesh"), LeftMesh->GetStaticMesh() == nullptr);
+
+	Test.Inventory->CarryNewItem(MakeItem(SwordSize, Cube));
+	Test.Inventory->SwapCarriedItemWithQuickSlot(EFSQuickSlot::Left);
+	Rig->ShowInventory(*Test.Inventory);
+	TestTrue(TEXT("A full slot looks like a taken cell"), IsSlotTaken(AFSInventoryRig::LeftQuickSlot));
+	TestFalse(TEXT("The other slot is unaffected"), IsSlotTaken(AFSInventoryRig::RightQuickSlot));
+	TestTrue(TEXT("It shows the item's mesh"), LeftMesh->GetStaticMesh() == Cube);
+
+	const FVector2D Centre = Rig->GetQuickSlotCentre(AFSInventoryRig::LeftQuickSlot);
+	TestEqual(TEXT("Centred on the slot across the screen"), LeftMesh->GetRelativeLocation().Y, Centre.X, 0.01);
+	TestEqual(TEXT("Centred on the slot up the screen"), LeftMesh->GetRelativeLocation().Z, Centre.Y, 0.01);
+
+	Test.Inventory->SwapCarriedItemWithQuickSlot(EFSQuickSlot::Left);
+	Rig->ShowInventory(*Test.Inventory);
+	TestFalse(TEXT("Emptying a slot clears it"), IsSlotTaken(AFSInventoryRig::LeftQuickSlot));
+
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSEquipmentDisplayVisibilityTest, "Fellowship.Equipment.Display.MakesWayForTheInventory", TestFlags)
 
 bool FFSEquipmentDisplayVisibilityTest::RunTest(const FString& Parameters)
@@ -735,6 +775,13 @@ bool FFSEquipmentDisplayLayoutTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("They're level"), Left.Y == Backpack.Y && Right.Y == Backpack.Y);
 	TestTrue(TEXT("They don't overlap"), Backpack.X - Left.X > AFSEquipmentDisplay::SlotRadius * 2.0f);
 	TestTrue(TEXT("They're at the bottom of the screen"), Backpack.Y > 900.0 && Backpack.Y + AFSEquipmentDisplay::SlotRadius < Viewport.Y);
+
+	const FVector2D LeftQuickSlot = AFSEquipmentDisplay::GetSlotCentre(Viewport, EFSEquipmentSlot::LeftQuickSlot);
+	const FVector2D RightQuickSlot = AFSEquipmentDisplay::GetSlotCentre(Viewport, EFSEquipmentSlot::RightQuickSlot);
+
+	TestTrue(TEXT("The left quick slot is left of the left hand"), Left.X - LeftQuickSlot.X > AFSEquipmentDisplay::SlotRadius * 2.0f);
+	TestTrue(TEXT("The right quick slot is right of the right hand"), RightQuickSlot.X - Right.X > AFSEquipmentDisplay::SlotRadius * 2.0f);
+	TestTrue(TEXT("The quick slots are level with the rest"), LeftQuickSlot.Y == Backpack.Y && RightQuickSlot.Y == Backpack.Y);
 
 	const UStaticMesh* Cube = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
 	if (!TestNotNull(TEXT("The cube loads"), Cube))

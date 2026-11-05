@@ -128,17 +128,31 @@ void UFSInventoryComponent::ClearCarriedItem()
 
 bool UFSInventoryComponent::SwapCarriedItemWithHand(EFSHand Hand)
 {
-	FFSInventoryItem& HandItem = HandItems[static_cast<int32>(Hand)];
-	if (!IsCarryingItem() && !HandItem.Definition)
+	if (!SwapCarriedItemWith(HandItems[static_cast<int32>(Hand)]))
 	{
 		return false;
 	}
 
-	// Hands always show an item upright
-	CarriedItem.Rotation = 0;
-	Swap(CarriedItem, HandItem);
-
 	OnHandItemsChanged.Broadcast();
+	return true;
+}
+
+bool UFSInventoryComponent::SwapCarriedItemWithQuickSlot(EFSQuickSlot QuickSlot)
+{
+	return SwapCarriedItemWith(QuickSlotItems[static_cast<int32>(QuickSlot)]);
+}
+
+bool UFSInventoryComponent::SwapCarriedItemWith(FFSInventoryItem& HeldItem)
+{
+	if (!IsCarryingItem() && !HeldItem.Definition)
+	{
+		return false;
+	}
+
+	// Hands and quick slots always show an item upright
+	CarriedItem.Rotation = 0;
+	Swap(CarriedItem, HeldItem);
+
 	return true;
 }
 

@@ -185,6 +185,36 @@ bool FFSInventoryRigHandSlotsTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSInventoryRigQuickSlotsTest, "Fellowship.Inventory.Rig.PutsTwoCellsBelowTheGrid", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FFSInventoryRigQuickSlotsTest::RunTest(const FString& Parameters)
+{
+	FInventoryRigTestWorld Test;
+	const UInstancedStaticMeshComponent* QuickSlots = Test.Rig->GetQuickSlots();
+	const double HalfGrid = GridSize * CellSize * 0.5;
+
+	TestEqual(TEXT("One cell for each slot"), QuickSlots->GetInstanceCount(), AFSInventoryRig::QuickSlotCount);
+	TestEqual(TEXT("They have the same custom data as the grid's cells"), QuickSlots->NumCustomDataFloats, AFSInventoryRig::CellDataCount);
+
+	FTransform LeftSlot;
+	FTransform RightSlot;
+	QuickSlots->GetInstanceTransform(AFSInventoryRig::LeftQuickSlot, LeftSlot);
+	QuickSlots->GetInstanceTransform(AFSInventoryRig::RightQuickSlot, RightSlot);
+
+	// The plane mesh is 100cm across
+	const double HalfSlot = LeftSlot.GetScale3D().X * 50.0;
+	TestTrue(TEXT("The left slot is below the grid"), LeftSlot.GetLocation().Z + HalfSlot < -HalfGrid);
+	TestEqual(TEXT("The slots are level"), LeftSlot.GetLocation().Z, RightSlot.GetLocation().Z);
+	TestTrue(TEXT("They don't overlap"), RightSlot.GetLocation().Y - LeftSlot.GetLocation().Y > HalfSlot * 2.0);
+	TestEqual(TEXT("They're centred under the grid"), LeftSlot.GetLocation().Y, -RightSlot.GetLocation().Y);
+
+	// 90 degrees across a 16:9 screen, with the grid 40cm away
+	constexpr double HalfScreenHeight = 22.5;
+	TestTrue(TEXT("They're on a 16:9 screen"), LeftSlot.GetLocation().Z - HalfSlot > -HalfScreenHeight);
+
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSInventoryRigArmsTest, "Fellowship.Inventory.Rig.PosesTheHandsBehindTheirCells", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FFSInventoryRigArmsTest::RunTest(const FString& Parameters)
@@ -256,6 +286,37 @@ bool FFSInventoryRigHandSlotRayTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Hovering remembers the slot"), Test.Rig->GetHoveredHandSlot(), AFSInventoryRig::LeftHandSlot);
 	Test.Rig->SetHoveredHandSlot(INDEX_NONE);
 	TestEqual(TEXT("And can be cleared"), Test.Rig->GetHoveredHandSlot(), static_cast<int32>(INDEX_NONE));
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSInventoryRigQuickSlotRayTest, "Fellowship.Inventory.Rig.FindsQuickSlotsFromRays", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FFSInventoryRigQuickSlotRayTest::RunTest(const FString& Parameters)
+{
+	FInventoryRigTestWorld Test;
+
+	const auto SlotAt = [&Test](const FVector2D& Point)
+	{
+		int32 QuickSlot = INDEX_NONE;
+		Test.Rig->GetQuickSlotFromWorldRay(Test.Rig->GetActorLocation(), Test.DirectionToGridPoint(Point.X, Point.Y), QuickSlot);
+		return QuickSlot;
+	};
+
+	const FVector2D LeftCentre = Test.Rig->GetQuickSlotCentre(AFSInventoryRig::LeftQuickSlot);
+	const FVector2D RightCentre = Test.Rig->GetQuickSlotCentre(AFSInventoryRig::RightQuickSlot);
+	FIntPoint Cell = NoCell;
+
+	TestEqual(TEXT("The left slot"), SlotAt(LeftCentre), AFSInventoryRig::LeftQuickSlot);
+	TestEqual(TEXT("The right slot"), SlotAt(RightCentre), AFSInventoryRig::RightQuickSlot);
+	TestEqual(TEXT("The gap between them is neither"), SlotAt((LeftCentre + RightCentre) * 0.5), static_cast<int32>(INDEX_NONE));
+	TestEqual(TEXT("The middle of the grid is neither"), SlotAt(FVector2D::ZeroVector), static_cast<int32>(INDEX_NONE));
+	TestFalse(TEXT("A slot isn't a cell of the grid"), Test.CellAt(LeftCentre.X, LeftCentre.Y, Cell));
+
+	Test.Rig->SetHoveredQuickSlot(AFSInventoryRig::RightQuickSlot);
+	TestEqual(TEXT("Hovering remembers the slot"), Test.Rig->GetHoveredQuickSlot(), AFSInventoryRig::RightQuickSlot);
+	Test.Rig->SetHoveredQuickSlot(INDEX_NONE);
+	TestEqual(TEXT("And can be cleared"), Test.Rig->GetHoveredQuickSlot(), static_cast<int32>(INDEX_NONE));
 
 	return true;
 }

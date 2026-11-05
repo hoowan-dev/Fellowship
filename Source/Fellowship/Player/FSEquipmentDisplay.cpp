@@ -92,7 +92,7 @@ AFSEquipmentDisplay::AFSEquipmentDisplay()
 
 	SetRootComponent(CreateDefaultSubobject<USceneComponent>(TEXT("Root")));
 
-	const FName SlotNames[] = { TEXT("LeftHandMesh"), TEXT("BackpackMesh"), TEXT("RightHandMesh") };
+	const FName SlotNames[] = { TEXT("LeftQuickSlotMesh"), TEXT("LeftHandMesh"), TEXT("BackpackMesh"), TEXT("RightHandMesh"), TEXT("RightQuickSlotMesh") };
 
 	for (int32 Index = 0; Index < static_cast<int32>(EFSEquipmentSlot::Count); ++Index)
 	{
@@ -168,14 +168,16 @@ void AFSEquipmentDisplay::Tick(float DeltaTime)
 		return;
 	}
 
-	const auto UpdateHand = [this, PlayerController, Inventory](EFSEquipmentSlot Slot, EFSHand Hand)
+	const auto UpdateItem = [this, PlayerController](EFSEquipmentSlot Slot, const FFSInventoryItem& InventoryItem)
 	{
-		const UFSItemDefinition* Item = Inventory->GetHandItem(Hand).Definition;
+		const UFSItemDefinition* Item = InventoryItem.Definition;
 		UpdateSlot(*PlayerController, Slot, Item ? Item->Mesh.Get() : nullptr, Item ? Item->InventoryMeshRotation : FRotator::ZeroRotator);
 	};
 
-	UpdateHand(EFSEquipmentSlot::LeftHand, EFSHand::Left);
-	UpdateHand(EFSEquipmentSlot::RightHand, EFSHand::Right);
+	UpdateItem(EFSEquipmentSlot::LeftQuickSlot, Inventory->GetQuickSlotItem(EFSQuickSlot::Left));
+	UpdateItem(EFSEquipmentSlot::LeftHand, Inventory->GetHandItem(EFSHand::Left));
+	UpdateItem(EFSEquipmentSlot::RightHand, Inventory->GetHandItem(EFSHand::Right));
+	UpdateItem(EFSEquipmentSlot::RightQuickSlot, Inventory->GetQuickSlotItem(EFSQuickSlot::Right));
 
 	const AFSInventoryRig* Rig = PlayerController->GetInventoryRigDefaults();
 	UpdateSlot(*PlayerController, EFSEquipmentSlot::Backpack, Rig ? Rig->GetPackMesh() : nullptr, Rig ? Rig->GetPackRotation() : FRotator::ZeroRotator);

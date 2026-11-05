@@ -17,10 +17,11 @@ class UStaticMesh;
 class UStaticMeshComponent;
 struct FFSInventoryItem;
 enum class EFSHand : uint8;
+enum class EFSQuickSlot : uint8;
 
 /**
  * What the player sees with the inventory open: a first person camera looking at the held backpack, with the grid floating between them,
- * and the player's forearms raised either side of it with a large cell over each hand.
+ * the player's forearms raised either side of it with a large cell over each hand, and a cell for each quick slot below it.
  * Exists only on the owning client. The grid's cells run from (0, 0) at the top left.
  */
 UCLASS()
@@ -44,6 +45,14 @@ public:
 
 	// Which hand a hand slot is for
 	static EFSHand GetHandOfSlot(int32 HandSlot);
+
+	// The instance of the quick slots each quick slot's cell is
+	static constexpr int32 LeftQuickSlot = 0;
+	static constexpr int32 RightQuickSlot = 1;
+	static constexpr int32 QuickSlotCount = 2;
+
+	// Which of the inventory's quick slots an instance of the quick slots is for
+	static EFSQuickSlot GetQuickSlotOfIndex(int32 QuickSlotIndex);
 
 	FORCEINLINE UStaticMesh* GetPackMesh() const { return PackMeshAsset; }
 	FORCEINLINE const FRotator& GetPackRotation() const { return PackRotation; }
@@ -73,6 +82,12 @@ public:
 	// Highlights a hand slot, showing whether the carried item would go in it or swap with what's there. INDEX_NONE clears the highlight.
 	void SetHoveredHandSlot(int32 HandSlot);
 
+	// Finds the quick slot a world space ray passes through. Returns false if it misses both.
+	bool GetQuickSlotFromWorldRay(const FVector& RayOrigin, const FVector& RayDirection, int32& OutQuickSlot) const;
+
+	// Highlights a quick slot, showing whether the carried item would go in it or swap with what's there. INDEX_NONE clears the highlight.
+	void SetHoveredQuickSlot(int32 QuickSlot);
+
 	// Moves the light and the carried item to where the mouse points, given as a world space ray
 	void SetCursorRay(const FVector& RayOrigin, const FVector& RayDirection);
 
@@ -81,6 +96,9 @@ public:
 
 	// Where a held item's mesh sits relative to the grid, upright and fitted to the hand's cell
 	FTransform GetHandItemTransform(const FFSInventoryItem& Item, int32 HandSlot) const;
+
+	// Where a quick slot's item's mesh sits relative to the grid, upright and fitted to the slot's cell
+	FTransform GetQuickSlotItemTransform(const FFSInventoryItem& Item, int32 QuickSlot) const;
 
 	// Where an item's mesh sits relative to the grid, fitted to the cells it covers
 	FTransform GetItemTransform(const FFSInventoryItem& Item) const;
@@ -99,16 +117,23 @@ public:
 	FORCEINLINE UInstancedStaticMeshComponent* GetItemBorders() const { return ItemBorders; }
 	FORCEINLINE int32 GetCellIndex(const FIntPoint& Cell) const { return Cell.Y * GridWidth + Cell.X; }
 	FORCEINLINE UInstancedStaticMeshComponent* GetHandSlots() const { return HandSlots; }
+	FORCEINLINE UInstancedStaticMeshComponent* GetQuickSlots() const { return QuickSlots; }
+	FORCEINLINE UStaticMeshComponent* GetQuickSlotItemMesh(int32 QuickSlot) const { return QuickSlot == LeftQuickSlot ? LeftQuickSlotItemMesh : RightQuickSlotItemMesh; }
+	FORCEINLINE int32 GetHoveredQuickSlot() const { return HoveredQuickSlot; }
 	FORCEINLINE UPoseableMeshComponent* GetArms() const { return Arms; }
 
 	// The centre of a hand's cell on the plane of the grid, in cm from the grid's centre: X to the right and Y up
 	FVector2D GetHandSlotCentre(int32 HandSlot) const;
+
+	// The centre of a quick slot's cell on the plane of the grid, in cm from the grid's centre: X to the right and Y up
+	FVector2D GetQuickSlotCentre(int32 QuickSlot) const;
 
 protected:
 	virtual void BeginPlay() override;
 
 	void BuildGrid();
 	void BuildHandSlots();
+	void BuildQuickSlots();
 	void PoseArms();
 	void PoseArm(bool bLeft);
 	void FitPackMesh();
@@ -120,6 +145,10 @@ protected:
 	FIntPoint GetCellFromGridPoint(const FVector2D& GridPoint) const;
 	FTransform GetItemTransformAt(const FFSInventoryItem& Item, const FVector2D& TopLeft) const;
 	void HighlightCells(TArray<FIntPoint>&& Cells, int32 CellData);
+	FTransform GetSlotItemTransform(const FFSInventoryItem& Item, const FVector2D& SlotCentre, double SlotSize) const;
+
+	// Moves a highlight between the cells of one kind of slot. Hovered and HoveredData are that kind's record of what it has set.
+	void SetHoveredSlot(UInstancedStaticMeshComponent& Slots, int32& Hovered, int32& HoveredData, int32 NewHovered, bool bNewHoveredTaken);
 
 	UPROPERTY(VisibleAnywhere, Category = "Inventory")
 	TObjectPtr<USceneComponent> Root;
@@ -156,6 +185,18 @@ protected:
 	// Attached to the grid so it scales in and out along with it. Has no mesh while the hand is empty.
 	UPROPERTY(VisibleAnywhere, Category = "Inventory")
 	TObjectPtr<UStaticMeshComponent> RightHandItemMesh;
+
+	// A cell below the grid for each quick slot. Attached to the grid so they scale in and out along with it.
+	UPROPERTY(VisibleAnywhere, Category = "Inventory")
+	TObjectPtr<UInstancedStaticMeshComponent> QuickSlots;
+
+	// Attached to the grid so it scales in and out along with it. Has no mesh while the slot is empty.
+	UPROPERTY(VisibleAnywhere, Category = "Inventory")
+	TObjectPtr<UStaticMeshComponent> LeftQuickSlotItemMesh;
+
+	// Attached to the grid so it scales in and out along with it. Has no mesh while the slot is empty.
+	UPROPERTY(VisibleAnywhere, Category = "Inventory")
+	TObjectPtr<UStaticMeshComponent> RightQuickSlotItemMesh;
 
 	// A copy of the character's mesh with its arms posed in the display's frame and the rest of its body shrunk away, since it's all one mesh
 	UPROPERTY(VisibleAnywhere, Category = "Inventory")
@@ -242,6 +283,14 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Hands")
 	FVector UpperArmDirection = FVector(0.55, -0.3, 0.75);
 
+	// Small enough that the cells stay on a 16:9 screen below a grid of the default height
+	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Quick Slots", meta = (ClampMin = "0.1", Units = cm))
+	float QuickSlotSize = 7.5f;
+
+	// Between the bottom of the grid and the quick slots' cells, and between the two cells
+	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Quick Slots", meta = (ClampMin = "0.0", Units = cm))
+	float QuickSlotGap = 1.5f;
+
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Pack")
 	TObjectPtr<UStaticMesh> PackMeshAsset;
 
@@ -281,6 +330,11 @@ private:
 
 	// Which of the cell custom data values the hovered hand slot has set
 	int32 HoveredHandSlotData = CellHoveredData;
+
+	int32 HoveredQuickSlot = INDEX_NONE;
+
+	// Which of the cell custom data values the hovered quick slot has set
+	int32 HoveredQuickSlotData = CellHoveredData;
 
 	TArray<FIntPoint> HighlightedCells;
 

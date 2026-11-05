@@ -13,9 +13,11 @@ class UStaticMeshComponent;
 // The circles at the bottom of the HUD, from left to right
 enum class EFSEquipmentSlot : uint8
 {
+	LeftQuickSlot,
 	LeftHand,
 	Backpack,
 	RightHand,
+	RightQuickSlot,
 	Count
 };
 

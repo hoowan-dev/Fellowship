@@ -115,6 +115,12 @@ const FFSInventoryItem* AFSPlayerController::GetHoveredInventoryItem() const
 		return HandItem.Definition ? &HandItem : nullptr;
 	}
 
+	if (InventoryRig->GetHoveredQuickSlot() != INDEX_NONE)
+	{
+		const FFSInventoryItem& QuickSlotItem = Inventory->GetQuickSlotItem(AFSInventoryRig::GetQuickSlotOfIndex(InventoryRig->GetHoveredQuickSlot()));
+		return QuickSlotItem.Definition ? &QuickSlotItem : nullptr;
+	}
+
 	return Inventory->FindItemAt(InventoryRig->GetHoveredCell());
 }
 
@@ -151,10 +157,14 @@ void AFSPlayerController::SelectAtInventoryCursor()
 	{
 		UpdateHoveredInventoryCell();
 
-		// Outside the grid means tossing the carried item, so the hands have to be checked first
+		// Outside the grid means tossing the carried item, so the hands and quick slots have to be checked first
 		if (InventoryRig->GetHoveredHandSlot() != INDEX_NONE)
 		{
 			SelectInventoryHand(AFSInventoryRig::GetHandOfSlot(InventoryRig->GetHoveredHandSlot()));
+		}
+		else if (InventoryRig->GetHoveredQuickSlot() != INDEX_NONE)
+		{
+			SelectInventoryQuickSlot(AFSInventoryRig::GetQuickSlotOfIndex(InventoryRig->GetHoveredQuickSlot()));
 		}
 		else
 		{
@@ -191,6 +201,15 @@ void AFSPlayerController::SelectInventoryHand(EFSHand Hand)
 {
 	UFSInventoryComponent* Inventory = GetInventory();
 	if (Inventory && InventoryViewState == EFSInventoryViewState::Open && Inventory->SwapCarriedItemWithHand(Hand))
+	{
+		RefreshInventoryView();
+	}
+}
+
+void AFSPlayerController::SelectInventoryQuickSlot(EFSQuickSlot QuickSlot)
+{
+	UFSInventoryComponent* Inventory = GetInventory();
+	if (Inventory && InventoryViewState == EFSInventoryViewState::Open && Inventory->SwapCarriedItemWithQuickSlot(QuickSlot))
 	{
 		RefreshInventoryView();
 	}
@@ -442,14 +461,17 @@ void AFSPlayerController::UpdateHoveredInventoryCell()
 	FVector RayDirection;
 	FIntPoint Cell(INDEX_NONE, INDEX_NONE);
 	int32 HandSlot = INDEX_NONE;
+	int32 QuickSlot = INDEX_NONE;
 
 	if (DeprojectMousePositionToWorld(RayOrigin, RayDirection))
 	{
 		InventoryRig->GetCellFromWorldRay(RayOrigin, RayDirection, Cell);
 		InventoryRig->GetHandSlotFromWorldRay(RayOrigin, RayDirection, HandSlot);
+		InventoryRig->GetQuickSlotFromWorldRay(RayOrigin, RayDirection, QuickSlot);
 		InventoryRig->SetCursorRay(RayOrigin, RayDirection);
 	}
 
 	InventoryRig->SetHoveredCell(Cell);
 	InventoryRig->SetHoveredHandSlot(HandSlot);
+	InventoryRig->SetHoveredQuickSlot(QuickSlot);
 }

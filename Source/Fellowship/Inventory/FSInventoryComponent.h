@@ -27,6 +27,13 @@ enum class EFSHand : uint8
 	Right
 };
 
+// The slots that sit outside the hands on the HUD. For now an item in one is only shown there, never on the character.
+enum class EFSQuickSlot : uint8
+{
+	Left,
+	Right
+};
+
 DECLARE_MULTICAST_DELEGATE(FFSOnHandItemsChanged);
 
 USTRUCT()
@@ -51,7 +58,7 @@ struct FELLOWSHIP_API FFSInventoryItem
 
 /**
  * The items a player owns. Lives on the player state, so it outlasts the character.
- * One item at a time can be carried on the cursor, and each hand can hold one. Those items cover no cells and aren't in GetItems().
+ * One item at a time can be carried on the cursor, and each hand and quick slot can hold one. Those items cover no cells and aren't in GetItems().
  */
 UCLASS(ClassGroup = (Inventory), meta = (BlueprintSpawnableComponent))
 class FELLOWSHIP_API UFSInventoryComponent : public UActorComponent
@@ -103,6 +110,12 @@ public:
 
 	FFSOnHandItemsChanged OnHandItemsChanged;
 
+	// Puts the carried item in a quick slot, and what the slot held becomes the carried item. Returns false, changing nothing, if both are empty.
+	bool SwapCarriedItemWithQuickSlot(EFSQuickSlot QuickSlot);
+
+	// What a quick slot holds. Its definition is null if the slot is empty.
+	FORCEINLINE const FFSInventoryItem& GetQuickSlotItem(EFSQuickSlot QuickSlot) const { return QuickSlotItems[static_cast<int32>(QuickSlot)]; }
+
 	FORCEINLINE const FFSInventoryGrid& GetGrid() const { return Grid; }
 	FORCEINLINE const TArray<FFSInventoryItem>& GetItems() const { return Items; }
 
@@ -116,6 +129,9 @@ private:
 	// Moves an item from the grid to the cursor
 	void LiftItem(int32 ItemId);
 
+	// Swaps the carried item with one held outside the grid. Returns false, changing nothing, if both are empty.
+	bool SwapCarriedItemWith(FFSInventoryItem& HeldItem);
+
 	UPROPERTY(Transient)
 	FFSInventoryGrid Grid;
 
@@ -127,6 +143,9 @@ private:
 
 	UPROPERTY(Transient)
 	FFSInventoryItem HandItems[2];
+
+	UPROPERTY(Transient)
+	FFSInventoryItem QuickSlotItems[2];
 
 	int32 NextItemId = 0;
 };

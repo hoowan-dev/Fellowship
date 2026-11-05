@@ -106,15 +106,17 @@ void AFSHUD::DrawEquipmentSlots()
 	const UFSInventoryComponent* Inventory = PlayerController->GetInventory();
 	const FVector2D ViewportSize(Canvas->SizeX, Canvas->SizeY);
 
-	const auto GetHandItemName = [Inventory](EFSHand Hand)
+	const auto GetItemName = [](const FFSInventoryItem& InventoryItem)
 	{
-		const UFSItemDefinition* Item = Inventory->GetHandItem(Hand).Definition;
+		const UFSItemDefinition* Item = InventoryItem.Definition;
 		return Item ? Item->DisplayName : FText::GetEmpty();
 	};
 
-	DrawEquipmentSlot(AFSEquipmentDisplay::GetSlotCentre(ViewportSize, EFSEquipmentSlot::LeftHand), GetHandItemName(EFSHand::Left));
+	DrawEquipmentSlot(AFSEquipmentDisplay::GetSlotCentre(ViewportSize, EFSEquipmentSlot::LeftQuickSlot), GetItemName(Inventory->GetQuickSlotItem(EFSQuickSlot::Left)));
+	DrawEquipmentSlot(AFSEquipmentDisplay::GetSlotCentre(ViewportSize, EFSEquipmentSlot::LeftHand), GetItemName(Inventory->GetHandItem(EFSHand::Left)));
 	DrawEquipmentSlot(AFSEquipmentDisplay::GetSlotCentre(ViewportSize, EFSEquipmentSlot::Backpack), LOCTEXT("BackpackSlot", "Backpack"));
-	DrawEquipmentSlot(AFSEquipmentDisplay::GetSlotCentre(ViewportSize, EFSEquipmentSlot::RightHand), GetHandItemName(EFSHand::Right));
+	DrawEquipmentSlot(AFSEquipmentDisplay::GetSlotCentre(ViewportSize, EFSEquipmentSlot::RightHand), GetItemName(Inventory->GetHandItem(EFSHand::Right)));
+	DrawEquipmentSlot(AFSEquipmentDisplay::GetSlotCentre(ViewportSize, EFSEquipmentSlot::RightQuickSlot), GetItemName(Inventory->GetQuickSlotItem(EFSQuickSlot::Right)));
 }
 
 void AFSHUD::DrawEquipmentSlot(const FVector2D& Centre, const FText& Name)

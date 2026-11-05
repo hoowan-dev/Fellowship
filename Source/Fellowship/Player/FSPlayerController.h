@@ -14,6 +14,7 @@ class UInputAction;
 class UInputMappingContext;
 struct FFSInventoryItem;
 enum class EFSHand : uint8;
+enum class EFSQuickSlot : uint8;
 
 UENUM()
 enum class EFSInventoryViewState : uint8
@@ -109,6 +110,9 @@ public:
 
 	// What selecting a hand's cell does in the open inventory: puts the carried item in that hand, taking what it held onto the cursor
 	void SelectInventoryHand(EFSHand Hand);
+
+	// What selecting a quick slot's cell does in the open inventory: puts the carried item in that slot, taking what it held onto the cursor
+	void SelectInventoryQuickSlot(EFSQuickSlot QuickSlot);
 
 	// Turns the carried item a quarter turn clockwise, if the inventory is open and an item is carried
 	void RotateCarriedInventoryItem();

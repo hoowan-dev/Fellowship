@@ -177,6 +177,88 @@ bool FFSHandControllerTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSQuickSlotSwapTest, "Fellowship.Equipment.QuickSlots.SwapWithTheCarriedItem", EquipmentTestFlags)
+
+bool FFSQuickSlotSwapTest::RunTest(const FString& Parameters)
+{
+	FEquipmentTestWorld Test;
+	UFSItemDefinition* Sword = MakeWeapon(EFSWeaponType::Sword);
+	UFSItemDefinition* Spear = MakeWeapon(EFSWeaponType::Spear);
+
+	TestFalse(TEXT("Nothing to swap when both are empty"), Test.Inventory->SwapCarriedItemWithQuickSlot(EFSQuickSlot::Right));
+
+	Test.Inventory->CarryNewItem(Sword);
+	Test.Inventory->RotateCarriedItem();
+	TestTrue(TEXT("A carried item goes in an empty slot"), Test.Inventory->SwapCarriedItemWithQuickSlot(EFSQuickSlot::Right));
+	TestTrue(TEXT("The slot holds it"), Test.Inventory->GetQuickSlotItem(EFSQuickSlot::Right).Definition == Sword);
+	TestEqual(TEXT("Upright"), static_cast<int32>(Test.Inventory->GetQuickSlotItem(EFSQuickSlot::Right).Rotation), 0);
+	TestFalse(TEXT("The cursor is empty"), Test.Inventory->IsCarryingItem());
+	TestTrue(TEXT("The other slot is untouched"), Test.Inventory->GetQuickSlotItem(EFSQuickSlot::Left).Definition == nullptr);
+	TestEqual(TEXT("It isn't in the grid's items"), Test.Inventory->GetItems().Num(), 0);
+
+	Test.Inventory->CarryNewItem(Spear);
+	Test.Inventory->SwapCarriedItemWithQuickSlot(EFSQuickSlot::Right);
+	TestTrue(TEXT("A second item replaces the first"), Test.Inventory->GetQuickSlotItem(EFSQuickSlot::Right).Definition == Spear);
+	TestTrue(TEXT("Which moves to the cursor"), Test.Inventory->GetCarriedItem().Definition == Sword);
+
+	Test.Inventory->ClearCarriedItem();
+	Test.Inventory->SwapCarriedItemWithQuickSlot(EFSQuickSlot::Right);
+	TestTrue(TEXT("An empty cursor takes what the slot holds"), Test.Inventory->GetCarriedItem().Definition == Spear);
+	TestTrue(TEXT("Leaving the slot empty"), Test.Inventory->GetQuickSlotItem(EFSQuickSlot::Right).Definition == nullptr);
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSQuickSlotCharacterTest, "Fellowship.Equipment.QuickSlots.DontAppearOnTheCharacter", EquipmentTestFlags)
+
+bool FFSQuickSlotCharacterTest::RunTest(const FString& Parameters)
+{
+	FEquipmentTestWorld Test;
+	UFSWeaponStance* Unarmed = NewObject<UFSWeaponStance>();
+	Test.Equipment->UnarmedStance = Unarmed;
+	Test.Equipment->StanceRules.Add(MakeRule(EFSWeaponType::Sword, EFSWeaponType::None, NewObject<UFSWeaponStance>()));
+
+	int32 Changes = 0;
+	Test.Inventory->OnHandItemsChanged.AddLambda([&Changes]() { ++Changes; });
+
+	Test.Inventory->CarryNewItem(MakeWeapon(EFSWeaponType::Sword));
+	Test.Inventory->SwapCarriedItemWithQuickSlot(EFSQuickSlot::Left);
+
+	TestEqual(TEXT("The hands haven't changed"), Changes, 0);
+	TestNull(TEXT("No mesh appears for either hand"), Test.Equipment->GetHandMesh(EFSHand::Left));
+	TestNull(TEXT("Nor the other"), Test.Equipment->GetHandMesh(EFSHand::Right));
+	TestFalse(TEXT("It can't be drawn"), Test.Equipment->Draw());
+	TestTrue(TEXT("It doesn't change the stance"), Test.Equipment->GetCurrentStance() == Unarmed);
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSQuickSlotControllerTest, "Fellowship.Equipment.QuickSlots.AreSelectedInTheOpenInventory", EquipmentTestFlags)
+
+bool FFSQuickSlotControllerTest::RunTest(const FString& Parameters)
+{
+	FEquipmentTestWorld Test;
+	UFSItemDefinition* Sword = MakeWeapon(EFSWeaponType::Sword);
+	Test.Inventory->CarryNewItem(Sword);
+
+	Test.Controller->SelectInventoryQuickSlot(EFSQuickSlot::Left);
+	TestTrue(TEXT("Selecting does nothing while the inventory is closed"), Test.Inventory->IsCarryingItem());
+
+	Test.OpenInventory();
+	if (!TestTrue(TEXT("The inventory opens"), Test.Controller->GetInventoryViewState() == EFSInventoryViewState::Open))
+	{
+		return false;
+	}
+
+	Test.Controller->SelectInventoryQuickSlot(EFSQuickSlot::Left);
+	TestTrue(TEXT("Selecting a slot puts the carried item in it"), Test.Inventory->GetQuickSlotItem(EFSQuickSlot::Left).Definition == Sword);
+
+	Test.Controller->CloseInventory();
+	TestTrue(TEXT("Closing the inventory doesn't toss what's in it"), Test.Inventory->GetQuickSlotItem(EFSQuickSlot::Left).Definition == Sword);
+
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSEquipmentAttachTest, "Fellowship.Equipment.Weapons.MoveBetweenTheBackAndTheHands", EquipmentTestFlags)
 
 bool FFSEquipmentAttachTest::RunTest(const FString& Parameters)
