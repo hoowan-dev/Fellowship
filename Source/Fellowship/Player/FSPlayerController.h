@@ -8,6 +8,7 @@
 
 class AFSCharacter;
 class AFSInventoryRig;
+class UFSInventoryComponent;
 class UInputAction;
 class UInputMappingContext;
 
@@ -40,12 +41,16 @@ class FELLOWSHIP_API AFSPlayerController : public APlayerController
 	UPROPERTY(EditDefaultsOnly, Category = "Input")
 	TObjectPtr<UInputAction> ToggleInventoryAction;
 
+	// Digital (bool). Picks up the nearest item.
+	UPROPERTY(EditDefaultsOnly, Category = "Input")
+	TObjectPtr<UInputAction> InteractAction;
+
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory")
 	TSubclassOf<AFSInventoryRig> InventoryRigClass;
 
 	// How long the camera takes to move to and from the backpack
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory", meta = (ClampMin = "0.01", Units = s))
-	float InventoryBlendTime = 0.35f;
+	float InventoryBlendTime = 0.15f;
 
 	// The possessed pawn as an FSCharacter; null when possessing anything else
 	UPROPERTY(Transient, BlueprintReadOnly, Category = "Character", meta = (AllowPrivateAccess = "true"))
@@ -63,10 +68,19 @@ public:
 	FORCEINLINE AFSCharacter* GetFSCharacter() const { return FSCharacter; }
 	FORCEINLINE EFSInventoryViewState GetInventoryViewState() const { return InventoryViewState; }
 
+	// This player's inventory, or null if the player state hasn't arrived yet
+	UFSInventoryComponent* GetInventory() const;
+
+	UFUNCTION(BlueprintCallable, Category = "Inventory")
 	void OpenInventory();
 
 	// Moves the camera back to the character
+	UFUNCTION(BlueprintCallable, Category = "Inventory")
 	void CloseInventory();
+
+	// Picks up the nearest item, if there's one in range and the inventory is closed
+	UFUNCTION(BlueprintCallable, Category = "Inventory")
+	void Interact();
 
 protected:
 	virtual void BeginPlay() override;

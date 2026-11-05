@@ -2,4 +2,10 @@
 
 
 #include "FSPlayerState.h"
+#include "Inventory/FSInventoryComponent.h"
+
+AFSPlayerState::AFSPlayerState()
+{
+	Inventory = CreateDefaultSubobject<UFSInventoryComponent>(TEXT("Inventory"));
+}
 

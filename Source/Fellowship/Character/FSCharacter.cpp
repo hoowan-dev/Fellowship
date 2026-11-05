@@ -5,6 +5,7 @@
 #include "GameFramework/SpringArmComponent.h"
 #include "Camera/CameraComponent.h"
 #include "FSCharacterMovementComponent.h"
+#include "Inventory/FSItemPickup.h"
 #include "Player/FSPlayerController.h"
 #include "Camera/PlayerCameraManager.h"
 #include "EnhancedInputComponent.h"
@@ -75,6 +76,37 @@ void AFSCharacter::SetInventoryViewBonesHidden(bool bHide)
 			GetMesh()->UnHideBoneByName(Bone);
 		}
 	}
+}
+
+void AFSCharacter::AddNearbyPickup(AFSItemPickup* Pickup)
+{
+	NearbyPickups.AddUnique(Pickup);
+}
+
+void AFSCharacter::RemoveNearbyPickup(AFSItemPickup* Pickup)
+{
+	NearbyPickups.Remove(Pickup);
+}
+
+AFSItemPickup* AFSCharacter::GetNearestPickup() const
+{
+	AFSItemPickup* Nearest = nullptr;
+	double NearestDistanceSquared = TNumericLimits<double>::Max();
+
+	for (const TWeakObjectPtr<AFSItemPickup>& Pickup : NearbyPickups)
+	{
+		if (Pickup.IsValid())
+		{
+			const double DistanceSquared = FVector::DistSquared(GetActorLocation(), Pickup->GetActorLocation());
+			if (DistanceSquared < NearestDistanceSquared)
+			{
+				Nearest = Pickup.Get();
+				NearestDistanceSquared = DistanceSquared;
+			}
+		}
+	}
+
+	return Nearest;
 }
 
 void AFSCharacter::NotifyControllerChanged()

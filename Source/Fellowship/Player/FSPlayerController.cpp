@@ -8,7 +8,10 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "InputAction.h"
 #include "InputMappingContext.h"
+#include "Inventory/FSInventoryComponent.h"
 #include "Inventory/FSInventoryRig.h"
+#include "Inventory/FSItemPickup.h"
+#include "Player/FSPlayerState.h"
 #include "TimerManager.h"
 
 namespace
@@ -62,6 +65,34 @@ void AFSPlayerController::SetupInputComponent()
 	else
 	{
 		UE_LOG(LogTemp, Warning, TEXT("Inventory can't be toggled: EnhancedInput=%d ToggleInventoryAction=%s"), EnhancedInput != nullptr, *GetNameSafe(ToggleInventoryAction));
+	}
+
+	if (EnhancedInput && InteractAction)
+	{
+		EnhancedInput->BindAction(InteractAction, ETriggerEvent::Started, this, &AFSPlayerController::Interact);
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Items can't be picked up: EnhancedInput=%d InteractAction=%s"), EnhancedInput != nullptr, *GetNameSafe(InteractAction));
+	}
+}
+
+UFSInventoryComponent* AFSPlayerController::GetInventory() const
+{
+	const AFSPlayerState* FSPlayerState = GetPlayerState<AFSPlayerState>();
+	return FSPlayerState ? FSPlayerState->GetInventory() : nullptr;
+}
+
+void AFSPlayerController::Interact()
+{
+	if (InventoryViewState != EFSInventoryViewState::Closed || !FSCharacter)
+	{
+		return;
+	}
+
+	if (AFSItemPickup* Pickup = FSCharacter->GetNearestPickup())
+	{
+		Pickup->TryPickUp(GetInventory());
 	}
 }
 
@@ -144,6 +175,11 @@ void AFSPlayerController::OpenInventory()
 	}
 
 	InventoryRig->AttachToCharacter(FSCharacter);
+
+	if (const UFSInventoryComponent* Inventory = GetInventory())
+	{
+		InventoryRig->ShowInventory(*Inventory);
+	}
 
 	InventoryViewState = EFSInventoryViewState::Opening;
 	SetInventoryInputActive(true);

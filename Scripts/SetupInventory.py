@@ -3,12 +3,15 @@
 """
 Sets up the assets for the backpack inventory:
   - Creates IA_ToggleInventory and IMC_Inventory, and maps Tab to the action in IMC_Inventory and IMC_Default (Escape closes it too)
-  - Creates (or rebuilds) /Game/Materials/Inventory/M_InventoryGridCell
-  - Creates BP_FSInventoryRig and points it at the backpack mesh and grid material
+  - Creates (or rebuilds) M_InventoryGridCell and M_InventoryItemBorder in /Game/Materials/Inventory, keeping their parameter values
+  - Creates BP_FSInventoryRig and points it at those materials, and at the backpack mesh if it doesn't have one
   - Points BP_FSPlayerController at all of the above
+  - Creates IA_Interact, mapped to E and the left face button in IMC_Default
+  - Creates BP_FSItemPickup
 
 Run it inside the editor, after compiling the C++, from Tools > Execute Python Script.
-It can be run again safely. Values set by hand on BP_FSInventoryRig, other than its mesh and material, are kept.
+It can be run again safely: values set by hand on BP_FSInventoryRig and the materials' parameters are kept.
+It doesn't touch items: those are FSItemDefinition assets made in the editor.
 """
 
 import os
@@ -24,14 +27,23 @@ TOGGLE_ACTION_NAME = "IA_ToggleInventory"
 MAPPING_CONTEXT_NAME = "IMC_Inventory"
 DEFAULT_MAPPING_CONTEXT_PATH = f"{INPUT_FOLDER}/IMC_Default"
 MATERIAL_NAME = "M_InventoryGridCell"
+BORDER_MATERIAL_NAME = "M_InventoryItemBorder"
 RIG_BLUEPRINT_NAME = "BP_FSInventoryRig"
+PICKUP_BLUEPRINT_NAME = "BP_FSItemPickup"
 PLAYER_CONTROLLER_PATH = "/Game/Blueprints/Player/BP_FSPlayerController"
 PACK_MESH_PATH = "/Game/Meshes/TinyHero/BodyPart/BackPack01_SM"
 
+INTERACT_ACTION_NAME = "IA_Interact"
 # How much of a cell's half width its outline covers
 LINE_THICKNESS = 0.06
 LINE_COLOR = unreal.LinearColor(0.85, 0.85, 0.8, 1.0)
 HOVER_COLOR = unreal.LinearColor(0.9, 0.65, 0.2, 1.0)
+OPEN_COLOR = unreal.LinearColor(0.015, 0.015, 0.02, 1.0)
+TAKEN_COLOR = unreal.LinearColor(0.14, 0.1, 0.045, 1.0)
+BORDER_COLOR = unreal.LinearColor(1.0, 0.75, 0.3, 1.0)
+OPEN_OPACITY = 0.85
+TAKEN_OPACITY = 0.95
+HOVER_OPACITY = 0.97
 
 library = unreal.MaterialEditingLibrary
 assets = unreal.EditorAssetLibrary
@@ -83,10 +95,28 @@ def setup_input():
     inventory_context = load_or_create(MAPPING_CONTEXT_NAME, INPUT_FOLDER, unreal.InputMappingContext, unreal.InputMappingContext_Factory())
     map_keys(inventory_context, action, ["Tab", "Escape"])
 
+    interact_action = load_or_create(INTERACT_ACTION_NAME, INPUT_FOLDER, unreal.InputAction, unreal.InputAction_Factory())
+    interact_action.set_editor_property("value_type", unreal.InputActionValueType.BOOLEAN)
+    save(interact_action)
+
     default_context = assets.load_asset(DEFAULT_MAPPING_CONTEXT_PATH)
     map_keys(default_context, action, ["Tab"])
+    map_keys(default_context, interact_action, ["E", "Gamepad_FaceButton_Left"])
 
-    return action, inventory_context
+    return action, interact_action, inventory_context
+
+
+def setup_pickup_blueprint():
+    """The pickup placed in levels. It has no item of its own: each one placed sets its Item to an FSItemDefinition asset."""
+    path = f"{BLUEPRINT_FOLDER}/{PICKUP_BLUEPRINT_NAME}"
+    if assets.does_asset_exist(path):
+        return assets.load_blueprint_class(path)
+
+    factory = unreal.BlueprintFactory()
+    factory.set_editor_property("parent_class", unreal.FSItemPickup)
+    blueprint = tools.create_asset(PICKUP_BLUEPRINT_NAME, BLUEPRINT_FOLDER, unreal.Blueprint, factory)
+    compile_and_save(blueprint)
+    return assets.load_blueprint_class(path)
 
 
 def add_expression(material, expression_class, x, y, **properties):
@@ -96,18 +126,60 @@ def add_expression(material, expression_class, x, y, **properties):
     return expression
 
 
-def build_grid_material():
-    path = f"{MATERIAL_FOLDER}/{MATERIAL_NAME}"
+def start_material(name):
+    """Returns the material emptied of its graph, along with the values its parameters had, so that rebuilding keeps them."""
+    path = f"{MATERIAL_FOLDER}/{name}"
+    saved_values = {}
+
     if assets.does_asset_exist(path):
         material = assets.load_asset(path)
+        for parameter in library.get_vector_parameter_names(material):
+            saved_values[str(parameter)] = library.get_material_default_vector_parameter_value(material, parameter)
+        for parameter in library.get_scalar_parameter_names(material):
+            saved_values[str(parameter)] = library.get_material_default_scalar_parameter_value(material, parameter)
         library.delete_all_material_expressions(material)
     else:
-        material = tools.create_asset(MATERIAL_NAME, MATERIAL_FOLDER, unreal.Material, unreal.MaterialFactoryNew())
+        material = tools.create_asset(name, MATERIAL_FOLDER, unreal.Material, unreal.MaterialFactoryNew())
 
-    # Masked rather than translucent, so the pack shows through without any sorting against the first person meshes
     material.set_editor_property("shading_model", unreal.MaterialShadingModel.MSM_UNLIT)
-    material.set_editor_property("blend_mode", unreal.BlendMode.BLEND_MASKED)
     material.set_editor_property("used_with_instanced_static_meshes", True)
+    return material, saved_values
+
+
+def add_color(material, saved_values, name, default, x, y):
+    return add_expression(material, unreal.MaterialExpressionVectorParameter, x, y, parameter_name=name, default_value=saved_values.get(name, default))
+
+
+def add_scalar(material, saved_values, name, default, x, y):
+    return add_expression(material, unreal.MaterialExpressionScalarParameter, x, y, parameter_name=name, default_value=saved_values.get(name, default))
+
+
+def connect_steady_color(material, color):
+    """Uses a color as the emissive color, cancelling out the camera's exposure so it looks the same in sunlight and in shade."""
+    inverse_exposure = add_expression(material, unreal.MaterialExpressionEyeAdaptationInverse, 500, -350)
+    steady_color = add_expression(material, unreal.MaterialExpressionMultiply, 700, -450)
+    library.connect_material_expressions(color, "", steady_color, "A")
+    library.connect_material_expressions(inverse_exposure, "", steady_color, "B")
+    library.connect_material_property(steady_color, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
+
+
+def build_border_material():
+    material, saved_values = start_material(BORDER_MATERIAL_NAME)
+    material.set_editor_property("blend_mode", unreal.BlendMode.BLEND_OPAQUE)
+
+    color = add_color(material, saved_values, "BorderColor", BORDER_COLOR, -400, 0)
+    connect_steady_color(material, color)
+
+    library.recompile_material(material)
+    save(material)
+    return material
+
+
+def build_grid_material():
+    material, saved_values = start_material(MATERIAL_NAME)
+
+    # Translucent so that the pack still shows faintly behind the grid's dark background
+    material.set_editor_property("blend_mode", unreal.BlendMode.BLEND_TRANSLUCENT)
 
     coordinates = add_expression(material, unreal.MaterialExpressionTextureCoordinate, -1600, 0)
     from_centre = add_expression(material, unreal.MaterialExpressionSubtract, -1400, 0, const_b=0.5)
@@ -116,14 +188,28 @@ def build_grid_material():
     down = add_expression(material, unreal.MaterialExpressionComponentMask, -1000, 100, r=False, g=True, b=False, a=False)
     nearest_edge = add_expression(material, unreal.MaterialExpressionMax, -800, 0)
     past_line_start = add_expression(material, unreal.MaterialExpressionSubtract, -600, 0, const_b=0.5 * (1.0 - LINE_THICKNESS))
-    # A steep ramp, so the mask clips into a sharp line
+    # A steep ramp, so the line has a sharp edge
     sharpened = add_expression(material, unreal.MaterialExpressionMultiply, -400, 0, const_b=1000.0)
-    hovered = add_expression(material, unreal.MaterialExpressionPerInstanceCustomData, -400, 200, data_index=0)
-    mask = add_expression(material, unreal.MaterialExpressionAdd, -200, 100)
+    on_line = add_expression(material, unreal.MaterialExpressionSaturate, -200, 0)
 
-    line_color = add_expression(material, unreal.MaterialExpressionVectorParameter, -400, -400, parameter_name="LineColor", default_value=LINE_COLOR)
-    hover_color = add_expression(material, unreal.MaterialExpressionVectorParameter, -400, -200, parameter_name="HoverColor", default_value=HOVER_COLOR)
-    color = add_expression(material, unreal.MaterialExpressionLinearInterpolate, -200, -200)
+    # These match AFSInventoryRig's CellHoveredData and CellTakenData
+    hovered = add_expression(material, unreal.MaterialExpressionPerInstanceCustomData, -400, 200, data_index=0)
+    taken = add_expression(material, unreal.MaterialExpressionPerInstanceCustomData, -400, 300, data_index=1)
+
+    open_color = add_color(material, saved_values, "OpenColor", OPEN_COLOR, -400, -800)
+    taken_color = add_color(material, saved_values, "TakenColor", TAKEN_COLOR, -400, -650)
+    hover_color = add_color(material, saved_values, "HoverColor", HOVER_COLOR, -400, -500)
+    line_color = add_color(material, saved_values, "LineColor", LINE_COLOR, -400, -350)
+    cell_color = add_expression(material, unreal.MaterialExpressionLinearInterpolate, -100, -700)
+    lit_color = add_expression(material, unreal.MaterialExpressionLinearInterpolate, 100, -600)
+    color = add_expression(material, unreal.MaterialExpressionLinearInterpolate, 300, -500)
+
+    open_opacity = add_scalar(material, saved_values, "OpenOpacity", OPEN_OPACITY, -400, 450)
+    taken_opacity = add_scalar(material, saved_values, "TakenOpacity", TAKEN_OPACITY, -400, 550)
+    hover_opacity = add_scalar(material, saved_values, "HoverOpacity", HOVER_OPACITY, -400, 650)
+    cell_opacity = add_expression(material, unreal.MaterialExpressionLinearInterpolate, -100, 500)
+    lit_opacity = add_expression(material, unreal.MaterialExpressionLinearInterpolate, 100, 500)
+    opacity = add_expression(material, unreal.MaterialExpressionLinearInterpolate, 300, 500, const_b=1.0)
 
     connect = library.connect_material_expressions
     connect(coordinates, "", from_centre, "A")
@@ -134,21 +220,36 @@ def build_grid_material():
     connect(down, "", nearest_edge, "B")
     connect(nearest_edge, "", past_line_start, "A")
     connect(past_line_start, "", sharpened, "A")
-    connect(sharpened, "", mask, "A")
-    connect(hovered, "", mask, "B")
-    connect(line_color, "", color, "A")
-    connect(hover_color, "", color, "B")
-    connect(hovered, "", color, "Alpha")
+    connect(sharpened, "", on_line, "")
 
-    library.connect_material_property(color, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
-    library.connect_material_property(mask, "", unreal.MaterialProperty.MP_OPACITY_MASK)
+    connect(open_color, "", cell_color, "A")
+    connect(taken_color, "", cell_color, "B")
+    connect(taken, "", cell_color, "Alpha")
+    connect(cell_color, "", lit_color, "A")
+    connect(hover_color, "", lit_color, "B")
+    connect(hovered, "", lit_color, "Alpha")
+    connect(lit_color, "", color, "A")
+    connect(line_color, "", color, "B")
+    connect(on_line, "", color, "Alpha")
+
+    connect(open_opacity, "", cell_opacity, "A")
+    connect(taken_opacity, "", cell_opacity, "B")
+    connect(taken, "", cell_opacity, "Alpha")
+    connect(cell_opacity, "", lit_opacity, "A")
+    connect(hover_opacity, "", lit_opacity, "B")
+    connect(hovered, "", lit_opacity, "Alpha")
+    connect(lit_opacity, "", opacity, "A")
+    connect(on_line, "", opacity, "Alpha")
+
+    connect_steady_color(material, color)
+    library.connect_material_property(opacity, "", unreal.MaterialProperty.MP_OPACITY)
 
     library.recompile_material(material)
     save(material)
     return material
 
 
-def setup_rig_blueprint(material):
+def setup_rig_blueprint(material, border_material):
     path = f"{BLUEPRINT_FOLDER}/{RIG_BLUEPRINT_NAME}"
     if assets.does_asset_exist(path):
         blueprint = assets.load_asset(path)
@@ -159,23 +260,28 @@ def setup_rig_blueprint(material):
 
     rig_class = assets.load_blueprint_class(path)
     defaults = unreal.get_default_object(rig_class)
-    defaults.set_editor_property("pack_mesh_asset", assets.load_asset(PACK_MESH_PATH))
+    if not defaults.get_editor_property("pack_mesh_asset"):
+        defaults.set_editor_property("pack_mesh_asset", assets.load_asset(PACK_MESH_PATH))
     defaults.set_editor_property("grid_cell_material", material)
+    defaults.set_editor_property("item_border_material", border_material)
     compile_and_save(blueprint)
     return rig_class
 
 
-def setup_player_controller(action, mapping_context, rig_class):
+def setup_player_controller(action, interact_action, mapping_context, rig_class):
     blueprint = assets.load_asset(PLAYER_CONTROLLER_PATH)
     defaults = unreal.get_default_object(assets.load_blueprint_class(PLAYER_CONTROLLER_PATH))
     defaults.set_editor_property("toggle_inventory_action", action)
+    defaults.set_editor_property("interact_action", interact_action)
     defaults.set_editor_property("inventory_mapping_context", mapping_context)
     defaults.set_editor_property("inventory_rig_class", rig_class)
     compile_and_save(blueprint)
 
 
-action, mapping_context = setup_input()
+action, interact_action, mapping_context = setup_input()
 material = build_grid_material()
-rig_class = setup_rig_blueprint(material)
-setup_player_controller(action, mapping_context, rig_class)
+border_material = build_border_material()
+rig_class = setup_rig_blueprint(material, border_material)
+setup_player_controller(action, interact_action, mapping_context, rig_class)
+setup_pickup_blueprint()
 unreal.log("Inventory assets are set up")

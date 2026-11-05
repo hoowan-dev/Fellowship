@@ -8,6 +8,7 @@
 
 class USpringArmComponent;
 class UCameraComponent;
+class AFSItemPickup;
 class AFSPlayerController;
 class UInputAction;
 struct FInputActionValue;
@@ -91,5 +92,15 @@ public:
 	void SetMaxLookPitch(float NewMaxLookPitch);
 
 	void SetInventoryViewBonesHidden(bool bHide);
+
+	// Called by pickups as this character enters and leaves their range
+	void AddNearbyPickup(AFSItemPickup* Pickup);
+	void RemoveNearbyPickup(AFSItemPickup* Pickup);
+
+	// The closest pickup in range, or null if there are none
+	AFSItemPickup* GetNearestPickup() const;
+
+private:
+	TArray<TWeakObjectPtr<AFSItemPickup>> NearbyPickups;
 
 };

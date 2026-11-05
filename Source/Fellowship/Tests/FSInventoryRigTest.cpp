@@ -62,7 +62,7 @@ bool FFSInventoryRigBuildsGridTest::RunTest(const FString& Parameters)
 	FInventoryRigTestWorld Test;
 
 	TestEqual(TEXT("One instance per cell"), Test.Rig->GetGrid()->GetInstanceCount(), GridSize * GridSize);
-	TestEqual(TEXT("Each cell has one custom data value"), Test.Rig->GetGrid()->NumCustomDataFloats, 1);
+	TestEqual(TEXT("Each cell has its custom data values"), Test.Rig->GetGrid()->NumCustomDataFloats, AFSInventoryRig::CellDataCount);
 
 	return true;
 }
@@ -115,12 +115,17 @@ bool FFSInventoryRigHoverTest::RunTest(const FString& Parameters)
 	FInventoryRigTestWorld Test;
 	const UInstancedStaticMeshComponent* Grid = Test.Rig->GetGrid();
 
+	const auto HoveredValue = [&Test, Grid](const FIntPoint& Cell)
+	{
+		return Grid->PerInstanceSMCustomData[Test.Rig->GetCellIndex(Cell) * AFSInventoryRig::CellDataCount + AFSInventoryRig::CellHoveredData];
+	};
+
 	const auto CountHighlighted = [Grid]()
 	{
 		int32 Count = 0;
-		for (const float Value : Grid->PerInstanceSMCustomData)
+		for (int32 Index = AFSInventoryRig::CellHoveredData; Index < Grid->PerInstanceSMCustomData.Num(); Index += AFSInventoryRig::CellDataCount)
 		{
-			Count += Value > 0.0f ? 1 : 0;
+			Count += Grid->PerInstanceSMCustomData[Index] > 0.0f ? 1 : 0;
 		}
 		return Count;
 	};
@@ -130,12 +135,12 @@ bool FFSInventoryRigHoverTest::RunTest(const FString& Parameters)
 	const FIntPoint First(2, 5);
 	Test.Rig->SetHoveredCell(First);
 	TestEqual(TEXT("The hovered cell is stored"), Test.Rig->GetHoveredCell(), First);
-	TestEqual(TEXT("The hovered cell's instance is highlighted"), Grid->PerInstanceSMCustomData[Test.Rig->GetCellIndex(First)], 1.0f);
+	TestEqual(TEXT("The hovered cell's instance is highlighted"), HoveredValue(First), 1.0f);
 	TestEqual(TEXT("One cell is highlighted"), CountHighlighted(), 1);
 
 	const FIntPoint Second(7, 0);
 	Test.Rig->SetHoveredCell(Second);
-	TestEqual(TEXT("The old cell is cleared"), Grid->PerInstanceSMCustomData[Test.Rig->GetCellIndex(First)], 0.0f);
+	TestEqual(TEXT("The old cell is cleared"), HoveredValue(First), 0.0f);
 	TestEqual(TEXT("The highlight moved to one new cell"), CountHighlighted(), 1);
 
 	Test.Rig->SetHoveredCell(NoCell);

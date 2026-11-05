@@ -139,7 +139,7 @@ public:
 	// While airborne, draws the path taken (cyan for a jump, magenta for a fall), the predicted path (yellow) and the vertical speed.
 	// Marks the takeoff, apex and landing, with the height gained, distance and air time. Not available in Shipping builds.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Movement: Jumping")
-	bool bDrawDebugJump = false;
+	bool bDrawDebugJump = true;
 
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
