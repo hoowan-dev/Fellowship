@@ -10,6 +10,7 @@ class USpringArmComponent;
 class UCameraComponent;
 class AFSItemPickup;
 class AFSPlayerController;
+class UFSEquipmentComponent;
 class UInputAction;
 struct FInputActionValue;
 
@@ -28,6 +29,10 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UCameraComponent> FollowCamera;
 
+	// Shows what the hands hold, drawn or on the back
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Equipment", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UFSEquipmentComponent> Equipment;
+
 public:
 
 	// Axis2D: X = right, Y = forward
@@ -41,6 +46,10 @@ public:
 	// Digital (bool)
 	UPROPERTY(EditDefaultsOnly, Category = "Input")
 	TObjectPtr<UInputAction> JumpAction;
+
+	// Digital (bool). Draws the held weapons or sheathes them.
+	UPROPERTY(EditDefaultsOnly, Category = "Input")
+	TObjectPtr<UInputAction> ToggleDrawnAction;
 
 public:
 
@@ -64,6 +73,7 @@ protected:
 	// Called when the game starts or when spawned
 	virtual void BeginPlay() override;
 	virtual void NotifyControllerChanged() override;
+	virtual void OnPlayerStateChanged(APlayerState* NewPlayerState, APlayerState* OldPlayerState) override;
 
 	// Pushes MaxLookPitch to the possessing player's camera manager
 	void ApplyLookPitchLimits() const;
@@ -74,6 +84,8 @@ protected:
 	// Lets go of the surface while climbing, otherwise jumps
 	void JumpOrLetGo();
 
+	void ToggleWeaponsDrawn();
+
 public:
 	// Called every frame
 	virtual void Tick(float DeltaTime) override;
@@ -81,8 +93,11 @@ public:
 	// Called to bind functionality to input
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
 
+	virtual void OnMovementModeChanged(EMovementMode PrevMovementMode, uint8 PreviousCustomMode = 0) override;
+
 	FORCEINLINE USpringArmComponent* GetCameraBoom() const { return CameraBoom; }
 	FORCEINLINE UCameraComponent* GetFollowCamera() const { return FollowCamera; }
+	FORCEINLINE UFSEquipmentComponent* GetEquipment() const { return Equipment; }
 
 	// Controller possessing this character, if it is an FSPlayerController
 	UFUNCTION(BlueprintPure, Category = "Character")
@@ -91,6 +106,7 @@ public:
 	UFUNCTION(BlueprintSetter)
 	void SetMaxLookPitch(float NewMaxLookPitch);
 
+	// Also hides the weapons, which would otherwise get in the way of the camera
 	void SetInventoryViewBonesHidden(bool bHide);
 
 	// Called by pickups as this character enters and leaves their range

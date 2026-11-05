@@ -104,7 +104,18 @@ UFSInventoryComponent* AFSPlayerController::GetInventory() const
 const FFSInventoryItem* AFSPlayerController::GetHoveredInventoryItem() const
 {
 	const UFSInventoryComponent* Inventory = GetInventory();
-	return Inventory && InventoryRig && InventoryViewState == EFSInventoryViewState::Open ? Inventory->FindItemAt(InventoryRig->GetHoveredCell()) : nullptr;
+	if (!Inventory || !InventoryRig || InventoryViewState != EFSInventoryViewState::Open)
+	{
+		return nullptr;
+	}
+
+	if (InventoryRig->GetHoveredHandSlot() != INDEX_NONE)
+	{
+		const FFSInventoryItem& HandItem = Inventory->GetHandItem(AFSInventoryRig::GetHandOfSlot(InventoryRig->GetHoveredHandSlot()));
+		return HandItem.Definition ? &HandItem : nullptr;
+	}
+
+	return Inventory->FindItemAt(InventoryRig->GetHoveredCell());
 }
 
 void AFSPlayerController::Interact()
@@ -134,7 +145,16 @@ void AFSPlayerController::SelectAtInventoryCursor()
 	if (InventoryViewState == EFSInventoryViewState::Open)
 	{
 		UpdateHoveredInventoryCell();
-		SelectInventoryCell(InventoryRig->GetHoveredCell());
+
+		// Outside the grid means tossing the carried item, so the hands have to be checked first
+		if (InventoryRig->GetHoveredHandSlot() != INDEX_NONE)
+		{
+			SelectInventoryHand(AFSInventoryRig::GetHandOfSlot(InventoryRig->GetHoveredHandSlot()));
+		}
+		else
+		{
+			SelectInventoryCell(InventoryRig->GetHoveredCell());
+		}
 	}
 }
 
@@ -160,6 +180,15 @@ void AFSPlayerController::SelectInventoryCell(const FIntPoint& Cell)
 	}
 
 	RefreshInventoryView();
+}
+
+void AFSPlayerController::SelectInventoryHand(EFSHand Hand)
+{
+	UFSInventoryComponent* Inventory = GetInventory();
+	if (Inventory && InventoryViewState == EFSInventoryViewState::Open && Inventory->SwapCarriedItemWithHand(Hand))
+	{
+		RefreshInventoryView();
+	}
 }
 
 void AFSPlayerController::RotateCarriedInventoryItem()
@@ -407,12 +436,15 @@ void AFSPlayerController::UpdateHoveredInventoryCell()
 	FVector RayOrigin;
 	FVector RayDirection;
 	FIntPoint Cell(INDEX_NONE, INDEX_NONE);
+	int32 HandSlot = INDEX_NONE;
 
 	if (DeprojectMousePositionToWorld(RayOrigin, RayDirection))
 	{
 		InventoryRig->GetCellFromWorldRay(RayOrigin, RayDirection, Cell);
+		InventoryRig->GetHandSlotFromWorldRay(RayOrigin, RayDirection, HandSlot);
 		InventoryRig->SetCursorRay(RayOrigin, RayDirection);
 	}
 
 	InventoryRig->SetHoveredCell(Cell);
+	InventoryRig->SetHoveredHandSlot(HandSlot);
 }

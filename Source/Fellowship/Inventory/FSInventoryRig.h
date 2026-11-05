@@ -16,6 +16,7 @@ class UPoseableMeshComponent;
 class UStaticMesh;
 class UStaticMeshComponent;
 struct FFSInventoryItem;
+enum class EFSHand : uint8;
 
 /**
  * What the player sees with the inventory open: a first person camera looking at the held backpack, with the grid floating between them,
@@ -41,6 +42,9 @@ public:
 	static constexpr int32 RightHandSlot = 1;
 	static constexpr int32 HandSlotCount = 2;
 
+	// Which hand a hand slot is for
+	static EFSHand GetHandOfSlot(int32 HandSlot);
+
 	AFSInventoryRig();
 
 	virtual void Tick(float DeltaTime) override;
@@ -60,11 +64,20 @@ public:
 	// cover with its top left in this cell instead, showing whether it can go there. Any cell outside the grid clears the highlight.
 	void SetHoveredCell(const FIntPoint& Cell);
 
+	// Finds the hand slot a world space ray passes through. Returns false if it misses both.
+	bool GetHandSlotFromWorldRay(const FVector& RayOrigin, const FVector& RayDirection, int32& OutHandSlot) const;
+
+	// Highlights a hand slot, showing whether the carried item would go in it or swap with what's there. INDEX_NONE clears the highlight.
+	void SetHoveredHandSlot(int32 HandSlot);
+
 	// Moves the light and the carried item to where the mouse points, given as a world space ray
 	void SetCursorRay(const FVector& RayOrigin, const FVector& RayDirection);
 
 	// Matches the grid, the item meshes, their borders and the carried item to what the inventory holds
 	void ShowInventory(const UFSInventoryComponent& Inventory);
+
+	// Where a held item's mesh sits relative to the grid, upright and fitted to the hand's cell
+	FTransform GetHandItemTransform(const FFSInventoryItem& Item, int32 HandSlot) const;
 
 	// Where an item's mesh sits relative to the grid, fitted to the cells it covers
 	FTransform GetItemTransform(const FFSInventoryItem& Item) const;
@@ -75,6 +88,8 @@ public:
 
 	FORCEINLINE const TArray<TObjectPtr<UStaticMeshComponent>>& GetItemMeshes() const { return ItemMeshes; }
 	FORCEINLINE UStaticMeshComponent* GetCarriedItemMesh() const { return CarriedItemMesh; }
+	FORCEINLINE UStaticMeshComponent* GetHandItemMesh(int32 HandSlot) const { return HandSlot == LeftHandSlot ? LeftHandItemMesh : RightHandItemMesh; }
+	FORCEINLINE int32 GetHoveredHandSlot() const { return HoveredHandSlot; }
 	FORCEINLINE UPointLightComponent* GetCursorLight() const { return CursorLight; }
 	FORCEINLINE const FIntPoint& GetHoveredCell() const { return HoveredCell; }
 	FORCEINLINE UInstancedStaticMeshComponent* GetGrid() const { return Grid; }
@@ -127,9 +142,17 @@ protected:
 	UPROPERTY(VisibleAnywhere, Category = "Inventory")
 	TObjectPtr<UStaticMeshComponent> CarriedItemMesh;
 
-	// A large cell over each hand, for what that hand holds. Nothing can be put in them yet. Attached to the grid so they scale in and out along with it.
+	// A large cell over each hand, for what that hand holds. Attached to the grid so they scale in and out along with it.
 	UPROPERTY(VisibleAnywhere, Category = "Inventory")
 	TObjectPtr<UInstancedStaticMeshComponent> HandSlots;
+
+	// Attached to the grid so it scales in and out along with it. Has no mesh while the hand is empty.
+	UPROPERTY(VisibleAnywhere, Category = "Inventory")
+	TObjectPtr<UStaticMeshComponent> LeftHandItemMesh;
+
+	// Attached to the grid so it scales in and out along with it. Has no mesh while the hand is empty.
+	UPROPERTY(VisibleAnywhere, Category = "Inventory")
+	TObjectPtr<UStaticMeshComponent> RightHandItemMesh;
 
 	// A copy of the character's mesh with its arms posed in the display's frame and the rest of its body shrunk away, since it's all one mesh
 	UPROPERTY(VisibleAnywhere, Category = "Inventory")
@@ -255,6 +278,11 @@ private:
 	TWeakObjectPtr<const UFSInventoryComponent> ShownInventory;
 
 	FIntPoint HoveredCell = FIntPoint(INDEX_NONE, INDEX_NONE);
+	int32 HoveredHandSlot = INDEX_NONE;
+
+	// Which of the cell custom data values the hovered hand slot has set
+	int32 HoveredHandSlotData = CellHoveredData;
+
 	TArray<FIntPoint> HighlightedCells;
 
 	// Which of the cell custom data values HighlightedCells have set

@@ -231,4 +231,33 @@ bool FFSInventoryRigArmsTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSInventoryRigHandSlotRayTest, "Fellowship.Inventory.Rig.FindsHandSlotsFromRays", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FFSInventoryRigHandSlotRayTest::RunTest(const FString& Parameters)
+{
+	FInventoryRigTestWorld Test;
+
+	const auto SlotAt = [&Test](const FVector2D& Point)
+	{
+		int32 HandSlot = INDEX_NONE;
+		Test.Rig->GetHandSlotFromWorldRay(Test.Rig->GetActorLocation(), Test.DirectionToGridPoint(Point.X, Point.Y), HandSlot);
+		return HandSlot;
+	};
+
+	const FVector2D LeftCentre = Test.Rig->GetHandSlotCentre(AFSInventoryRig::LeftHandSlot);
+	const FVector2D RightCentre = Test.Rig->GetHandSlotCentre(AFSInventoryRig::RightHandSlot);
+
+	TestEqual(TEXT("The left slot"), SlotAt(LeftCentre), AFSInventoryRig::LeftHandSlot);
+	TestEqual(TEXT("The right slot"), SlotAt(RightCentre), AFSInventoryRig::RightHandSlot);
+	TestEqual(TEXT("The middle of the grid is neither"), SlotAt(FVector2D::ZeroVector), static_cast<int32>(INDEX_NONE));
+	TestEqual(TEXT("Beyond a slot is neither"), SlotAt(RightCentre + FVector2D(100.0, 0.0)), static_cast<int32>(INDEX_NONE));
+
+	Test.Rig->SetHoveredHandSlot(AFSInventoryRig::LeftHandSlot);
+	TestEqual(TEXT("Hovering remembers the slot"), Test.Rig->GetHoveredHandSlot(), AFSInventoryRig::LeftHandSlot);
+	Test.Rig->SetHoveredHandSlot(INDEX_NONE);
+	TestEqual(TEXT("And can be cleared"), Test.Rig->GetHoveredHandSlot(), static_cast<int32>(INDEX_NONE));
+
+	return true;
+}
+
 #endif

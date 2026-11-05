@@ -3,7 +3,12 @@
 
 #include "FSCharacterAnimInstance.h"
 #include "FSCharacterMovementComponent.h"
+#include "Character/FSCharacter.h"
+#include "Character/FSEquipmentComponent.h"
+#include "Animation/AnimClassInterface.h"
 #include "GameFramework/Character.h"
+#include "PoseSearch/AnimNode_MotionMatching.h"
+#include "PoseSearch/PoseSearchDatabase.h"
 
 void UFSCharacterAnimInstance::NativeInitializeAnimation()
 {
@@ -12,11 +17,52 @@ void UFSCharacterAnimInstance::NativeInitializeAnimation()
 	// Null in the animation editor's preview, which has no character
 	const ACharacter* Character = Cast<ACharacter>(GetOwningActor());
 	MovementComponent = Character ? Character->GetCharacterMovement<UFSCharacterMovementComponent>() : nullptr;
+
+	const AFSCharacter* FSCharacter = Cast<AFSCharacter>(Character);
+	Equipment = FSCharacter ? FSCharacter->GetEquipment() : nullptr;
+
+	// Found by name because the node's struct isn't exported from its module
+	MotionMatchingNode = nullptr;
+	MotionMatchingDatabase = nullptr;
+	if (const IAnimClassInterface* AnimClass = IAnimClassInterface::GetFromClass(GetClass()))
+	{
+		static const FName MotionMatchingNodeName(TEXT("AnimNode_MotionMatching"));
+
+		for (const FStructProperty* NodeProperty : AnimClass->GetAnimNodeProperties())
+		{
+			if (NodeProperty->Struct->GetFName() == MotionMatchingNodeName)
+			{
+				MotionMatchingNode = NodeProperty->ContainerPtrToValuePtr<FAnimNode_MotionMatching>(this);
+				break;
+			}
+		}
+	}
 }
 
 void UFSCharacterAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 {
 	Super::NativeUpdateAnimation(DeltaSeconds);
+
+	if (const UFSWeaponStance* Stance = Equipment ? Equipment->GetCurrentStance() : nullptr)
+	{
+		// The node keeps searching what it's told until told otherwise, and interrupting what's playing is only wanted when this changes
+		UPoseSearchDatabase* Database = Stance->LocomotionDatabase;
+		if (MotionMatchingNode && Database && Database != MotionMatchingDatabase)
+		{
+			MotionMatchingNode->SetDatabaseToSearch(Database, EPoseSearchInterruptMode::InterruptOnDatabaseChange);
+			MotionMatchingDatabase = Database;
+		}
+
+		JumpStart = Stance->JumpStart;
+		JumpAir = Stance->JumpAir;
+		JumpEnd = Stance->JumpEnd;
+	}
+	else
+	{
+		JumpStart = nullptr;
+		JumpAir = nullptr;
+		JumpEnd = nullptr;
+	}
 
 	if (MovementComponent)
 	{

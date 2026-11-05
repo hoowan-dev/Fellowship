@@ -5,8 +5,10 @@
 #include "GameFramework/SpringArmComponent.h"
 #include "Camera/CameraComponent.h"
 #include "FSCharacterMovementComponent.h"
+#include "Character/FSEquipmentComponent.h"
 #include "Inventory/FSItemPickup.h"
 #include "Player/FSPlayerController.h"
+#include "Player/FSPlayerState.h"
 #include "Camera/PlayerCameraManager.h"
 #include "EnhancedInputComponent.h"
 #include "InputActionValue.h"
@@ -36,6 +38,8 @@ AFSCharacter::AFSCharacter(const FObjectInitializer& ObjectInitializer)
 	FollowCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("FollowCamera"));
 	FollowCamera->SetupAttachment(CameraBoom, USpringArmComponent::SocketName);
 	FollowCamera->bUsePawnControlRotation = false;
+
+	Equipment = CreateDefaultSubobject<UFSEquipmentComponent>(TEXT("Equipment"));
 }
 
 // Called when the game starts or when spawned
@@ -65,6 +69,8 @@ void AFSCharacter::SetMaxLookPitch(float NewMaxLookPitch)
 
 void AFSCharacter::SetInventoryViewBonesHidden(bool bHide)
 {
+	Equipment->SetMeshesHidden(bHide);
+
 	for (const FName& Bone : InventoryViewHiddenBones)
 	{
 		if (bHide)
@@ -116,6 +122,25 @@ void AFSCharacter::NotifyControllerChanged()
 	ApplyLookPitchLimits();
 }
 
+void AFSCharacter::OnPlayerStateChanged(APlayerState* NewPlayerState, APlayerState* OldPlayerState)
+{
+	Super::OnPlayerStateChanged(NewPlayerState, OldPlayerState);
+
+	const AFSPlayerState* FSPlayerState = Cast<AFSPlayerState>(NewPlayerState);
+	Equipment->SetInventory(FSPlayerState ? FSPlayerState->GetInventory() : nullptr);
+}
+
+void AFSCharacter::OnMovementModeChanged(EMovementMode PrevMovementMode, uint8 PreviousCustomMode)
+{
+	Super::OnMovementModeChanged(PrevMovementMode, PreviousCustomMode);
+
+	const UFSCharacterMovementComponent* Movement = GetCharacterMovement<UFSCharacterMovementComponent>();
+	if (Movement && Movement->IsClimbing())
+	{
+		Equipment->Sheathe();
+	}
+}
+
 void AFSCharacter::ApplyLookPitchLimits() const
 {
 	// The camera manager clamps pitch every frame when processing view rotation
@@ -153,6 +178,11 @@ void AFSCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompone
 		EnhancedInput->BindAction(JumpAction, ETriggerEvent::Started, this, &AFSCharacter::JumpOrLetGo);
 		EnhancedInput->BindAction(JumpAction, ETriggerEvent::Completed, this, &ACharacter::StopJumping);
 	}
+
+	if (ToggleDrawnAction)
+	{
+		EnhancedInput->BindAction(ToggleDrawnAction, ETriggerEvent::Started, this, &AFSCharacter::ToggleWeaponsDrawn);
+	}
 }
 
 void AFSCharacter::Move(const FInputActionValue& Value)
@@ -182,6 +212,11 @@ void AFSCharacter::Look(const FInputActionValue& Value)
 
 	AddControllerYawInput(Input.X * LookSpeed);
 	AddControllerPitchInput(Input.Y * LookSpeed);
+}
+
+void AFSCharacter::ToggleWeaponsDrawn()
+{
+	Equipment->ToggleDrawn();
 }
 
 void AFSCharacter::JumpOrLetGo()

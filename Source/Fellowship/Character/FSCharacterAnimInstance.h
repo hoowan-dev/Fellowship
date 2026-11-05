@@ -10,7 +10,11 @@
 /**
  * 
  */
+class UAnimSequenceBase;
 class UFSCharacterMovementComponent;
+class UFSEquipmentComponent;
+class UPoseSearchDatabase;
+struct FAnimNode_MotionMatching;
 
 UCLASS()
 class FELLOWSHIP_API UFSCharacterAnimInstance : public UAnimInstance
@@ -47,10 +51,32 @@ class FELLOWSHIP_API UFSCharacterAnimInstance : public UAnimInstance
 	UPROPERTY(Transient, BlueprintReadOnly, Category = "Climbing", meta = (AllowPrivateAccess = "true"))
 	float ClimbSurfaceLean = 0.0f;
 
+	UPROPERTY(Transient, BlueprintReadOnly, Category = "Equipment", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UAnimSequenceBase> JumpStart;
+
+	UPROPERTY(Transient, BlueprintReadOnly, Category = "Equipment", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UAnimSequenceBase> JumpAir;
+
+	UPROPERTY(Transient, BlueprintReadOnly, Category = "Equipment", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UAnimSequenceBase> JumpEnd;
+
 	UPROPERTY(Transient)
 	TObjectPtr<const UFSCharacterMovementComponent> MovementComponent;
+
+	UPROPERTY(Transient)
+	TObjectPtr<const UFSEquipmentComponent> Equipment;
+
+	// What the Motion Matching node was last told to search. Null until a stance with a database applies, when the node uses the database set on it.
+	UPROPERTY(Transient)
+	TObjectPtr<UPoseSearchDatabase> MotionMatchingDatabase;
+
+	// Part of this instance. Null if the Anim Blueprint has no Motion Matching node.
+	FAnimNode_MotionMatching* MotionMatchingNode = nullptr;
 
 public:
 	virtual void NativeInitializeAnimation() override;
 	virtual void NativeUpdateAnimation(float DeltaSeconds) override;
+
+	FORCEINLINE const UPoseSearchDatabase* GetMotionMatchingDatabase() const { return MotionMatchingDatabase; }
+	FORCEINLINE bool HasMotionMatchingNode() const { return MotionMatchingNode != nullptr; }
 };

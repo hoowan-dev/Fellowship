@@ -20,6 +20,15 @@ enum class EFSItemPlacement : uint8
 	Swap
 };
 
+UENUM()
+enum class EFSHand : uint8
+{
+	Left,
+	Right
+};
+
+DECLARE_MULTICAST_DELEGATE(FFSOnHandItemsChanged);
+
 USTRUCT()
 struct FELLOWSHIP_API FFSInventoryItem
 {
@@ -42,7 +51,7 @@ struct FELLOWSHIP_API FFSInventoryItem
 
 /**
  * The items a player owns. Lives on the player state, so it outlasts the character.
- * One item at a time can be carried on the cursor: a carried item covers no cells and isn't in GetItems().
+ * One item at a time can be carried on the cursor, and each hand can hold one. Those items cover no cells and aren't in GetItems().
  */
 UCLASS(ClassGroup = (Inventory), meta = (BlueprintSpawnableComponent))
 class FELLOWSHIP_API UFSInventoryComponent : public UActorComponent
@@ -86,6 +95,14 @@ public:
 	// Only meaningful while IsCarryingItem is true
 	FORCEINLINE const FFSInventoryItem& GetCarriedItem() const { return CarriedItem; }
 
+	// Puts the carried item in a hand, and what the hand held becomes the carried item. Returns false, changing nothing, if both are empty.
+	bool SwapCarriedItemWithHand(EFSHand Hand);
+
+	// What a hand holds. Its definition is null if the hand is empty.
+	FORCEINLINE const FFSInventoryItem& GetHandItem(EFSHand Hand) const { return HandItems[static_cast<int32>(Hand)]; }
+
+	FFSOnHandItemsChanged OnHandItemsChanged;
+
 	FORCEINLINE const FFSInventoryGrid& GetGrid() const { return Grid; }
 	FORCEINLINE const TArray<FFSInventoryItem>& GetItems() const { return Items; }
 
@@ -107,6 +124,9 @@ private:
 
 	UPROPERTY(Transient)
 	FFSInventoryItem CarriedItem;
+
+	UPROPERTY(Transient)
+	FFSInventoryItem HandItems[2];
 
 	int32 NextItemId = 0;
 };

@@ -13,6 +13,7 @@ class UFSInventoryComponent;
 class UInputAction;
 class UInputMappingContext;
 struct FFSInventoryItem;
+enum class EFSHand : uint8;
 
 UENUM()
 enum class EFSInventoryViewState : uint8
@@ -102,6 +103,9 @@ public:
 
 	// What selecting a cell does in the open inventory: picks up the item there or places the carried one. INDEX_NONE means outside the grid, which tosses the carried item.
 	void SelectInventoryCell(const FIntPoint& Cell);
+
+	// What selecting a hand's cell does in the open inventory: puts the carried item in that hand, taking what it held onto the cursor
+	void SelectInventoryHand(EFSHand Hand);
 
 	// Turns the carried item a quarter turn clockwise, if the inventory is open and an item is carried
 	void RotateCarriedInventoryItem();

@@ -126,6 +126,22 @@ void UFSInventoryComponent::ClearCarriedItem()
 	CarriedItem = FFSInventoryItem();
 }
 
+bool UFSInventoryComponent::SwapCarriedItemWithHand(EFSHand Hand)
+{
+	FFSInventoryItem& HandItem = HandItems[static_cast<int32>(Hand)];
+	if (!IsCarryingItem() && !HandItem.Definition)
+	{
+		return false;
+	}
+
+	// Hands always show an item upright
+	CarriedItem.Rotation = 0;
+	Swap(CarriedItem, HandItem);
+
+	OnHandItemsChanged.Broadcast();
+	return true;
+}
+
 void UFSInventoryComponent::LiftItem(int32 ItemId)
 {
 	const int32 ItemIndex = Items.IndexOfByPredicate([ItemId](const FFSInventoryItem& Item) { return Item.Id == ItemId; });

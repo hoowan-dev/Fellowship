@@ -112,6 +112,20 @@ AFSInventoryRig::AFSInventoryRig()
 	HandSlots->SetCastShadow(false);
 	HandSlots->SetCanEverAffectNavigation(false);
 
+	const auto CreateHandItemMesh = [this](const FName Name)
+	{
+		UStaticMeshComponent* Mesh = CreateDefaultSubobject<UStaticMeshComponent>(Name);
+		Mesh->SetupAttachment(Grid);
+		Mesh->SetMobility(EComponentMobility::Movable);
+		Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Mesh->SetCastShadow(false);
+		Mesh->SetCanEverAffectNavigation(false);
+		return Mesh;
+	};
+
+	LeftHandItemMesh = CreateHandItemMesh(TEXT("LeftHandItemMesh"));
+	RightHandItemMesh = CreateHandItemMesh(TEXT("RightHandItemMesh"));
+
 	Arms = CreateDefaultSubobject<UPoseableMeshComponent>(TEXT("Arms"));
 	Arms->SetupAttachment(Display);
 	Arms->SetMobility(EComponentMobility::Movable);
@@ -152,6 +166,8 @@ void AFSInventoryRig::BeginPlay()
 	ItemBorders->SetFirstPersonPrimitiveType(EFirstPersonPrimitiveType::FirstPerson);
 	CarriedItemMesh->SetFirstPersonPrimitiveType(EFirstPersonPrimitiveType::FirstPerson);
 	HandSlots->SetFirstPersonPrimitiveType(EFirstPersonPrimitiveType::FirstPerson);
+	LeftHandItemMesh->SetFirstPersonPrimitiveType(EFirstPersonPrimitiveType::FirstPerson);
+	RightHandItemMesh->SetFirstPersonPrimitiveType(EFirstPersonPrimitiveType::FirstPerson);
 	Arms->SetFirstPersonPrimitiveType(EFirstPersonPrimitiveType::FirstPerson);
 
 	CursorLight->SetIntensity(CursorLightIntensity);
@@ -220,6 +236,11 @@ void AFSInventoryRig::BuildHandSlots()
 		const FVector2D Centre = GetHandSlotCentre(HandSlot);
 		HandSlots->AddInstance(FTransform(FacingCamera, FVector(0.0, Centre.X, Centre.Y), SlotScale));
 	}
+}
+
+EFSHand AFSInventoryRig::GetHandOfSlot(int32 HandSlot)
+{
+	return HandSlot == LeftHandSlot ? EFSHand::Left : EFSHand::Right;
 }
 
 FVector2D AFSInventoryRig::GetHandSlotCentre(int32 HandSlot) const
@@ -317,6 +338,7 @@ void AFSInventoryRig::ShowInventory(const UFSInventoryComponent& Inventory)
 {
 	// The items may have moved since the last highlight, and rebuilding the grid would invalidate it
 	SetHoveredCell(FIntPoint(INDEX_NONE, INDEX_NONE));
+	SetHoveredHandSlot(INDEX_NONE);
 	ShownInventory = &Inventory;
 
 	const FIntPoint& Size = Inventory.GetGrid().GetSize();
@@ -377,6 +399,15 @@ void AFSInventoryRig::ShowInventory(const UFSInventoryComponent& Inventory)
 	}
 
 	CarriedItemMesh->SetStaticMesh(Inventory.IsCarryingItem() ? Inventory.GetCarriedItem().Definition->Mesh.Get() : nullptr);
+
+	for (int32 HandSlot = 0; HandSlot < HandSlotCount; ++HandSlot)
+	{
+		const FFSInventoryItem& Item = Inventory.GetHandItem(GetHandOfSlot(HandSlot));
+		UStaticMeshComponent* HandItemMesh = GetHandItemMesh(HandSlot);
+
+		HandItemMesh->SetStaticMesh(Item.Definition ? Item.Definition->Mesh.Get() : nullptr);
+		HandItemMesh->SetRelativeTransform(GetHandItemTransform(Item, HandSlot));
+	}
 }
 
 void AFSInventoryRig::AddItemBorder(const FFSInventoryItem& Item)
@@ -406,6 +437,28 @@ void AFSInventoryRig::AddItemBorder(const FFSInventoryItem& Item)
 	AddBar(CentreY, Top - Height + Thickness * 0.5, Width, Thickness);
 	AddBar(Left + Thickness * 0.5, CentreZ, Thickness, Height - Thickness * 2.0);
 	AddBar(Left + Width - Thickness * 0.5, CentreZ, Thickness, Height - Thickness * 2.0);
+}
+
+FTransform AFSInventoryRig::GetHandItemTransform(const FFSInventoryItem& Item, int32 HandSlot) const
+{
+	const UStaticMesh* Mesh = Item.Definition ? Item.Definition->Mesh : nullptr;
+	if (!Mesh)
+	{
+		return FTransform::Identity;
+	}
+
+	const FBoxSphereBounds Bounds = Mesh->GetBounds();
+	const FQuat Upright = Item.Definition->InventoryMeshRotation.Quaternion();
+
+	// The size of the mesh once it's upright, where Y is its width on screen and Z its height
+	const FVector UprightSize = FBox(-Bounds.BoxExtent, Bounds.BoxExtent).TransformBy(FTransform(Upright)).GetSize();
+	const double Scale = ItemFillFraction * HandSlotSize / FMath::Max3(UprightSize.Y, UprightSize.Z, static_cast<double>(UE_KINDA_SMALL_NUMBER));
+
+	// The back of the mesh rests just in front of the cell, as it does on the grid
+	const FVector2D SlotCentre = GetHandSlotCentre(HandSlot);
+	const FVector Centre(-(UprightSize.X * Scale * 0.5 + 0.1), SlotCentre.X, SlotCentre.Y);
+
+	return FTransform(Upright, Centre - Upright.RotateVector(Bounds.Origin * Scale), FVector(Scale));
 }
 
 FTransform AFSInventoryRig::GetItemTransform(const FFSInventoryItem& Item) const
@@ -544,6 +597,52 @@ bool AFSInventoryRig::GetCellFromWorldRay(const FVector& RayOrigin, const FVecto
 
 	OutCell = Cell;
 	return true;
+}
+
+bool AFSInventoryRig::GetHandSlotFromWorldRay(const FVector& RayOrigin, const FVector& RayDirection, int32& OutHandSlot) const
+{
+	FVector2D GridPoint;
+	if (!GetGridPointFromWorldRay(RayOrigin, RayDirection, GridPoint))
+	{
+		return false;
+	}
+
+	for (int32 HandSlot = 0; HandSlot < HandSlotCount; ++HandSlot)
+	{
+		const FVector2D FromCentre = GridPoint - GetHandSlotCentre(HandSlot);
+		if (FMath::Abs(FromCentre.X) <= HandSlotSize * 0.5 && FMath::Abs(FromCentre.Y) <= HandSlotSize * 0.5)
+		{
+			OutHandSlot = HandSlot;
+			return true;
+		}
+	}
+
+	return false;
+}
+
+void AFSInventoryRig::SetHoveredHandSlot(int32 HandSlot)
+{
+	if (HoveredHandSlot != INDEX_NONE)
+	{
+		HandSlots->SetCustomDataValue(HoveredHandSlot, HoveredHandSlotData, 0.0f, true);
+	}
+
+	HoveredHandSlot = HandSlot;
+
+	if (HandSlot == INDEX_NONE)
+	{
+		return;
+	}
+
+	const UFSInventoryComponent* Inventory = ShownInventory.Get();
+	HoveredHandSlotData = CellHoveredData;
+
+	if (Inventory && Inventory->IsCarryingItem())
+	{
+		HoveredHandSlotData = Inventory->GetHandItem(GetHandOfSlot(HandSlot)).Definition ? CellCanSwapData : CellCanPlaceData;
+	}
+
+	HandSlots->SetCustomDataValue(HandSlot, HoveredHandSlotData, 1.0f, true);
 }
 
 FIntPoint AFSInventoryRig::GetCellFromGridPoint(const FVector2D& GridPoint) const
