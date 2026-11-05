@@ -51,7 +51,7 @@ public:
 
 protected:
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory", meta = (ClampMin = "1"))
-	FIntPoint GridSize = FIntPoint(8, 8);
+	FIntPoint GridSize = FIntPoint(12, 8);
 
 	virtual void InitializeComponent() override;
 

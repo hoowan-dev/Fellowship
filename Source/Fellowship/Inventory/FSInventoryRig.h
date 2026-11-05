@@ -89,7 +89,7 @@ protected:
 	TObjectPtr<UInstancedStaticMeshComponent> ItemBorders;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Grid", meta = (ClampMin = "0.1", Units = cm))
-	float CellSize = 4.0f;
+	float CellSize = 3.0f;
 
 	// From the camera to the grid
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Grid", meta = (ClampMin = "1.0", Units = cm))

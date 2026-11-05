@@ -25,7 +25,7 @@ namespace
 	const FIntPoint SwordSize(2, 6);
 
 	// Matches the rig's defaults
-	constexpr double CellSize = 4.0;
+	constexpr double RigCellSize = 4.0;
 	constexpr int32 RigGridSize = 8;
 
 	UFSItemDefinition* MakeItem(const FIntPoint& Size, UStaticMesh* Mesh = nullptr)
@@ -229,22 +229,22 @@ bool FFSInventoryRigItemsTest::RunTest(const FString& Parameters)
 
 	const FBoxSphereBounds Bounds = Cube->GetBounds();
 	const FBox MeshBox(Bounds.Origin - Bounds.BoxExtent, Bounds.Origin + Bounds.BoxExtent);
-	const double HalfGrid = RigGridSize * CellSize * 0.5;
+	const double HalfGrid = RigGridSize * RigCellSize * 0.5;
 
 	const FBox Upright = MeshBox.TransformBy(Rig->GetItemTransform(Item));
 	const FVector UprightCentre = Upright.GetCenter();
-	TestEqual(TEXT("Centred across cells 1 and 2"), UprightCentre.Y, 2.0 * CellSize - HalfGrid, 0.01);
-	TestEqual(TEXT("Centred down cells 2 to 7"), UprightCentre.Z, HalfGrid - 5.0 * CellSize, 0.01);
-	TestTrue(TEXT("Narrower than two cells"), Upright.GetSize().Y <= 2.0 * CellSize);
-	TestTrue(TEXT("Shorter than six cells"), Upright.GetSize().Z <= 6.0 * CellSize);
+	TestEqual(TEXT("Centred across cells 1 and 2"), UprightCentre.Y, 2.0 * RigCellSize - HalfGrid, 0.01);
+	TestEqual(TEXT("Centred down cells 2 to 7"), UprightCentre.Z, HalfGrid - 5.0 * RigCellSize, 0.01);
+	TestTrue(TEXT("Narrower than two cells"), Upright.GetSize().Y <= 2.0 * RigCellSize);
+	TestTrue(TEXT("Shorter than six cells"), Upright.GetSize().Z <= 6.0 * RigCellSize);
 	TestTrue(TEXT("In front of the grid"), Upright.Max.X < 0.0);
 
 	Item.Cell = FIntPoint(0, 6);
 	Item.Rotation = 1;
 	const FTransform SidewaysTransform = Rig->GetItemTransform(Item);
 	const FBox Sideways = MeshBox.TransformBy(SidewaysTransform);
-	TestEqual(TEXT("Centred across cells 0 to 5"), Sideways.GetCenter().Y, 3.0 * CellSize - HalfGrid, 0.01);
-	TestEqual(TEXT("Centred down cells 6 and 7"), Sideways.GetCenter().Z, HalfGrid - 7.0 * CellSize, 0.01);
+	TestEqual(TEXT("Centred across cells 0 to 5"), Sideways.GetCenter().Y, 3.0 * RigCellSize - HalfGrid, 0.01);
+	TestEqual(TEXT("Centred down cells 6 and 7"), Sideways.GetCenter().Z, HalfGrid - 7.0 * RigCellSize, 0.01);
 	TestTrue(TEXT("A clockwise turn points the top of the item to the right"), SidewaysTransform.GetRotation().RotateVector(FVector::UpVector).Y > 0.99);
 
 	Test.Inventory->AddItem(MakeItem(SwordSize, Cube));
@@ -374,11 +374,11 @@ bool FFSInventoryRigBorderTest::RunTest(const FString& Parameters)
 		AllBars += Plane.TransformBy(Bar);
 	}
 
-	const double HalfGrid = RigGridSize * CellSize * 0.5;
+	const double HalfGrid = RigGridSize * RigCellSize * 0.5;
 	TestEqual(TEXT("Left edge of the cells"), AllBars.Min.Y, -HalfGrid, 0.01);
-	TestEqual(TEXT("Right edge of two cells"), AllBars.Max.Y, -HalfGrid + 2.0 * CellSize, 0.01);
+	TestEqual(TEXT("Right edge of two cells"), AllBars.Max.Y, -HalfGrid + 2.0 * RigCellSize, 0.01);
 	TestEqual(TEXT("Top edge of the cells"), AllBars.Max.Z, HalfGrid, 0.01);
-	TestEqual(TEXT("Bottom edge of six cells"), AllBars.Min.Z, HalfGrid - 6.0 * CellSize, 0.01);
+	TestEqual(TEXT("Bottom edge of six cells"), AllBars.Min.Z, HalfGrid - 6.0 * RigCellSize, 0.01);
 
 	return true;
 }
