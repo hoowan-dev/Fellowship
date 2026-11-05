@@ -128,6 +128,12 @@ public:
 	// The centre of a quick slot's cell on the plane of the grid, in cm from the grid's centre: X to the right and Y up
 	FVector2D GetQuickSlotCentre(int32 QuickSlot) const;
 
+	// The point in the world to centre a hand slot's name on, just above its cell
+	FVector GetHandSlotLabelLocation(int32 HandSlot) const;
+
+	// The point in the world to centre a quick slot's name on, just above its cell
+	FVector GetQuickSlotLabelLocation(int32 QuickSlot) const;
+
 protected:
 	virtual void BeginPlay() override;
 
@@ -146,6 +152,7 @@ protected:
 	FTransform GetItemTransformAt(const FFSInventoryItem& Item, const FVector2D& TopLeft) const;
 	void HighlightCells(TArray<FIntPoint>&& Cells, int32 CellData);
 	FTransform GetSlotItemTransform(const FFSInventoryItem& Item, const FVector2D& SlotCentre, double SlotSize) const;
+	FVector GetSlotLabelLocation(const FVector2D& SlotCentre, double SlotSize) const;
 
 	// Moves a highlight between the cells of one kind of slot. Hovered and HoveredData are that kind's record of what it has set.
 	void SetHoveredSlot(UInstancedStaticMeshComponent& Slots, int32& Hovered, int32& HoveredData, int32 NewHovered, bool bNewHoveredTaken);

@@ -1,12 +1,25 @@
 // Copyright HoowanDev 2026 all rights reserved.
 
 #include "FSInventoryComponent.h"
+#include "Game/FSEventLog.h"
 #include "Inventory/FSItemDefinition.h"
+
+#define LOCTEXT_NAMESPACE "FSInventoryComponent"
 
 UFSInventoryComponent::UFSInventoryComponent()
 {
 	bWantsInitializeComponent = true;
 	PrimaryComponentTick.bCanEverTick = false;
+}
+
+FText UFSInventoryComponent::GetHandSlotName(EFSHand Hand)
+{
+	return Hand == EFSHand::Left ? LOCTEXT("LeftHandSlot", "Left Hand") : LOCTEXT("RightHandSlot", "Right Hand");
+}
+
+FText UFSInventoryComponent::GetQuickSlotName(EFSQuickSlot QuickSlot)
+{
+	return QuickSlot == EFSQuickSlot::Left ? LOCTEXT("LeftQuickSlot", "Left Quick Slot") : LOCTEXT("RightQuickSlot", "Right Quick Slot");
 }
 
 void UFSInventoryComponent::InitializeComponent()
@@ -128,7 +141,7 @@ void UFSInventoryComponent::ClearCarriedItem()
 
 bool UFSInventoryComponent::SwapCarriedItemWithHand(EFSHand Hand)
 {
-	if (!SwapCarriedItemWith(HandItems[static_cast<int32>(Hand)]))
+	if (!SwapCarriedItemWith(HandItems[static_cast<int32>(Hand)], GetHandSlotName(Hand)))
 	{
 		return false;
 	}
@@ -139,10 +152,10 @@ bool UFSInventoryComponent::SwapCarriedItemWithHand(EFSHand Hand)
 
 bool UFSInventoryComponent::SwapCarriedItemWithQuickSlot(EFSQuickSlot QuickSlot)
 {
-	return SwapCarriedItemWith(QuickSlotItems[static_cast<int32>(QuickSlot)]);
+	return SwapCarriedItemWith(QuickSlotItems[static_cast<int32>(QuickSlot)], GetQuickSlotName(QuickSlot));
 }
 
-bool UFSInventoryComponent::SwapCarriedItemWith(FFSInventoryItem& HeldItem)
+bool UFSInventoryComponent::SwapCarriedItemWith(FFSInventoryItem& HeldItem, const FText& SlotName)
 {
 	if (!IsCarryingItem() && !HeldItem.Definition)
 	{
@@ -152,6 +165,17 @@ bool UFSInventoryComponent::SwapCarriedItemWith(FFSInventoryItem& HeldItem)
 	// Hands and quick slots always show an item upright
 	CarriedItem.Rotation = 0;
 	Swap(CarriedItem, HeldItem);
+
+	// What was held is now on the cursor
+	if (IsCarryingItem())
+	{
+		UFSEventLog::Add(this, FText::Format(LOCTEXT("UnequippedEvent", "Unequipped {0} from {1}"), CarriedItem.Definition->DisplayName, SlotName));
+	}
+
+	if (HeldItem.Definition)
+	{
+		UFSEventLog::Add(this, FText::Format(LOCTEXT("EquippedEvent", "Equipped {0} to {1}"), HeldItem.Definition->DisplayName, SlotName));
+	}
 
 	return true;
 }
@@ -165,3 +189,5 @@ void UFSInventoryComponent::LiftItem(int32 ItemId)
 	Items.RemoveAt(ItemIndex);
 	Grid.Remove(ItemId);
 }
+
+#undef LOCTEXT_NAMESPACE

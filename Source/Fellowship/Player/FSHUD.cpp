@@ -12,6 +12,7 @@
 #include "Game/FSEventLog.h"
 #include "GlobalRenderResources.h"
 #include "Inventory/FSInventoryComponent.h"
+#include "Inventory/FSInventoryRig.h"
 #include "Inventory/FSItemDefinition.h"
 #include "Inventory/FSItemPickup.h"
 #include "Player/FSEquipmentDisplay.h"
@@ -69,7 +70,7 @@ namespace
 		return EventLogVisibleLines * Font.GetMaxCharHeight() + EventLogPadding * 2.0f;
 	}
 
-	// From the bottom of a circle to the middle of the name beneath it
+	// From the edge of a circle to the middle of the name above or beneath it
 	constexpr float EquipmentSlotNameOffset = 16.0f;
 
 	constexpr int32 RingSides = 64;
@@ -89,6 +90,7 @@ void AFSHUD::DrawHUD()
 	Super::DrawHUD();
 
 	DrawEquipmentSlots();
+	DrawInventorySlotNames();
 	DrawPickupPrompt();
 	DrawHoveredItemName();
 	DrawStatBars();
@@ -112,20 +114,59 @@ void AFSHUD::DrawEquipmentSlots()
 		return Item ? Item->DisplayName : FText::GetEmpty();
 	};
 
-	DrawEquipmentSlot(AFSEquipmentDisplay::GetSlotCentre(ViewportSize, EFSEquipmentSlot::LeftQuickSlot), GetItemName(Inventory->GetQuickSlotItem(EFSQuickSlot::Left)));
-	DrawEquipmentSlot(AFSEquipmentDisplay::GetSlotCentre(ViewportSize, EFSEquipmentSlot::LeftHand), GetItemName(Inventory->GetHandItem(EFSHand::Left)));
-	DrawEquipmentSlot(AFSEquipmentDisplay::GetSlotCentre(ViewportSize, EFSEquipmentSlot::Backpack), LOCTEXT("BackpackSlot", "Backpack"));
-	DrawEquipmentSlot(AFSEquipmentDisplay::GetSlotCentre(ViewportSize, EFSEquipmentSlot::RightHand), GetItemName(Inventory->GetHandItem(EFSHand::Right)));
-	DrawEquipmentSlot(AFSEquipmentDisplay::GetSlotCentre(ViewportSize, EFSEquipmentSlot::RightQuickSlot), GetItemName(Inventory->GetQuickSlotItem(EFSQuickSlot::Right)));
+	DrawEquipmentSlot(AFSEquipmentDisplay::GetSlotCentre(ViewportSize, EFSEquipmentSlot::LeftQuickSlot), GetItemName(Inventory->GetQuickSlotItem(EFSQuickSlot::Left)), UFSInventoryComponent::GetQuickSlotName(EFSQuickSlot::Left));
+	DrawEquipmentSlot(AFSEquipmentDisplay::GetSlotCentre(ViewportSize, EFSEquipmentSlot::LeftHand), GetItemName(Inventory->GetHandItem(EFSHand::Left)), UFSInventoryComponent::GetHandSlotName(EFSHand::Left));
+
+	const FText BackpackName = LOCTEXT("BackpackSlot", "Backpack");
+	DrawEquipmentSlot(AFSEquipmentDisplay::GetSlotCentre(ViewportSize, EFSEquipmentSlot::Backpack), BackpackName, BackpackName);
+
+	DrawEquipmentSlot(AFSEquipmentDisplay::GetSlotCentre(ViewportSize, EFSEquipmentSlot::RightHand), GetItemName(Inventory->GetHandItem(EFSHand::Right)), UFSInventoryComponent::GetHandSlotName(EFSHand::Right));
+	DrawEquipmentSlot(AFSEquipmentDisplay::GetSlotCentre(ViewportSize, EFSEquipmentSlot::RightQuickSlot), GetItemName(Inventory->GetQuickSlotItem(EFSQuickSlot::Right)), UFSInventoryComponent::GetQuickSlotName(EFSQuickSlot::Right));
 }
 
-void AFSHUD::DrawEquipmentSlot(const FVector2D& Centre, const FText& Name)
+void AFSHUD::DrawEquipmentSlot(const FVector2D& Centre, const FText& Name, const FText& SlotName)
 {
 	DrawShadedRing(Centre, AFSEquipmentDisplay::SlotRadius);
 
+	const double NameDistance = AFSEquipmentDisplay::SlotRadius + BorderThickness + EquipmentSlotNameOffset;
+
 	if (!Name.IsEmpty())
 	{
-		DrawCentredText(Name.ToString(), Centre + FVector2D(0.0, AFSEquipmentDisplay::SlotRadius + BorderThickness + EquipmentSlotNameOffset));
+		DrawCentredText(Name.ToString(), Centre + FVector2D(0.0, NameDistance));
+	}
+
+	DrawCentredText(SlotName.ToString(), Centre - FVector2D(0.0, NameDistance));
+}
+
+void AFSHUD::DrawInventorySlotNames()
+{
+	const AFSPlayerController* PlayerController = Cast<AFSPlayerController>(GetOwningPlayerController());
+	const AFSInventoryRig* Rig = PlayerController ? PlayerController->GetInventoryRig() : nullptr;
+
+	// The grid and its cells are only there once the inventory has finished opening
+	if (!Rig || PlayerController->GetInventoryViewState() != EFSInventoryViewState::Open)
+	{
+		return;
+	}
+
+	const auto DrawSlotName = [this](const FText& SlotName, const FVector& Location)
+	{
+		// Z is not positive when the point is behind the camera
+		const FVector ScreenLocation = Project(Location);
+		if (ScreenLocation.Z > 0.0)
+		{
+			DrawCentredText(SlotName.ToString(), FVector2D(ScreenLocation.X, ScreenLocation.Y));
+		}
+	};
+
+	for (int32 HandSlot = 0; HandSlot < AFSInventoryRig::HandSlotCount; ++HandSlot)
+	{
+		DrawSlotName(UFSInventoryComponent::GetHandSlotName(AFSInventoryRig::GetHandOfSlot(HandSlot)), Rig->GetHandSlotLabelLocation(HandSlot));
+	}
+
+	for (int32 QuickSlot = 0; QuickSlot < AFSInventoryRig::QuickSlotCount; ++QuickSlot)
+	{
+		DrawSlotName(UFSInventoryComponent::GetQuickSlotName(AFSInventoryRig::GetQuickSlotOfIndex(QuickSlot)), Rig->GetQuickSlotLabelLocation(QuickSlot));
 	}
 }
 

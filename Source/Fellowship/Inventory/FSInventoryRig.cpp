@@ -56,6 +56,9 @@ namespace
 	// A carried item is never pulled closer to the camera than this fraction of the way
 	constexpr double MinCarriedItemPull = 0.2;
 
+	// From the top of a slot's cell to the middle of its name. Half the default gap between the grid and the quick slots, so their names sit in that gap.
+	constexpr double SlotLabelHeight = 0.75;
+
 	bool IsPointInSlot(const FVector2D& Point, const FVector2D& SlotCentre, double SlotSize)
 	{
 		const FVector2D FromCentre = Point - SlotCentre;
@@ -300,6 +303,23 @@ FVector2D AFSInventoryRig::GetQuickSlotCentre(int32 QuickSlot) const
 	return FVector2D(
 		QuickSlot == LeftQuickSlot ? -FromMiddle : FromMiddle,
 		-(GridHeight * CellSize * 0.5 + QuickSlotGap + QuickSlotSize * 0.5));
+}
+
+FVector AFSInventoryRig::GetHandSlotLabelLocation(int32 HandSlot) const
+{
+	return GetSlotLabelLocation(GetHandSlotCentre(HandSlot), HandSlotSize);
+}
+
+FVector AFSInventoryRig::GetQuickSlotLabelLocation(int32 QuickSlot) const
+{
+	return GetSlotLabelLocation(GetQuickSlotCentre(QuickSlot), QuickSlotSize);
+}
+
+FVector AFSInventoryRig::GetSlotLabelLocation(const FVector2D& SlotCentre, double SlotSize) const
+{
+	// On the plane of the grid, where the first person scale leaves things in the same place on screen
+	const FVector OnGrid(GridDistance, SlotCentre.X, SlotCentre.Y + SlotSize * 0.5 + SlotLabelHeight);
+	return Display->GetComponentTransform().TransformPositionNoScale(OnGrid);
 }
 
 void AFSInventoryRig::PoseArms()

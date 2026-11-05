@@ -916,6 +916,64 @@ bool FFSItemEventLogTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSEquipEventLogTest, "Fellowship.Inventory.Component.LogsEquippingAndUnequipping", TestFlags)
+
+bool FFSEquipEventLogTest::RunTest(const FString& Parameters)
+{
+	FInventoryTestWorld Test;
+	const TArray<FText>& Events = Test.World->GetSubsystem<UFSEventLog>()->GetEvents();
+	UFSInventoryComponent* Inventory = Test.Inventory;
+
+	const auto LastEvent = [&Events]()
+	{
+		return Events.IsEmpty() ? FString() : Events.Last().ToString();
+	};
+
+	UFSItemDefinition* Sword = MakeItem(SwordSize);
+	Sword->DisplayName = FText::FromString(TEXT("Sword"));
+	UFSItemDefinition* Apple = MakeItem(FIntPoint(1, 1));
+	Apple->DisplayName = FText::FromString(TEXT("Apple"));
+
+	Inventory->SwapCarriedItemWithHand(EFSHand::Left);
+	Inventory->SwapCarriedItemWithQuickSlot(EFSQuickSlot::Left);
+	TestEqual(TEXT("Swapping nothing with nothing isn't logged"), Events.Num(), 0);
+
+	const auto TestSlot = [this, Inventory, Sword, &Events, &LastEvent](const FString& SlotName, TFunctionRef<void()> Swap)
+	{
+		const int32 EventsBefore = Events.Num();
+
+		Inventory->CarryNewItem(Sword);
+		Swap();
+		TestEqual(SlotName + TEXT(": equipping is one event"), Events.Num(), EventsBefore + 1);
+		TestEqual(SlotName + TEXT(": equipping names the item and slot"), LastEvent(), TEXT("Equipped Sword to ") + SlotName);
+
+		Swap();
+		TestEqual(SlotName + TEXT(": unequipping is one event"), Events.Num(), EventsBefore + 2);
+		TestEqual(SlotName + TEXT(": unequipping names the item and slot"), LastEvent(), TEXT("Unequipped Sword from ") + SlotName);
+
+		Inventory->ClearCarriedItem();
+	};
+
+	TestSlot(TEXT("Left Hand"), [Inventory]() { Inventory->SwapCarriedItemWithHand(EFSHand::Left); });
+	TestSlot(TEXT("Right Hand"), [Inventory]() { Inventory->SwapCarriedItemWithHand(EFSHand::Right); });
+	TestSlot(TEXT("Left Quick Slot"), [Inventory]() { Inventory->SwapCarriedItemWithQuickSlot(EFSQuickSlot::Left); });
+	TestSlot(TEXT("Right Quick Slot"), [Inventory]() { Inventory->SwapCarriedItemWithQuickSlot(EFSQuickSlot::Right); });
+
+	Inventory->CarryNewItem(Sword);
+	Inventory->SwapCarriedItemWithHand(EFSHand::Right);
+	Inventory->CarryNewItem(Apple);
+	const int32 EventsBeforeSwap = Events.Num();
+	Inventory->SwapCarriedItemWithHand(EFSHand::Right);
+
+	if (TestEqual(TEXT("Replacing an item is two events"), Events.Num(), EventsBeforeSwap + 2))
+	{
+		TestEqual(TEXT("The old item comes off first"), Events[EventsBeforeSwap].ToString(), FString(TEXT("Unequipped Sword from Right Hand")));
+		TestEqual(TEXT("Then the new one goes on"), Events[EventsBeforeSwap + 1].ToString(), FString(TEXT("Equipped Apple to Right Hand")));
+	}
+
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSInventoryRigPreviewTest, "Fellowship.Inventory.Rig.PreviewsWhereTheCarriedItemGoes", TestFlags)
 
 bool FFSInventoryRigPreviewTest::RunTest(const FString& Parameters)

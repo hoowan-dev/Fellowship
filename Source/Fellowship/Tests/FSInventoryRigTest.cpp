@@ -215,6 +215,38 @@ bool FFSInventoryRigQuickSlotsTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSInventoryRigSlotLabelsTest, "Fellowship.Inventory.Rig.PlacesSlotNamesAboveTheirCells", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FFSInventoryRigSlotLabelsTest::RunTest(const FString& Parameters)
+{
+	FInventoryRigTestWorld Test;
+
+	// Matches the rig's defaults
+	constexpr double HandSlotSize = 12.0;
+	constexpr double QuickSlotSize = 7.5;
+	constexpr double QuickSlotGap = 1.5;
+
+	// Where on the grid a location is seen, as a direction from the camera that can be compared to the point it should be over
+	const auto TestLabel = [this, &Test](const TCHAR* Name, const FVector& Location, const FVector2D& SlotCentre, double SlotSize)
+	{
+		const FVector Seen = (Location - Test.Rig->GetActorLocation()).GetSafeNormal();
+		const FVector2D Above = SlotCentre + FVector2D(0.0, SlotSize * 0.5 + 0.75);
+
+		TestTrue(FString::Printf(TEXT("%s: centred just above its cell"), Name), Seen.Equals(Test.DirectionToGridPoint(Above.X, Above.Y), 0.001));
+	};
+
+	TestLabel(TEXT("Left hand"), Test.Rig->GetHandSlotLabelLocation(AFSInventoryRig::LeftHandSlot), Test.Rig->GetHandSlotCentre(AFSInventoryRig::LeftHandSlot), HandSlotSize);
+	TestLabel(TEXT("Right hand"), Test.Rig->GetHandSlotLabelLocation(AFSInventoryRig::RightHandSlot), Test.Rig->GetHandSlotCentre(AFSInventoryRig::RightHandSlot), HandSlotSize);
+	TestLabel(TEXT("Left quick slot"), Test.Rig->GetQuickSlotLabelLocation(AFSInventoryRig::LeftQuickSlot), Test.Rig->GetQuickSlotCentre(AFSInventoryRig::LeftQuickSlot), QuickSlotSize);
+	TestLabel(TEXT("Right quick slot"), Test.Rig->GetQuickSlotLabelLocation(AFSInventoryRig::RightQuickSlot), Test.Rig->GetQuickSlotCentre(AFSInventoryRig::RightQuickSlot), QuickSlotSize);
+
+	// In the gap under the grid rather than over its bottom row
+	const double LabelUp = Test.Rig->GetQuickSlotCentre(AFSInventoryRig::LeftQuickSlot).Y + QuickSlotSize * 0.5 + 0.75;
+	TestEqual(TEXT("A quick slot's name is halfway between its cell and the grid"), LabelUp, -(GridSize * CellSize * 0.5 + QuickSlotGap * 0.5), 0.001);
+
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSInventoryRigArmsTest, "Fellowship.Inventory.Rig.PosesTheHandsBehindTheirCells", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FFSInventoryRigArmsTest::RunTest(const FString& Parameters)

@@ -26,8 +26,11 @@ private:
 	// Draws a circle at the bottom centre of the screen around each mesh of the equipment display, with what it holds named underneath
 	void DrawEquipmentSlots();
 
-	// Draws one of those circles, with an optional name underneath
-	void DrawEquipmentSlot(const FVector2D& Centre, const FText& Name);
+	// Draws one of those circles, with what it's for named above and what it holds named underneath, if anything.
+	void DrawEquipmentSlot(const FVector2D& Centre, const FText& Name, const FText& SlotName);
+
+	// Draws the name of each hand and quick slot above its cell in the open inventory
+	void DrawInventorySlotNames();
 
 	// Draws a shaded ring, whose radius doesn't include its thickness. It's empty in the middle because
 	// the HUD is drawn over the scene, so anything there would cover the mesh.

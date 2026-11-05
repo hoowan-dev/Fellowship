@@ -84,6 +84,9 @@ public:
 	FORCEINLINE AFSCharacter* GetFSCharacter() const { return FSCharacter; }
 	FORCEINLINE EFSInventoryViewState GetInventoryViewState() const { return InventoryViewState; }
 
+	// Null until the inventory has been opened for the first time
+	FORCEINLINE const AFSInventoryRig* GetInventoryRig() const { return InventoryRig; }
+
 	// This player's inventory, or null if the player state hasn't arrived yet
 	UFSInventoryComponent* GetInventory() const;
 

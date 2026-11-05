@@ -68,6 +68,12 @@ class FELLOWSHIP_API UFSInventoryComponent : public UActorComponent
 public:
 	UFSInventoryComponent();
 
+	// What the player sees a hand's slot called
+	static FText GetHandSlotName(EFSHand Hand);
+
+	// What the player sees a quick slot called
+	static FText GetQuickSlotName(EFSQuickSlot QuickSlot);
+
 	// Whether there's space for the item, in either orientation
 	bool CanAddItem(const UFSItemDefinition* Definition) const;
 
@@ -129,8 +135,9 @@ private:
 	// Moves an item from the grid to the cursor
 	void LiftItem(int32 ItemId);
 
-	// Swaps the carried item with one held outside the grid. Returns false, changing nothing, if both are empty.
-	bool SwapCarriedItemWith(FFSInventoryItem& HeldItem);
+	// Swaps the carried item with one held outside the grid, logging what's unequipped and equipped. SlotName is where it's held.
+	// Returns false, changing nothing, if both are empty.
+	bool SwapCarriedItemWith(FFSInventoryItem& HeldItem, const FText& SlotName);
 
 	UPROPERTY(Transient)
 	FFSInventoryGrid Grid;
