@@ -11,6 +11,7 @@ class UCameraComponent;
 class UFSInventoryComponent;
 class UFSItemDefinition;
 class UInstancedStaticMeshComponent;
+class UMaterialInstanceDynamic;
 class UMaterialInterface;
 class UPointLightComponent;
 class UPoseableMeshComponent;
@@ -95,7 +96,7 @@ public:
 
 	FORCEINLINE bool IsDropBackpackButtonHovered() const { return bDropBackpackButtonHovered; }
 
-	// Moves the light and the carried item to where the mouse points, given as a world space ray
+	// Moves the light and the carried item to where the mouse points, given as a world space ray. The carried item leans the way the point has been moving on tick.
 	void SetCursorRay(const FVector& RayOrigin, const FVector& RayDirection);
 
 	// Matches the pack, the grid, the item meshes, their borders and the carried item to what the inventory holds
@@ -129,6 +130,11 @@ public:
 	FORCEINLINE int32 GetHoveredQuickSlot() const { return HoveredQuickSlot; }
 	FORCEINLINE UPoseableMeshComponent* GetArms() const { return Arms; }
 	FORCEINLINE UStaticMeshComponent* GetPack() const { return Pack; }
+	FORCEINLINE UStaticMeshComponent* GetBackgroundDarkener() const { return BackgroundDarkener; }
+	FORCEINLINE UCameraComponent* GetViewCamera() const { return ViewCamera; }
+
+	// How far the carried item is leaning, in degrees: X to the right and Y up
+	FORCEINLINE const FVector2D& GetCarriedItemSway() const { return CarriedItemSway; }
 	FORCEINLINE UInstancedStaticMeshComponent* GetDropBackpackButton() const { return DropBackpackButton; }
 
 	// Whether the last inventory shown had a backpack, which is what the grid, quick slots and button belong to. True until one is shown.
@@ -179,6 +185,21 @@ protected:
 	FTransform GetSlotItemTransform(const FFSInventoryItem& Item, const FVector2D& SlotCentre, double SlotSize) const;
 	FVector GetSlotLabelLocation(const FVector2D& SlotCentre, double SlotSize) const;
 	FVector GetLocationOnGrid(const FVector2D& GridPoint) const;
+
+	// Starts the carried item's mesh turning from how it looked at its old rotation to how it should look at its current one
+	void StartCarriedItemTurn(const FFSInventoryItem& Item, uint8 OldRotation);
+
+	// Moves the sway on by a frame, or settles it if nothing's carried
+	void UpdateCarriedItemSway(float DeltaTime);
+
+	// Places the carried item's mesh under the cursor, leaning and part way through any turn
+	void UpdateCarriedItemMesh();
+
+	// Places the meshes of the items in the hands and quick slots, swaying about their cells
+	void UpdateSlotItemSway();
+
+	// The turn of a slot's item at this moment. Phase is how far ahead of the others it is, as a fraction of a sway.
+	FQuat GetSlotItemSwayRotation(double Phase) const;
 
 	// Moves a highlight between the cells of one kind of slot. Hovered and HoveredData are that kind's record of what it has set.
 	void SetHoveredSlot(UInstancedStaticMeshComponent& Slots, int32& Hovered, int32& HoveredData, int32 NewHovered, bool bNewHoveredTaken);
@@ -235,6 +256,10 @@ protected:
 	UPROPERTY(VisibleAnywhere, Category = "Inventory")
 	TObjectPtr<UInstancedStaticMeshComponent> DropBackpackButton;
 
+	// Fills the screen just behind the grid and everything on it, shading the arms, the pack and the world beyond them
+	UPROPERTY(VisibleAnywhere, Category = "Inventory")
+	TObjectPtr<UStaticMeshComponent> BackgroundDarkener;
+
 	// A copy of the character's mesh with its arms posed in the display's frame and the rest of its body shrunk away, since it's all one mesh
 	UPROPERTY(VisibleAnywhere, Category = "Inventory")
 	TObjectPtr<UPoseableMeshComponent> Arms;
@@ -270,6 +295,41 @@ protected:
 	// The gap between a carried item and the tallest item in the grid
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Grid", meta = (ClampMin = "0.01", Units = cm))
 	float CarriedItemClearance = 1.0f;
+
+	// How many degrees a carried item leans for each cm per second it's dragged at on the grid
+	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Carried Item", meta = (ClampMin = "0.0"))
+	float CarriedItemSwayPerSpeed = 0.25f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Carried Item", meta = (ClampMin = "0.0", ClampMax = "45.0", Units = deg))
+	float CarriedItemMaxSway = 18.0f;
+
+	// How hard a carried item is pulled towards the lean its speed calls for. Higher swings faster.
+	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Carried Item", meta = (ClampMin = "1.0", ClampMax = "1000.0"))
+	float CarriedItemSwayStiffness = 150.0f;
+
+	// How quickly a carried item's swinging dies down. Lower swings back and forth more times when it stops.
+	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Carried Item", meta = (ClampMin = "0.0", ClampMax = "60.0"))
+	float CarriedItemSwayDamping = 9.0f;
+
+	// How long a carried item takes to turn when it's rotated
+	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Carried Item", meta = (ClampMin = "0.01", Units = s))
+	float CarriedItemTurnTime = 0.15f;
+
+	// How far the items in the hands and quick slots turn each way as they sway
+	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Slot Items", meta = (ClampMin = "0.0", ClampMax = "45.0", Units = deg))
+	float SlotItemSwayAngle = 3.0f;
+
+	// How long the items in the hands and quick slots take to sway there and back
+	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Slot Items", meta = (ClampMin = "0.1", Units = s))
+	float SlotItemSwayPeriod = 3.5f;
+
+	// Unlit and translucent, with its opacity set through a scalar parameter named Darkness
+	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Background")
+	TObjectPtr<UMaterialInterface> BackgroundDarkenMaterial;
+
+	// How much of what's behind the grid is blocked out, once the grid has scaled in
+	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Background", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float BackgroundDarkness = 0.35f;
 
 	// How far in front of the grid the light under the mouse sits
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Cursor Light", meta = (ClampMin = "0.0", Units = cm))
@@ -391,4 +451,30 @@ private:
 
 	float GridScale = 0.0f;
 	float GridScaleTarget = 0.0f;
+
+	// Where the mouse last pointed on the plane of the grid, and where it was when the sway last looked
+	FVector2D CursorGridPoint = FVector2D::ZeroVector;
+	FVector2D SwayCursorGridPoint = FVector2D::ZeroVector;
+
+	FVector2D CarriedItemSway = FVector2D::ZeroVector;
+	FVector2D CarriedItemSwayVelocity = FVector2D::ZeroVector;
+
+	// The carried item ShowInventory last showed, used to tell when it's been rotated
+	TWeakObjectPtr<const UFSItemDefinition> ShownCarriedDefinition;
+	int32 ShownCarriedId = INDEX_NONE;
+	uint8 ShownCarriedRotation = 0;
+
+	// How far the carried item's mesh is from its proper place as a turn starts: an angle about the view and a move on the grid. It closes as the time runs out.
+	float CarriedItemTurnTimeLeft = 0.0f;
+	double CarriedItemTurnAngle = 0.0;
+	FVector CarriedItemTurnShift = FVector::ZeroVector;
+
+	// Where the items in the hands and quick slots sit, which they sway about
+	FTransform HandItemRests[HandSlotCount];
+	FTransform QuickSlotItemRests[QuickSlotCount];
+	double SlotItemSwayTime = 0.0;
+
+	// Made from BackgroundDarkenMaterial, so the rig can fade it
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInstanceDynamic> BackgroundDarkenInstance;
 };

@@ -21,6 +21,8 @@
 #include "Inventory/FSInventoryComponent.h"
 #include "Inventory/FSInventoryGrid.h"
 #include "Inventory/FSInventoryRig.h"
+#include "Materials/MaterialInstanceDynamic.h"
+#include "Camera/CameraComponent.h"
 #include "Inventory/FSItemDefinition.h"
 #include "Inventory/FSItemPickup.h"
 #include "Player/FSEquipmentDisplay.h"
@@ -1692,6 +1694,317 @@ bool FFSBackpackRigTest::RunTest(const FString& Parameters)
 	TestNull(TEXT("Dropping it removes the pack mesh"), Rig->GetPack()->GetStaticMesh().Get());
 	TestFalse(TEXT("And hides the grid again"), Rig->GetGrid()->GetVisibleFlag());
 	TestTrue(TEXT("But not the hands' cells"), Rig->GetHandSlots()->GetVisibleFlag());
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSInventoryRigCarriedSwayTest, "Fellowship.Inventory.Rig.CarriedItemSwaysTheWayItsDragged", TestFlags)
+
+bool FFSInventoryRigCarriedSwayTest::RunTest(const FString& Parameters)
+{
+	FInventoryTestWorld Test;
+	UFSInventoryComponent* Inventory = Test.Inventory;
+	AFSInventoryRig* Rig = Test.World->SpawnActor<AFSInventoryRig>();
+
+	UStaticMesh* Cube = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
+	if (!TestNotNull(TEXT("The test mesh loads"), Cube))
+	{
+		return false;
+	}
+
+	constexpr float Frame = 1.0f / 60.0f;
+
+	const auto PointAt = [Rig](const FVector2D& Point)
+	{
+		const FVector FromCamera = FRotator(-20.0, 0.0, 0.0).RotateVector(FVector(GridDistanceForTests, Point.X, Point.Y));
+		Rig->SetCursorRay(Rig->GetActorLocation(), Rig->GetActorRotation().RotateVector(FromCamera).GetSafeNormal());
+	};
+
+	// The mouse is already there when the item's picked up, as it is in play, so getting there doesn't count as dragging it
+	const FVector2D Start(-6.0, 3.0);
+	PointAt(Start);
+	Rig->Tick(Frame);
+
+	Inventory->AddItem(MakeItem(SwordSize, Cube));
+	Inventory->PickUpItemAt(FIntPoint(0, 0));
+	Rig->ShowInventory(*Inventory);
+	Rig->SetPackVisible(true);
+
+	const FFSInventoryItem Carried = Inventory->GetCarriedItem();
+	Rig->Tick(Frame);
+
+	UStaticMeshComponent* Mesh = Rig->GetCarriedItemMesh();
+
+	// How the mesh has been turned from how it would sit if it were still
+	const auto GetTurn = [Mesh, Rig, &Carried](const FVector2D& Point)
+	{
+		return Mesh->GetRelativeRotation().Quaternion() * Rig->GetCarriedItemTransform(Carried, Point).GetRotation().Inverse();
+	};
+
+	TestTrue(TEXT("Held still it doesn't lean"), Rig->GetCarriedItemSway().IsNearlyZero(0.001));
+	TestTrue(TEXT("And sits where it would without the sway"), Mesh->GetRelativeTransform().Equals(Rig->GetCarriedItemTransform(Carried, Start), 0.001));
+
+	// Dragged right
+	FVector2D Point = Start;
+	for (int32 Index = 0; Index < 6; ++Index)
+	{
+		Point.X += 1.0;
+		PointAt(Point);
+		Rig->Tick(Frame);
+	}
+
+	TestTrue(TEXT("Dragged right it leans right"), Rig->GetCarriedItemSway().X > 1.0);
+	TestEqual(TEXT("And no other way"), Rig->GetCarriedItemSway().Y, 0.0, 0.001);
+	TestTrue(TEXT("The top of the mesh goes to the right"), GetTurn(Point).RotateVector(FVector::UpVector).Y > 0.01);
+	TestTrue(TEXT("Its front turns to the right"), GetTurn(Point).RotateVector(FVector::BackwardVector).Y > 0.01);
+
+	const FVector ExpectedCentre = Rig->GetCarriedItemTransform(Carried, Point).GetLocation();
+	TestTrue(TEXT("It stays under the cursor, turning about its middle"), Mesh->GetRelativeLocation().Equals(ExpectedCentre, 0.01));
+
+	// Left to swing
+	bool bSwungBack = false;
+	for (int32 Index = 0; Index < 180; ++Index)
+	{
+		Rig->Tick(Frame);
+		bSwungBack = bSwungBack || Rig->GetCarriedItemSway().X < -0.01;
+	}
+
+	TestTrue(TEXT("Stopping swings it back past upright"), bSwungBack);
+	TestTrue(TEXT("Before it comes to rest"), Rig->GetCarriedItemSway().IsNearlyZero(0.01));
+	TestTrue(TEXT("Where it would be without the sway"), Mesh->GetRelativeTransform().Equals(Rig->GetCarriedItemTransform(Carried, Point), 0.01));
+
+	// Dragged up
+	for (int32 Index = 0; Index < 6; ++Index)
+	{
+		Point.Y += 1.0;
+		PointAt(Point);
+		Rig->Tick(Frame);
+	}
+
+	TestTrue(TEXT("Dragged up it leans up"), Rig->GetCarriedItemSway().Y > 1.0);
+	TestTrue(TEXT("Its front turns up"), GetTurn(Point).RotateVector(FVector::BackwardVector).Z > 0.01);
+
+	// However fast, and however long the frame
+	Point.X -= 1000.0;
+	PointAt(Point);
+	for (int32 Index = 0; Index < 5; ++Index)
+	{
+		Rig->Tick(1.0f);
+		TestTrue(TEXT("A long frame doesn't send it flying"), FMath::Abs(Rig->GetCarriedItemSway().X) < 90.0);
+	}
+
+	// The next item picked up shouldn't start out swinging
+	Rig->Tick(Frame);
+	Inventory->PlaceCarriedItem(FIntPoint(0, 0));
+	Rig->ShowInventory(*Inventory);
+	Rig->Tick(Frame);
+	TestTrue(TEXT("Putting it down stops the sway"), Rig->GetCarriedItemSway().IsNearlyZero());
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSInventoryRigCarriedTurnTest, "Fellowship.Inventory.Rig.CarriedItemAnimatesWhenRotated", TestFlags)
+
+bool FFSInventoryRigCarriedTurnTest::RunTest(const FString& Parameters)
+{
+	FInventoryTestWorld Test;
+	UFSInventoryComponent* Inventory = Test.Inventory;
+	AFSInventoryRig* Rig = Test.World->SpawnActor<AFSInventoryRig>();
+
+	UStaticMesh* Cube = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
+	if (!TestNotNull(TEXT("The test mesh loads"), Cube))
+	{
+		return false;
+	}
+
+	// Matches the rig's default
+	constexpr float TurnTime = 0.15f;
+
+	Inventory->AddItem(MakeItem(SwordSize, Cube));
+	Inventory->PickUpItemAt(FIntPoint(0, 0));
+	Rig->ShowInventory(*Inventory);
+	Rig->SetPackVisible(true);
+
+	UStaticMeshComponent* Mesh = Rig->GetCarriedItemMesh();
+	const FVector2D Point = FVector2D::ZeroVector;
+
+	const auto GetRest = [Rig, Inventory, &Point]()
+	{
+		return Rig->GetCarriedItemTransform(Inventory->GetCarriedItem(), Point);
+	};
+
+	Rig->Tick(0.01f);
+	TestTrue(TEXT("Picking an item up doesn't turn it"), Mesh->GetRelativeTransform().Equals(GetRest(), 0.001));
+
+	const FTransform Before = GetRest();
+	Inventory->RotateCarriedItem();
+	Rig->ShowInventory(*Inventory);
+	const FTransform After = GetRest();
+
+	TestFalse(TEXT("The test item looks different rotated"), Before.Equals(After, 0.001));
+
+	Rig->Tick(0.0001f);
+	TestTrue(TEXT("It starts from how it looked"), Mesh->GetRelativeRotation().Quaternion().Equals(Before.GetRotation(), 0.01));
+	TestTrue(TEXT("And where it was"), Mesh->GetRelativeLocation().Equals(Before.GetLocation(), 0.05));
+
+	Rig->Tick(TurnTime * 0.3f);
+	const double AngleToBefore = Mesh->GetRelativeRotation().Quaternion().AngularDistance(Before.GetRotation());
+	const double AngleToAfter = Mesh->GetRelativeRotation().Quaternion().AngularDistance(After.GetRotation());
+	TestTrue(TEXT("Part way through it's between the two"), AngleToBefore > 0.05 && AngleToAfter > 0.05);
+	TestEqual(TEXT("On the quarter turn between them"), AngleToBefore + AngleToAfter, UE_DOUBLE_HALF_PI, 0.01);
+
+	Rig->Tick(TurnTime);
+	TestTrue(TEXT("Then it finishes where it should be"), Mesh->GetRelativeTransform().Equals(After, 0.001));
+
+	// Round to the rotation it started at, where the last step is one more quarter turn rather than three back
+	Inventory->RotateCarriedItem();
+	Rig->ShowInventory(*Inventory);
+	Rig->Tick(TurnTime);
+	Inventory->RotateCarriedItem();
+	Rig->ShowInventory(*Inventory);
+	Rig->Tick(TurnTime);
+	const FTransform BeforeLast = GetRest();
+	Inventory->RotateCarriedItem();
+	Rig->ShowInventory(*Inventory);
+	TestEqual(TEXT("Back at the first rotation"), static_cast<int32>(Inventory->GetCarriedItem().Rotation), 0);
+
+	Rig->Tick(TurnTime * 0.3f);
+	const double LastToBefore = Mesh->GetRelativeRotation().Quaternion().AngularDistance(BeforeLast.GetRotation());
+	const double LastToAfter = Mesh->GetRelativeRotation().Quaternion().AngularDistance(GetRest().GetRotation());
+	TestEqual(TEXT("The last step is a quarter turn too"), LastToBefore + LastToAfter, UE_DOUBLE_HALF_PI, 0.01);
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSInventoryRigSlotSwayTest, "Fellowship.Inventory.Rig.ItemsInSlotsSwaySubtly", TestFlags)
+
+bool FFSInventoryRigSlotSwayTest::RunTest(const FString& Parameters)
+{
+	FInventoryTestWorld Test;
+	UFSInventoryComponent* Inventory = Test.Inventory;
+	AFSInventoryRig* Rig = Test.World->SpawnActor<AFSInventoryRig>();
+
+	UStaticMesh* Cube = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
+	if (!TestNotNull(TEXT("The test mesh loads"), Cube))
+	{
+		return false;
+	}
+
+	// Matches the rig's defaults
+	constexpr double SwayAngle = 3.0;
+	constexpr float SwayPeriod = 3.5f;
+
+	Inventory->CarryNewItem(MakeItem(SwordSize, Cube));
+	Inventory->SwapCarriedItemWithHand(EFSHand::Left);
+	Inventory->CarryNewItem(MakeItem(SwordSize, Cube));
+	Inventory->SwapCarriedItemWithHand(EFSHand::Right);
+	Inventory->CarryNewItem(MakeItem(SwordSize, Cube));
+	Inventory->SwapCarriedItemWithQuickSlot(EFSQuickSlot::Left);
+
+	Rig->ShowInventory(*Inventory);
+	Rig->SetPackVisible(true);
+
+	UStaticMeshComponent* LeftHand = Rig->GetHandItemMesh(AFSInventoryRig::LeftHandSlot);
+	UStaticMeshComponent* RightHand = Rig->GetHandItemMesh(AFSInventoryRig::RightHandSlot);
+	UStaticMeshComponent* QuickSlot = Rig->GetQuickSlotItemMesh(AFSInventoryRig::LeftQuickSlot);
+
+	const FFSInventoryItem& LeftItem = Inventory->GetHandItem(EFSHand::Left);
+	const FQuat LeftRest = Rig->GetHandItemTransform(LeftItem, AFSInventoryRig::LeftHandSlot).GetRotation();
+	const FVector LeftRestLocation = Rig->GetHandItemTransform(LeftItem, AFSInventoryRig::LeftHandSlot).GetLocation();
+
+	const FQuat Start = LeftHand->GetRelativeRotation().Quaternion();
+
+	double MostFromRest = 0.0;
+	double MostFromStart = 0.0;
+	bool bHandsDiffer = false;
+
+	for (int32 Step = 0; Step < 40; ++Step)
+	{
+		Rig->Tick(SwayPeriod / 40.0f);
+
+		const FQuat Now = LeftHand->GetRelativeRotation().Quaternion();
+		MostFromRest = FMath::Max(MostFromRest, Now.AngularDistance(LeftRest));
+		MostFromStart = FMath::Max(MostFromStart, Now.AngularDistance(Start));
+
+		const FQuat RightRest = Rig->GetHandItemTransform(Inventory->GetHandItem(EFSHand::Right), AFSInventoryRig::RightHandSlot).GetRotation();
+		bHandsDiffer = bHandsDiffer || !(Now * LeftRest.Inverse()).Equals(RightHand->GetRelativeRotation().Quaternion() * RightRest.Inverse(), 0.001);
+
+		TestTrue(TEXT("It stays centred on its cell"), LeftHand->GetRelativeLocation().Equals(LeftRestLocation, 0.01));
+	}
+
+	TestTrue(TEXT("It moves"), FMath::RadiansToDegrees(MostFromStart) > 1.0);
+	TestTrue(TEXT("Only subtly"), FMath::RadiansToDegrees(MostFromRest) < SwayAngle * 2.0);
+	TestTrue(TEXT("The hands don't move together"), bHandsDiffer);
+	TestTrue(TEXT("It comes back round"), LeftHand->GetRelativeRotation().Quaternion().Equals(Start, 0.01));
+
+	const FQuat QuickRest = Rig->GetQuickSlotItemTransform(Inventory->GetQuickSlotItem(EFSQuickSlot::Left), AFSInventoryRig::LeftQuickSlot).GetRotation();
+	TestTrue(TEXT("The quick slots sway too"), QuickSlot->GetRelativeRotation().Quaternion().AngularDistance(QuickRest) > 0.001);
+
+	// A refresh mustn't jolt them back to rest
+	const FQuat BeforeRefresh = LeftHand->GetRelativeRotation().Quaternion();
+	Rig->ShowInventory(*Inventory);
+	TestTrue(TEXT("Showing the inventory again doesn't jolt it"), LeftHand->GetRelativeRotation().Quaternion().Equals(BeforeRefresh, 0.0001));
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSInventoryRigBackgroundDarkenerTest, "Fellowship.Inventory.Rig.DarkensTheBackgroundBehindTheGrid", TestFlags)
+
+bool FFSInventoryRigBackgroundDarkenerTest::RunTest(const FString& Parameters)
+{
+	FInventoryTestWorld Test;
+	AFSInventoryRig* Rig = Test.World->SpawnActor<AFSInventoryRig>();
+	const UStaticMeshComponent* Darkener = Rig->GetBackgroundDarkener();
+
+	UMaterialInstanceDynamic* Material = Cast<UMaterialInstanceDynamic>(Darkener->GetMaterial(0));
+	if (!TestNotNull(TEXT("It has its own instance of the material"), Material))
+	{
+		return false;
+	}
+
+	const auto GetDarkness = [Material]()
+	{
+		return Material->K2_GetScalarParameterValue(TEXT("Darkness"));
+	};
+
+	// In the display's frame, which the camera sits at the origin of
+	const double Distance = Darkener->GetRelativeLocation().X;
+	TestTrue(TEXT("It's behind the grid"), Distance > GridDistanceForTests);
+	TestTrue(TEXT("And in front of the hands"), Distance < 65.0);
+	TestEqual(TEXT("It's straight ahead"), Darkener->GetRelativeLocation().Y, 0.0);
+
+	// The plane mesh is 100cm across, and it has to reach past the edges of even a very wide screen
+	TestTrue(TEXT("It covers the screen"), Darkener->GetRelativeScale3D().X * 50.0 > Distance * 4.0);
+	TestTrue(TEXT("It faces the camera"), Darkener->GetRelativeRotation().Quaternion().GetUpVector().Equals(FVector::BackwardVector, 0.001));
+
+	TestFalse(TEXT("It's hidden with the inventory shut"), Darkener->GetVisibleFlag());
+	TestEqual(TEXT("And clear"), GetDarkness(), 0.0f);
+
+	Rig->SetPackVisible(true);
+	TestTrue(TEXT("It shows with the rest of the view"), Darkener->GetVisibleFlag());
+	TestEqual(TEXT("Still clear until the grid arrives"), GetDarkness(), 0.0f);
+
+	Rig->SetGridVisible(true);
+	Rig->Tick(0.04f);
+	const float PartWay = GetDarkness();
+	TestTrue(TEXT("It fades in with the grid"), PartWay > 0.0f);
+
+	Rig->Tick(1.0f);
+	const float Full = GetDarkness();
+	TestTrue(TEXT("Getting darker"), Full > PartWay);
+	TestTrue(TEXT("But only subtly"), Full < 0.5f);
+
+	Rig->SetGridVisible(false);
+	Rig->Tick(1.0f);
+	TestEqual(TEXT("And fades out with it"), GetDarkness(), 0.0f);
+
+	const FPostProcessSettings& PostProcess = Rig->GetViewCamera()->PostProcessSettings;
+	TestTrue(TEXT("Auto exposure can't undo it"), PostProcess.bOverride_AutoExposureSpeedUp && PostProcess.AutoExposureSpeedUp < 0.01f);
+
+	TestTrue(TEXT("The rig keeps ticking while it's on show"), Rig->IsActorTickEnabled());
+	Rig->SetPackVisible(false);
+	Rig->Tick(0.01f);
+	TestFalse(TEXT("And stops once it's hidden"), Rig->IsActorTickEnabled());
 
 	return true;
 }

@@ -12,6 +12,7 @@
 #include "GameFramework/Character.h"
 #include "Inventory/FSInventoryComponent.h"
 #include "Inventory/FSItemDefinition.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
 #include "UObject/ConstructorHelpers.h"
 
@@ -58,6 +59,33 @@ namespace
 
 	// From the top of a slot's cell to the middle of its name
 	constexpr double SlotLabelHeight = 0.75;
+
+	// How far a carried item turns its front towards where it's going, as a fraction of how far it leans
+	constexpr double SwayTiltFraction = 0.5;
+
+	// A long frame is simulated as if it were this long, because a spring given too long a step flies apart
+	constexpr double MaxSwayStep = 1.0 / 30.0;
+
+	// How far behind the grid the background's shade sits
+	constexpr double BackgroundDarkenerGap = 1.0;
+
+	// Far wider than the screen at the grid's distance. The plane mesh is 100cm across.
+	constexpr double BackgroundDarkenerScale = 20.0;
+
+	const FName BackgroundDarknessParameter(TEXT("Darkness"));
+
+	// Slow enough that auto exposure effectively stops, because it would otherwise brighten the view to make up for the shade
+	constexpr float FrozenExposureSpeed = 0.001f;
+
+	// Turns a mesh about the middle of its bounds, which needn't be its pivot, and moves it. The mesh is scaled evenly.
+	FTransform TurnAboutMeshCentre(const FTransform& Transform, const UStaticMesh& Mesh, const FQuat& Turn, const FVector& Shift = FVector::ZeroVector)
+	{
+		const FVector Origin = Mesh.GetBounds().Origin;
+		const FVector Centre = Transform.TransformPosition(Origin) + Shift;
+		const FQuat Rotation = Turn * Transform.GetRotation();
+
+		return FTransform(Rotation, Centre - Rotation.RotateVector(Origin * Transform.GetScale3D()), Transform.GetScale3D());
+	}
 
 	bool IsPointInSlot(const FVector2D& Point, const FVector2D& SlotCentre, double SlotSize)
 	{
@@ -151,6 +179,16 @@ AFSInventoryRig::AFSInventoryRig()
 	LeftQuickSlotItemMesh = CreateSlotItemMesh(TEXT("LeftQuickSlotItemMesh"));
 	RightQuickSlotItemMesh = CreateSlotItemMesh(TEXT("RightQuickSlotItemMesh"));
 
+	BackgroundDarkener = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("BackgroundDarkener"));
+	BackgroundDarkener->SetupAttachment(Display);
+	BackgroundDarkener->SetMobility(EComponentMobility::Movable);
+	BackgroundDarkener->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	BackgroundDarkener->SetCastShadow(false);
+	BackgroundDarkener->SetCanEverAffectNavigation(false);
+
+	// Translucent things are drawn furthest first by their centres, and the cells off to the sides could be further away than this one's
+	BackgroundDarkener->SetTranslucentSortPriority(-1);
+
 	Arms = CreateDefaultSubobject<UPoseableMeshComponent>(TEXT("Arms"));
 	Arms->SetupAttachment(Display);
 	Arms->SetMobility(EComponentMobility::Movable);
@@ -179,7 +217,20 @@ AFSInventoryRig::AFSInventoryRig()
 		HandSlots->SetStaticMesh(PlaneMesh.Object);
 		QuickSlots->SetStaticMesh(PlaneMesh.Object);
 		DropBackpackButton->SetStaticMesh(PlaneMesh.Object);
+		BackgroundDarkener->SetStaticMesh(PlaneMesh.Object);
 	}
+
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> DarkenMaterial(TEXT("/Game/Materials/Inventory/M_InventoryBackgroundDarken.M_InventoryBackgroundDarken"));
+	if (DarkenMaterial.Succeeded())
+	{
+		BackgroundDarkenMaterial = DarkenMaterial.Object;
+	}
+
+	FPostProcessSettings& PostProcess = ViewCamera->PostProcessSettings;
+	PostProcess.bOverride_AutoExposureSpeedUp = true;
+	PostProcess.AutoExposureSpeedUp = FrozenExposureSpeed;
+	PostProcess.bOverride_AutoExposureSpeedDown = true;
+	PostProcess.AutoExposureSpeedDown = FrozenExposureSpeed;
 }
 
 void AFSInventoryRig::BeginPlay()
@@ -200,6 +251,17 @@ void AFSInventoryRig::BeginPlay()
 	RightQuickSlotItemMesh->SetFirstPersonPrimitiveType(EFirstPersonPrimitiveType::FirstPerson);
 	DropBackpackButton->SetFirstPersonPrimitiveType(EFirstPersonPrimitiveType::FirstPerson);
 	Arms->SetFirstPersonPrimitiveType(EFirstPersonPrimitiveType::FirstPerson);
+	BackgroundDarkener->SetFirstPersonPrimitiveType(EFirstPersonPrimitiveType::FirstPerson);
+
+	BackgroundDarkener->SetRelativeLocationAndRotation(FVector(GridDistance + BackgroundDarkenerGap, 0.0, 0.0), FacingCamera);
+	BackgroundDarkener->SetRelativeScale3D(FVector(BackgroundDarkenerScale));
+
+	if (BackgroundDarkenMaterial)
+	{
+		BackgroundDarkenInstance = UMaterialInstanceDynamic::Create(BackgroundDarkenMaterial, this);
+		BackgroundDarkenInstance->SetScalarParameterValue(BackgroundDarknessParameter, 0.0f);
+		BackgroundDarkener->SetMaterial(0, BackgroundDarkenInstance);
+	}
 
 	CursorLight->SetIntensity(CursorLightIntensity);
 	CursorLight->SetAttenuationRadius(CursorLightRadius);
@@ -521,13 +583,32 @@ void AFSInventoryRig::ShowInventory(const UFSInventoryComponent& Inventory)
 
 	CarriedItemMesh->SetStaticMesh(Inventory.IsCarryingItem() ? Inventory.GetCarriedItem().Definition->Mesh.Get() : nullptr);
 
+	if (Inventory.IsCarryingItem())
+	{
+		const FFSInventoryItem& Carried = Inventory.GetCarriedItem();
+
+		if (Carried.Id == ShownCarriedId && Carried.Definition == ShownCarriedDefinition.Get() && Carried.Rotation != ShownCarriedRotation)
+		{
+			StartCarriedItemTurn(Carried, ShownCarriedRotation);
+		}
+
+		ShownCarriedDefinition = Carried.Definition;
+		ShownCarriedId = Carried.Id;
+		ShownCarriedRotation = Carried.Rotation;
+	}
+	else
+	{
+		ShownCarriedDefinition = nullptr;
+		ShownCarriedId = INDEX_NONE;
+	}
+
 	for (int32 HandSlot = 0; HandSlot < HandSlotCount; ++HandSlot)
 	{
 		const FFSInventoryItem& Item = Inventory.GetHandItem(GetHandOfSlot(HandSlot));
 		UStaticMeshComponent* HandItemMesh = GetHandItemMesh(HandSlot);
 
 		HandItemMesh->SetStaticMesh(Item.Definition ? Item.Definition->Mesh.Get() : nullptr);
-		HandItemMesh->SetRelativeTransform(GetHandItemTransform(Item, HandSlot));
+		HandItemRests[HandSlot] = GetHandItemTransform(Item, HandSlot);
 
 		HandSlots->SetCustomDataValue(HandSlot, CellTakenData, Item.Definition ? 1.0f : 0.0f, true);
 	}
@@ -538,10 +619,12 @@ void AFSInventoryRig::ShowInventory(const UFSInventoryComponent& Inventory)
 		UStaticMeshComponent* QuickSlotItemMesh = GetQuickSlotItemMesh(QuickSlot);
 
 		QuickSlotItemMesh->SetStaticMesh(Item.Definition ? Item.Definition->Mesh.Get() : nullptr);
-		QuickSlotItemMesh->SetRelativeTransform(GetQuickSlotItemTransform(Item, QuickSlot));
+		QuickSlotItemRests[QuickSlot] = GetQuickSlotItemTransform(Item, QuickSlot);
 
 		QuickSlots->SetCustomDataValue(QuickSlot, CellTakenData, Item.Definition ? 1.0f : 0.0f, true);
 	}
+
+	UpdateSlotItemSway();
 }
 
 void AFSInventoryRig::AddItemBorder(const FFSInventoryItem& Item)
@@ -721,14 +804,139 @@ void AFSInventoryRig::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 
-	GridScale = FMath::FInterpConstantTo(GridScale, GridScaleTarget, DeltaTime, 1.0f / GridScaleTime);
+	// Only while it's changing: without a backpack, updating the visibility turns the grid on and off again, which isn't free
+	if (GridScale != GridScaleTarget)
+	{
+		GridScale = FMath::FInterpConstantTo(GridScale, GridScaleTarget, DeltaTime, 1.0f / GridScaleTime);
 
-	Grid->SetRelativeScale3D(FVector(FMath::Max(GridScale, MinGridScale)));
-	UpdateGridVisibility();
+		Grid->SetRelativeScale3D(FVector(FMath::Max(GridScale, MinGridScale)));
+		UpdateGridVisibility();
 
-	if (FMath::IsNearlyEqual(GridScale, GridScaleTarget))
+		if (BackgroundDarkenInstance)
+		{
+			BackgroundDarkenInstance->SetScalarParameterValue(BackgroundDarknessParameter, BackgroundDarkness * GridScale);
+		}
+	}
+
+	UpdateCarriedItemSway(DeltaTime);
+
+	SlotItemSwayTime += DeltaTime;
+	UpdateSlotItemSway();
+
+	if (GridScale == GridScaleTarget && !Display->GetVisibleFlag())
 	{
 		SetActorTickEnabled(false);
+	}
+}
+
+void AFSInventoryRig::UpdateCarriedItemSway(float DeltaTime)
+{
+	if (DeltaTime <= 0.0f)
+	{
+		return;
+	}
+
+	const FVector2D CursorMove = CursorGridPoint - SwayCursorGridPoint;
+	SwayCursorGridPoint = CursorGridPoint;
+
+	const UFSInventoryComponent* Inventory = ShownInventory.Get();
+	if (!Inventory || !Inventory->IsCarryingItem())
+	{
+		CarriedItemSway = FVector2D::ZeroVector;
+		CarriedItemSwayVelocity = FVector2D::ZeroVector;
+		CarriedItemTurnTimeLeft = 0.0f;
+		return;
+	}
+
+	const FVector2D TargetSway = (CursorMove / DeltaTime * CarriedItemSwayPerSpeed).ClampAxes(-CarriedItemMaxSway, CarriedItemMaxSway);
+	const double Step = FMath::Min<double>(DeltaTime, MaxSwayStep);
+
+	// A damped spring, so that it overshoots a little and swings back when the mouse stops. Velocity comes first, which keeps it stable.
+	CarriedItemSwayVelocity += ((TargetSway - CarriedItemSway) * CarriedItemSwayStiffness - CarriedItemSwayVelocity * CarriedItemSwayDamping) * Step;
+	CarriedItemSway += CarriedItemSwayVelocity * Step;
+
+	CarriedItemTurnTimeLeft = FMath::Max(CarriedItemTurnTimeLeft - DeltaTime, 0.0f);
+
+	UpdateCarriedItemMesh();
+}
+
+void AFSInventoryRig::StartCarriedItemTurn(const FFSInventoryItem& Item, uint8 OldRotation)
+{
+	const UStaticMesh* Mesh = Item.Definition ? Item.Definition->Mesh.Get() : nullptr;
+	if (!Mesh)
+	{
+		return;
+	}
+
+	FFSInventoryItem OldItem = Item;
+	OldItem.Rotation = OldRotation;
+
+	const FVector Origin = Mesh->GetBounds().Origin;
+	const FVector OldCentre = GetCarriedItemTransform(OldItem, CursorGridPoint).TransformPosition(Origin);
+	const FVector NewCentre = GetCarriedItemTransform(Item, CursorGridPoint).TransformPosition(Origin);
+
+	// Starting from wherever the last turn had got to, so that rotating again part way through carries on smoothly.
+	// A rotation is a clockwise quarter turn, which from three back to zero is one more rather than three back.
+	const double Remaining = FMath::Cube(CarriedItemTurnTimeLeft / CarriedItemTurnTime);
+	CarriedItemTurnAngle = FRotator::NormalizeAxis(90.0f * (Item.Rotation - OldRotation)) + CarriedItemTurnAngle * Remaining;
+	CarriedItemTurnShift = OldCentre - NewCentre + CarriedItemTurnShift * Remaining;
+	CarriedItemTurnTimeLeft = CarriedItemTurnTime;
+}
+
+void AFSInventoryRig::UpdateCarriedItemMesh()
+{
+	const UFSInventoryComponent* Inventory = ShownInventory.Get();
+	if (!Inventory || !Inventory->IsCarryingItem())
+	{
+		return;
+	}
+
+	const FFSInventoryItem& Item = Inventory->GetCarriedItem();
+	const UStaticMesh* Mesh = Item.Definition ? Item.Definition->Mesh.Get() : nullptr;
+	if (!Mesh)
+	{
+		return;
+	}
+
+	// Leaning the top of the item towards where it's going, and turning its front that way too.
+	// A negative angle about the view is clockwise as seen from the camera, which takes the top to the right.
+	const FQuat Lean(FVector::ForwardVector, FMath::DegreesToRadians(-CarriedItemSway.X));
+	const FQuat TiltAcross(FVector::UpVector, FMath::DegreesToRadians(-CarriedItemSway.X * SwayTiltFraction));
+	const FQuat TiltUp(FVector::RightVector, FMath::DegreesToRadians(CarriedItemSway.Y * SwayTiltFraction));
+
+	// Fast at first and slowing into place
+	const double Remaining = FMath::Cube(CarriedItemTurnTimeLeft / CarriedItemTurnTime);
+	const FQuat Turn(FVector::ForwardVector, FMath::DegreesToRadians(CarriedItemTurnAngle * Remaining));
+
+	CarriedItemMesh->SetRelativeTransform(TurnAboutMeshCentre(GetCarriedItemTransform(Item, CursorGridPoint), *Mesh, TiltAcross * TiltUp * Lean * Turn, CarriedItemTurnShift * Remaining));
+}
+
+FQuat AFSInventoryRig::GetSlotItemSwayRotation(double Phase) const
+{
+	const double Angle = UE_DOUBLE_TWO_PI * (SlotItemSwayTime / SlotItemSwayPeriod + Phase);
+	const double Swing = FMath::DegreesToRadians<double>(SlotItemSwayAngle);
+
+	// A quarter of a sway apart, so the item turns from side to side and rocks as it goes rather than along one line
+	return FQuat(FVector::UpVector, Swing * FMath::Sin(Angle)) * FQuat(FVector::ForwardVector, Swing * FMath::Cos(Angle));
+}
+
+void AFSInventoryRig::UpdateSlotItemSway()
+{
+	const auto PlaceItem = [](UStaticMeshComponent& ItemMesh, const FTransform& Rest, const FQuat& Sway)
+	{
+		const UStaticMesh* Mesh = ItemMesh.GetStaticMesh();
+		ItemMesh.SetRelativeTransform(Mesh ? TurnAboutMeshCentre(Rest, *Mesh, Sway) : Rest);
+	};
+
+	// Spread through the sway, so that no two move together
+	for (int32 HandSlot = 0; HandSlot < HandSlotCount; ++HandSlot)
+	{
+		PlaceItem(*GetHandItemMesh(HandSlot), HandItemRests[HandSlot], GetSlotItemSwayRotation(HandSlot * 0.5));
+	}
+
+	for (int32 QuickSlot = 0; QuickSlot < QuickSlotCount; ++QuickSlot)
+	{
+		PlaceItem(*GetQuickSlotItemMesh(QuickSlot), QuickSlotItemRests[QuickSlot], GetSlotItemSwayRotation(0.25 + QuickSlot * 0.5));
 	}
 }
 
@@ -900,11 +1108,8 @@ void AFSInventoryRig::SetCursorRay(const FVector& RayOrigin, const FVector& RayD
 	const FVector OnGrid(GridDistance, GridPoint.X, GridPoint.Y);
 	CursorLight->SetRelativeLocation(OnGrid * (1.0 - CursorLightHeight / GridDistance) * FirstPersonScale);
 
-	const UFSInventoryComponent* Inventory = ShownInventory.Get();
-	if (Inventory && Inventory->IsCarryingItem())
-	{
-		CarriedItemMesh->SetRelativeTransform(GetCarriedItemTransform(Inventory->GetCarriedItem(), GridPoint));
-	}
+	CursorGridPoint = GridPoint;
+	UpdateCarriedItemMesh();
 }
 
 void AFSInventoryRig::SetHoveredCell(const FIntPoint& Cell)
