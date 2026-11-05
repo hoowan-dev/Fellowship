@@ -12,12 +12,14 @@ class UFSInventoryComponent;
 class UInstancedStaticMeshComponent;
 class UMaterialInterface;
 class UPointLightComponent;
+class UPoseableMeshComponent;
 class UStaticMesh;
 class UStaticMeshComponent;
 struct FFSInventoryItem;
 
 /**
- * What the player sees with the inventory open: a first person camera looking at the held backpack, with the grid floating between them.
+ * What the player sees with the inventory open: a first person camera looking at the held backpack, with the grid floating between them,
+ * and the player's forearms raised either side of it with a large cell over each hand.
  * Exists only on the owning client. The grid's cells run from (0, 0) at the top left.
  */
 UCLASS()
@@ -34,11 +36,16 @@ public:
 	static constexpr int32 CellCanSwapData = 4;
 	static constexpr int32 CellDataCount = 5;
 
+	// The instance of the hand slots each hand's cell is
+	static constexpr int32 LeftHandSlot = 0;
+	static constexpr int32 RightHandSlot = 1;
+	static constexpr int32 HandSlotCount = 2;
+
 	AFSInventoryRig();
 
 	virtual void Tick(float DeltaTime) override;
 
-	// Moves the rig to the character's head, facing the way the character faces, and keeps it there
+	// Moves the rig to the character's head, facing the way the character faces, and keeps it there. The arms take on the character's mesh.
 	void AttachToCharacter(ACharacter* Character);
 
 	void SetPackVisible(bool bVisible);
@@ -73,11 +80,19 @@ public:
 	FORCEINLINE UInstancedStaticMeshComponent* GetGrid() const { return Grid; }
 	FORCEINLINE UInstancedStaticMeshComponent* GetItemBorders() const { return ItemBorders; }
 	FORCEINLINE int32 GetCellIndex(const FIntPoint& Cell) const { return Cell.Y * GridWidth + Cell.X; }
+	FORCEINLINE UInstancedStaticMeshComponent* GetHandSlots() const { return HandSlots; }
+	FORCEINLINE UPoseableMeshComponent* GetArms() const { return Arms; }
+
+	// The centre of a hand's cell on the plane of the grid, in cm from the grid's centre: X to the right and Y up
+	FVector2D GetHandSlotCentre(int32 HandSlot) const;
 
 protected:
 	virtual void BeginPlay() override;
 
 	void BuildGrid();
+	void BuildHandSlots();
+	void PoseArms();
+	void PoseArm(bool bLeft);
 	void FitPackMesh();
 	void AddItemBorder(const FFSInventoryItem& Item);
 	bool IsCellInGrid(const FIntPoint& Cell) const;
@@ -111,6 +126,14 @@ protected:
 	// Attached to the grid so it scales in and out along with it. Has no mesh while nothing is carried.
 	UPROPERTY(VisibleAnywhere, Category = "Inventory")
 	TObjectPtr<UStaticMeshComponent> CarriedItemMesh;
+
+	// A large cell over each hand, for what that hand holds. Nothing can be put in them yet. Attached to the grid so they scale in and out along with it.
+	UPROPERTY(VisibleAnywhere, Category = "Inventory")
+	TObjectPtr<UInstancedStaticMeshComponent> HandSlots;
+
+	// A copy of the character's mesh with its arms posed in the display's frame and the rest of its body shrunk away, since it's all one mesh
+	UPROPERTY(VisibleAnywhere, Category = "Inventory")
+	TObjectPtr<UPoseableMeshComponent> Arms;
 
 	// Follows the mouse over the grid, shining on the items and the pack. The grid's own cells are unlit, so it doesn't brighten them.
 	UPROPERTY(VisibleAnywhere, Category = "Inventory")
@@ -157,6 +180,45 @@ protected:
 
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Cursor Light")
 	FLinearColor CursorLightColor = FLinearColor(1.0f, 0.85f, 0.65f);
+
+	// Falls back on the grid's cell material if this isn't set
+	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Hands")
+	TObjectPtr<UMaterialInterface> HandSlotMaterial;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Hands", meta = (ClampMin = "0.1", Units = cm))
+	float HandSlotSize = 12.0f;
+
+	// Between the side of the grid and a hand's cell. The hands follow the cells, so they stay clear of the grid whatever its size.
+	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Hands", meta = (ClampMin = "0.0", Units = cm))
+	float HandSlotGap = 3.0f;
+
+	// How far the centre of a hand's cell is above the centre of the grid
+	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Hands", meta = (Units = cm))
+	float HandSlotHeight = -2.0f;
+
+	// From the camera to the palms, which sit behind the grid
+	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Hands", meta = (ClampMin = "1.0", Units = cm))
+	float HandDistance = 65.0f;
+
+	// From the wrist bone to the part of the hand centred in its cell
+	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Hands", meta = (ClampMin = "0.0", Units = cm))
+	float WristToPalm = 10.0f;
+
+	// The directions below pose the right hand, in the display's frame: X away from the camera, Y to the right, Z up. The left hand mirrors it.
+	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Hands")
+	FVector FingerDirection = FVector(0.15, -0.2, 1.0);
+
+	// The way the palm faces, which only needs to be roughly across the fingers
+	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Hands")
+	FVector PalmDirection = FVector(-1.0, -0.25, 0.0);
+
+	// From the elbow to the wrist
+	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Hands")
+	FVector ForearmDirection = FVector(0.4, -0.2, 0.9);
+
+	// From the shoulder to the elbow. The upper arm is kept so that a narrow screen, which shows more below the elbow, doesn't show the arm's cut off end.
+	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Hands")
+	FVector UpperArmDirection = FVector(0.55, -0.3, 0.75);
 
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Pack")
 	TObjectPtr<UStaticMesh> PackMeshAsset;

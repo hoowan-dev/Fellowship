@@ -4,8 +4,10 @@
 #include "Camera/CameraComponent.h"
 #include "Components/InstancedStaticMeshComponent.h"
 #include "Components/PointLightComponent.h"
+#include "Components/PoseableMeshComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Engine/SkinnedAsset.h"
 #include "Engine/StaticMesh.h"
 #include "GameFramework/Character.h"
 #include "Inventory/FSInventoryComponent.h"
@@ -16,6 +18,23 @@
 namespace
 {
 	const FName HeadBoneName(TEXT("head"));
+	const FName RootBoneName(TEXT("root"));
+	const FName LeftUpperArmBoneName(TEXT("upperarm_l"));
+	const FName LeftLowerArmBoneName(TEXT("lowerarm_l"));
+	const FName LeftHandBoneName(TEXT("hand_l"));
+	const FName RightUpperArmBoneName(TEXT("upperarm_r"));
+	const FName RightLowerArmBoneName(TEXT("lowerarm_r"));
+	const FName RightHandBoneName(TEXT("hand_r"));
+
+	// The scale of the root bone, which shrinks the body to a point. Zero would make it impossible to work out the arms' transforms relative to it.
+	constexpr double HiddenBodyScale = 0.001;
+
+	// Where the body shrinks to in the display's frame: behind and below the camera, so the skin stretched from it to the shoulders stays out of view
+	const FVector HiddenBodyLocation(-20.0, 0.0, -80.0);
+
+	// The arms use the mesh's own bounds, because working them out from the bones doesn't suit a body that's shrunk away.
+	// This grows them to take in the camera, and being inside its bounds means the arms are never culled.
+	constexpr float ArmsBoundsScale = 2.0f;
 
 	// The engine's plane mesh is 100cm square and faces +Z
 	constexpr float CellMeshSize = 100.0f;
@@ -86,6 +105,22 @@ AFSInventoryRig::AFSInventoryRig()
 	CarriedItemMesh->SetCastShadow(false);
 	CarriedItemMesh->SetCanEverAffectNavigation(false);
 
+	HandSlots = CreateDefaultSubobject<UInstancedStaticMeshComponent>(TEXT("HandSlots"));
+	HandSlots->SetupAttachment(Grid);
+	HandSlots->SetMobility(EComponentMobility::Movable);
+	HandSlots->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	HandSlots->SetCastShadow(false);
+	HandSlots->SetCanEverAffectNavigation(false);
+
+	Arms = CreateDefaultSubobject<UPoseableMeshComponent>(TEXT("Arms"));
+	Arms->SetupAttachment(Display);
+	Arms->SetMobility(EComponentMobility::Movable);
+	Arms->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	Arms->SetCastShadow(false);
+	Arms->SetCanEverAffectNavigation(false);
+	Arms->bComponentUseFixedSkelBounds = true;
+	Arms->SetBoundsScale(ArmsBoundsScale);
+
 	// Attached to the display rather than the grid, because the grid turns its children's visibility back on as it scales
 	CursorLight = CreateDefaultSubobject<UPointLightComponent>(TEXT("CursorLight"));
 	CursorLight->SetupAttachment(Display);
@@ -102,6 +137,7 @@ AFSInventoryRig::AFSInventoryRig()
 	{
 		Grid->SetStaticMesh(PlaneMesh.Object);
 		ItemBorders->SetStaticMesh(PlaneMesh.Object);
+		HandSlots->SetStaticMesh(PlaneMesh.Object);
 	}
 }
 
@@ -115,6 +151,8 @@ void AFSInventoryRig::BeginPlay()
 	Grid->SetFirstPersonPrimitiveType(EFirstPersonPrimitiveType::FirstPerson);
 	ItemBorders->SetFirstPersonPrimitiveType(EFirstPersonPrimitiveType::FirstPerson);
 	CarriedItemMesh->SetFirstPersonPrimitiveType(EFirstPersonPrimitiveType::FirstPerson);
+	HandSlots->SetFirstPersonPrimitiveType(EFirstPersonPrimitiveType::FirstPerson);
+	Arms->SetFirstPersonPrimitiveType(EFirstPersonPrimitiveType::FirstPerson);
 
 	CursorLight->SetIntensity(CursorLightIntensity);
 	CursorLight->SetAttenuationRadius(CursorLightRadius);
@@ -158,6 +196,102 @@ void AFSInventoryRig::BuildGrid()
 			Grid->AddInstance(FTransform(FacingCamera, CellCentre, CellScale));
 		}
 	}
+
+	// The hands' cells are placed beside the grid, so they move with its width
+	BuildHandSlots();
+	PoseArms();
+}
+
+void AFSInventoryRig::BuildHandSlots()
+{
+	UMaterialInterface* Material = HandSlotMaterial ? HandSlotMaterial : GridCellMaterial;
+	if (Material)
+	{
+		HandSlots->SetMaterial(0, Material);
+	}
+
+	HandSlots->ClearInstances();
+	HandSlots->SetNumCustomDataFloats(CellDataCount);
+
+	const FVector SlotScale(HandSlotSize / CellMeshSize);
+
+	for (int32 HandSlot = 0; HandSlot < HandSlotCount; ++HandSlot)
+	{
+		const FVector2D Centre = GetHandSlotCentre(HandSlot);
+		HandSlots->AddInstance(FTransform(FacingCamera, FVector(0.0, Centre.X, Centre.Y), SlotScale));
+	}
+}
+
+FVector2D AFSInventoryRig::GetHandSlotCentre(int32 HandSlot) const
+{
+	const double DistanceFromCentre = GridWidth * CellSize * 0.5 + HandSlotGap + HandSlotSize * 0.5;
+	return FVector2D(HandSlot == LeftHandSlot ? -DistanceFromCentre : DistanceFromCentre, HandSlotHeight);
+}
+
+void AFSInventoryRig::PoseArms()
+{
+	const USkinnedAsset* Mesh = Arms->GetSkinnedAsset();
+	if (!Mesh || !Arms->RequiredBones.IsValid())
+	{
+		return;
+	}
+
+	Arms->BoneSpaceTransforms = Mesh->GetRefSkeleton().GetRefBonePose();
+	Arms->SetBoneTransformByName(RootBoneName, FTransform(FQuat::Identity, HiddenBodyLocation, FVector(HiddenBodyScale)), EBoneSpaces::ComponentSpace);
+
+	PoseArm(true);
+	PoseArm(false);
+
+	Arms->RefreshBoneTransforms();
+}
+
+void AFSInventoryRig::PoseArm(bool bLeft)
+{
+	const FName UpperArmBone = bLeft ? LeftUpperArmBoneName : RightUpperArmBoneName;
+	const FName LowerArmBone = bLeft ? LeftLowerArmBoneName : RightLowerArmBoneName;
+	const FName HandBone = bLeft ? LeftHandBoneName : RightHandBoneName;
+
+	const FReferenceSkeleton& Skeleton = Arms->GetSkinnedAsset()->GetRefSkeleton();
+	const int32 LowerArmIndex = Skeleton.FindBoneIndex(LowerArmBone);
+	const int32 HandIndex = Skeleton.FindBoneIndex(HandBone);
+
+	if (Skeleton.FindBoneIndex(UpperArmBone) == INDEX_NONE || LowerArmIndex == INDEX_NONE || HandIndex == INDEX_NONE)
+	{
+		return;
+	}
+
+	const FTransform& LowerArmReference = Skeleton.GetRefBonePose()[LowerArmIndex];
+	const FTransform& HandReference = Skeleton.GetRefBonePose()[HandIndex];
+
+	const FVector Mirror(1.0, bLeft ? -1.0 : 1.0, 1.0);
+	const FVector Fingers = (FingerDirection * Mirror).GetSafeNormal();
+	const FVector Forearm = (ForearmDirection * Mirror).GetSafeNormal();
+	const FVector UpperArm = (UpperArmDirection * Mirror).GetSafeNormal();
+
+	// The skeleton mirrors its arms by flipping their axes: a left arm bone's X axis runs towards the fingers and its Y axis out of the back of the hand, and a right arm bone's run the opposite ways
+	const double AxisSign = bLeft ? 1.0 : -1.0;
+
+	// Each bone turns as little as it can from how its child holds it, so the arm doesn't twist
+	const auto TurnTowards = [AxisSign](const FQuat& Rotation, const FVector& Direction)
+	{
+		return FQuat::FindBetweenNormals(Rotation.GetAxisX() * AxisSign, Direction) * Rotation;
+	};
+
+	const FQuat HandRotation = FRotationMatrix::MakeFromXY(Fingers * AxisSign, PalmDirection * Mirror * -AxisSign).ToQuat();
+	const FQuat LowerArmRotation = TurnTowards(HandRotation * HandReference.GetRotation().Inverse(), Forearm);
+	const FQuat UpperArmRotation = TurnTowards(LowerArmRotation * LowerArmReference.GetRotation().Inverse(), UpperArm);
+
+	// Along the ray from the camera through the middle of the hand's cell, so the cell is over the palm from where the player is looking
+	const FVector2D SlotCentre = GetHandSlotCentre(bLeft ? LeftHandSlot : RightHandSlot);
+	const FVector Palm = FVector(GridDistance, SlotCentre.X, SlotCentre.Y) * (HandDistance / GridDistance);
+	const FVector Wrist = Palm - Fingers * WristToPalm;
+	const FVector Elbow = Wrist - Forearm * HandReference.GetLocation().Size();
+	const FVector Shoulder = Elbow - UpperArm * LowerArmReference.GetLocation().Size();
+
+	// Parents first, because each is worked out relative to its parent's transform
+	Arms->SetBoneTransformByName(UpperArmBone, FTransform(UpperArmRotation, Shoulder), EBoneSpaces::ComponentSpace);
+	Arms->SetBoneTransformByName(LowerArmBone, FTransform(LowerArmRotation, Elbow), EBoneSpaces::ComponentSpace);
+	Arms->SetBoneTransformByName(HandBone, FTransform(HandRotation, Wrist), EBoneSpaces::ComponentSpace);
 }
 
 void AFSInventoryRig::FitPackMesh()
@@ -337,6 +471,20 @@ void AFSInventoryRig::AttachToCharacter(ACharacter* Character)
 	DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
 	SetActorLocationAndRotation(HeadLocation + FVector(0.0, 0.0, ViewHeightOffset), FRotator(0.0, Character->GetActorRotation().Yaw, 0.0));
 	AttachToActor(Character, FAttachmentTransformRules::KeepWorldTransform);
+
+	if (Mesh && Mesh->GetSkeletalMeshAsset())
+	{
+		if (Arms->GetSkinnedAsset() != Mesh->GetSkeletalMeshAsset())
+		{
+			Arms->SetSkinnedAssetAndUpdate(Mesh->GetSkeletalMeshAsset());
+			PoseArms();
+		}
+
+		for (int32 MaterialIndex = 0; MaterialIndex < Mesh->GetNumMaterials(); ++MaterialIndex)
+		{
+			Arms->SetMaterial(MaterialIndex, Mesh->GetMaterial(MaterialIndex));
+		}
+	}
 }
 
 void AFSInventoryRig::SetPackVisible(bool bVisible)
