@@ -337,7 +337,77 @@ bool FFSEquipmentInventoryViewTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSEquipmentAssetsTest, "Fellowship.Equipment.Assets.DrawingASwordSwitchesTheCharactersAnimation", EquipmentTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSEquipmentShowFlagsTest, "Fellowship.Equipment.Weapons.OnlyShowWhereTheItemAllows", EquipmentTestFlags)
+
+bool FFSEquipmentShowFlagsTest::RunTest(const FString& Parameters)
+{
+	FEquipmentTestWorld Test;
+	UFSItemDefinition* Item = MakeWeapon(EFSWeaponType::Sword);
+	Item->bShowSheathed = false;
+
+	Test.Hold(Item, EFSHand::Right);
+	TestNull(TEXT("Nothing appears sheathed"), Test.Equipment->GetHandMesh(EFSHand::Right));
+
+	TestTrue(TEXT("It can still be drawn"), Test.Equipment->Draw());
+	UStaticMeshComponent* Mesh = Test.Equipment->GetHandMesh(EFSHand::Right);
+	if (!TestNotNull(TEXT("It appears in the hand"), Mesh))
+	{
+		return false;
+	}
+	TestTrue(TEXT("Visibly"), Mesh->IsVisible());
+	TestTrue(TEXT("With the item's mesh"), Mesh->GetStaticMesh() == Item->Mesh);
+
+	Test.Equipment->Sheathe();
+	TestFalse(TEXT("Sheathing hides it"), Mesh->IsVisible());
+
+	Item->bShowSheathed = true;
+	Item->bShowHeld = false;
+	Test.Equipment->Draw();
+	TestFalse(TEXT("The held flag hides it in the hand"), Mesh->IsVisible());
+
+	Test.Equipment->Sheathe();
+	TestTrue(TEXT("And leaves it shown on the back"), Mesh->IsVisible());
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSEquipmentConsumableTest, "Fellowship.Equipment.Stance.TreatsConsumablesAsOneHandedWeapons", EquipmentTestFlags)
+
+bool FFSEquipmentConsumableTest::RunTest(const FString& Parameters)
+{
+	FEquipmentTestWorld Test;
+	UFSWeaponStance* Unarmed = NewObject<UFSWeaponStance>();
+	UFSWeaponStance* SingleSword = NewObject<UFSWeaponStance>();
+	UFSWeaponStance* DoubleSword = NewObject<UFSWeaponStance>();
+	UFSWeaponStance* SingleSpear = NewObject<UFSWeaponStance>();
+	Test.Equipment->UnarmedStance = Unarmed;
+	Test.Equipment->StanceRules.Add(MakeRule(EFSWeaponType::Sword, EFSWeaponType::None, SingleSword));
+	Test.Equipment->StanceRules.Add(MakeRule(EFSWeaponType::Sword, EFSWeaponType::Sword, DoubleSword));
+	Test.Equipment->StanceRules.Add(MakeRule(EFSWeaponType::Spear, EFSWeaponType::None, SingleSpear));
+
+	// The weapon type is only hidden in the editor, so an item changed to a consumable keeps its old value
+	UFSItemDefinition* Item = MakeWeapon(EFSWeaponType::Spear);
+	Item->ItemType = EFSItemType::Consumable;
+
+	Test.Hold(Item, EFSHand::Right);
+	TestTrue(TEXT("Sheathed, a consumable is unarmed like anything else"), Test.Equipment->GetCurrentStance() == Unarmed);
+
+	Test.Equipment->Draw();
+	TestTrue(TEXT("Drawn, it uses the one-handed stance"), Test.Equipment->GetCurrentStance() == SingleSword);
+
+	Test.Hold(MakeWeapon(EFSWeaponType::Sword), EFSHand::Left);
+	TestTrue(TEXT("It pairs with a sword like a sword would"), Test.Equipment->GetCurrentStance() == DoubleSword);
+
+	// Takes the left hand's sword onto the cursor
+	Test.Inventory->SwapCarriedItemWithHand(EFSHand::Left);
+	Test.Inventory->ClearCarriedItem();
+	Item->ItemType = EFSItemType::Weapon;
+	TestTrue(TEXT("The same item as a weapon goes by its weapon type"), Test.Equipment->GetCurrentStance() == SingleSpear);
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSEquipmentAssetsTest,"Fellowship.Equipment.Assets.DrawingASwordSwitchesTheCharactersAnimation", EquipmentTestFlags)
 
 // Uses the real character and items, because a stance only works once all of its assets agree
 bool FFSEquipmentAssetsTest::RunTest(const FString& Parameters)

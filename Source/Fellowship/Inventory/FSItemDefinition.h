@@ -8,7 +8,14 @@
 
 class UStaticMesh;
 
-// What kind of weapon an item is, which decides the stance it's held in. Anything else can be held too, but moves as if unarmed.
+UENUM(BlueprintType)
+enum class EFSItemType : uint8
+{
+	Consumable,
+	Weapon
+};
+
+// What kind of weapon an item is, which decides the stance it's held in. Items that aren't weapons are held like a Sword.
 UENUM(BlueprintType)
 enum class EFSWeaponType : uint8
 {
@@ -44,14 +51,27 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Inventory")
 	FRotator InventoryMeshRotation = FRotator::ZeroRotator;
 
+	// Defaults to Weapon because the assets saved before this existed are all weapons, and they only store what differs from the default
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Equipment")
+	EFSItemType ItemType = EFSItemType::Weapon;
+
+	// Ignored unless Item Type is Weapon
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Equipment", meta = (EditCondition = "ItemType == EFSItemType::Weapon", EditConditionHides))
 	EFSWeaponType WeaponType = EFSWeaponType::None;
 
-	// Where the mesh sits relative to the hand's socket while drawn
+	// Whether the mesh appears on the character while in a hand and drawn
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Equipment")
+	bool bShowHeld = true;
+
+	// Whether the mesh appears on the character while in a hand and sheathed
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Equipment")
+	bool bShowSheathed = true;
+
+	// Where the mesh sits relative to the hand's socket while drawn
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Equipment", meta = (EditCondition = "bShowHeld", EditConditionHides))
 	FTransform HeldTransform = FTransform::Identity;
 
 	// Where the mesh sits relative to the sheath socket on the back
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Equipment")
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Equipment", meta = (EditCondition = "bShowSheathed", EditConditionHides))
 	FTransform SheathedTransform = FTransform::Identity;
 };

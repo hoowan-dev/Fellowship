@@ -113,7 +113,8 @@ void UFSEquipmentComponent::RefreshMeshes()
 void UFSEquipmentComponent::RefreshMesh(EFSHand Hand)
 {
 	const UFSItemDefinition* Item = Inventory ? Inventory->GetHandItem(Hand).Definition.Get() : nullptr;
-	UStaticMesh* Mesh = Item ? Item->Mesh.Get() : nullptr;
+	const bool bShown = Item && (bDrawn ? Item->bShowHeld : Item->bShowSheathed);
+	UStaticMesh* Mesh = bShown ? Item->Mesh.Get() : nullptr;
 	TObjectPtr<UStaticMeshComponent>& HandMesh = HandMeshes[static_cast<int32>(Hand)];
 
 	const ACharacter* Character = Cast<ACharacter>(GetOwner());
@@ -164,5 +165,11 @@ bool UFSEquipmentComponent::IsHoldingAnything() const
 EFSWeaponType UFSEquipmentComponent::GetHeldWeaponType(EFSHand Hand) const
 {
 	const UFSItemDefinition* Item = Inventory ? Inventory->GetHandItem(Hand).Definition.Get() : nullptr;
-	return Item ? Item->WeaponType : EFSWeaponType::None;
+	if (!Item)
+	{
+		return EFSWeaponType::None;
+	}
+
+	// Anything that isn't a weapon is held the way a one-handed weapon is, so it shares those stance rules
+	return Item->ItemType == EFSItemType::Weapon ? Item->WeaponType : EFSWeaponType::Sword;
 }
