@@ -19,7 +19,7 @@ Builds go through UnrealBuildTool via the engine's `Build.bat`, run from the eng
 - Targets: `FellowshipEditor` (editor) and `Fellowship` (standalone game). Configurations: `Debug`, `DebugGame`, `Development`, `Test`, `Shipping`.
 - Clean: `Engine\Build\BatchFiles\Clean.bat` with the same arguments. Rebuild: `Rebuild.bat`.
 - The same commands exist as VS Code tasks in `Fellowship.code-workspace` (e.g. "FellowshipEditor Win64 Development Build").
-- If the editor is open with Live Coding enabled, a command-line build of the editor target will fail; compile from the editor (Ctrl+Alt+F11) or close it first. `Scripts\BuildAndRelaunch.ps1` closes the editor (with its save prompt), builds Development, and reopens the project; `Scripts\Launch.ps1` just opens it.
+- If the editor is open with Live Coding enabled, a command-line build of the editor target will fail; compile from the editor (Ctrl+Alt+F11) or close it first. `Scripts\BuildAndRelaunch.ps1` closes the editor (with its save prompt), builds Development, and reopens the project.
 - After adding/removing source files or modules, regenerate project files / compile commands:
   ```powershell
   & "C:\Program Files\Epic Games\UE_5.7\Engine\Build\BatchFiles\Build.bat" -projectfiles -project="C:\dev\Fellowship\Fellowship.uproject" -game -vscode
@@ -35,7 +35,7 @@ Automation tests live in `Source/Fellowship/Tests/`. Run them headless (`Fellows
 
 - `Fellowship.uproject` — module list and plugins (`ModelingToolsEditorMode`, editor-only).
 - `Source/Fellowship.Target.cs`, `Source/FellowshipEditor.Target.cs` — build targets (BuildSettings V6, include order `Unreal5_7`). New modules must be added to `ExtraModuleNames` here and to `Modules` in the `.uproject`.
-- `Source/Fellowship/` subfolders (`Character/`, `Game/`, `Player/`) mirror `Content/Blueprints/`; put a C++ class in the folder matching its Blueprint subclass. The module root is on the include path (`Fellowship.Build.cs`), so cross-folder includes are written `#include "Character/FSCharacter.h"`.
+- `Source/Fellowship/` subfolders (`Character/`, `Game/`, `Inventory/`, `Player/`) mirror `Content/Blueprints/`; put a C++ class in the folder matching its Blueprint subclass. The module root is on the include path (`Fellowship.Build.cs`), so cross-folder includes are written `#include "Character/FSCharacter.h"`.
 - `Source/Fellowship/Fellowship.Build.cs` — module deps. Public deps already include `EnhancedInput`; Slate and OnlineSubsystem are present as commented-out lines.
 - `Config/Default*.ini` — project settings. Rendering is configured for Lumen GI/reflections, hardware ray tracing, Virtual Shadow Maps, Substrate materials, DX12/SM6, no static lighting.
 - `Content/` — binary `.uasset`/`.umap` files; edit through the editor, not as text.

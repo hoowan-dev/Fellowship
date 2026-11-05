@@ -62,6 +62,21 @@ void AFSCharacter::SetMaxLookPitch(float NewMaxLookPitch)
 	ApplyLookPitchLimits();
 }
 
+void AFSCharacter::SetInventoryViewBonesHidden(bool bHide)
+{
+	for (const FName& Bone : InventoryViewHiddenBones)
+	{
+		if (bHide)
+		{
+			GetMesh()->HideBoneByName(Bone, PBO_None);
+		}
+		else
+		{
+			GetMesh()->UnHideBoneByName(Bone);
+		}
+	}
+}
+
 void AFSCharacter::NotifyControllerChanged()
 {
 	Super::NotifyControllerChanged();
