@@ -118,14 +118,19 @@ void AFSHUD::DrawEquipmentSlots()
 		return Item ? Item->DisplayName : FText::GetEmpty();
 	};
 
-	DrawEquipmentSlot(AFSEquipmentDisplay::GetSlotCentre(ViewportSize, EFSEquipmentSlot::LeftQuickSlot), GetItemName(Inventory->GetQuickSlotItem(EFSQuickSlot::Left)), UFSInventoryComponent::GetQuickSlotName(EFSQuickSlot::Left));
+	// The quick slots belong to the backpack
+	if (Inventory->HasBackpack())
+	{
+		DrawEquipmentSlot(AFSEquipmentDisplay::GetSlotCentre(ViewportSize, EFSEquipmentSlot::LeftQuickSlot), GetItemName(Inventory->GetQuickSlotItem(EFSQuickSlot::Left)), UFSInventoryComponent::GetQuickSlotName(EFSQuickSlot::Left));
+		DrawEquipmentSlot(AFSEquipmentDisplay::GetSlotCentre(ViewportSize, EFSEquipmentSlot::RightQuickSlot), GetItemName(Inventory->GetQuickSlotItem(EFSQuickSlot::Right)), UFSInventoryComponent::GetQuickSlotName(EFSQuickSlot::Right));
+	}
+
 	DrawEquipmentSlot(AFSEquipmentDisplay::GetSlotCentre(ViewportSize, EFSEquipmentSlot::LeftHand), GetItemName(Inventory->GetHandItem(EFSHand::Left)), UFSInventoryComponent::GetHandSlotName(EFSHand::Left));
 
-	const FText BackpackName = LOCTEXT("BackpackSlot", "Backpack");
-	DrawEquipmentSlot(AFSEquipmentDisplay::GetSlotCentre(ViewportSize, EFSEquipmentSlot::Backpack), BackpackName, BackpackName);
+	const UFSItemDefinition* Backpack = Inventory->GetBackpack();
+	DrawEquipmentSlot(AFSEquipmentDisplay::GetSlotCentre(ViewportSize, EFSEquipmentSlot::Backpack), Backpack ? Backpack->DisplayName : FText::GetEmpty(), LOCTEXT("BackpackSlot", "Backpack"));
 
 	DrawEquipmentSlot(AFSEquipmentDisplay::GetSlotCentre(ViewportSize, EFSEquipmentSlot::RightHand), GetItemName(Inventory->GetHandItem(EFSHand::Right)), UFSInventoryComponent::GetHandSlotName(EFSHand::Right));
-	DrawEquipmentSlot(AFSEquipmentDisplay::GetSlotCentre(ViewportSize, EFSEquipmentSlot::RightQuickSlot), GetItemName(Inventory->GetQuickSlotItem(EFSQuickSlot::Right)), UFSInventoryComponent::GetQuickSlotName(EFSQuickSlot::Right));
 }
 
 void AFSHUD::DrawEquipmentSlot(const FVector2D& Centre, const FText& Name, const FText& SlotName)
@@ -168,10 +173,17 @@ void AFSHUD::DrawInventorySlotNames()
 		DrawSlotName(UFSInventoryComponent::GetHandSlotName(AFSInventoryRig::GetHandOfSlot(HandSlot)), Rig->GetHandSlotLabelLocation(HandSlot));
 	}
 
+	if (!Rig->HasBackpack())
+	{
+		return;
+	}
+
 	for (int32 QuickSlot = 0; QuickSlot < AFSInventoryRig::QuickSlotCount; ++QuickSlot)
 	{
 		DrawSlotName(UFSInventoryComponent::GetQuickSlotName(AFSInventoryRig::GetQuickSlotOfIndex(QuickSlot)), Rig->GetQuickSlotLabelLocation(QuickSlot));
 	}
+
+	DrawSlotName(LOCTEXT("DropBackpackButton", "Drop Backpack"), Rig->GetDropBackpackButtonLabelLocation());
 }
 
 void AFSHUD::DrawShadedRing(const FVector2D& Centre, float Radius)

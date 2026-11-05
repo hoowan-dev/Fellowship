@@ -8,10 +8,11 @@
 #include "Inventory/FSWeaponStance.h"
 #include "FSEquipmentComponent.generated.h"
 
+class USkeletalMeshComponent;
 class UStaticMeshComponent;
 
 /**
- * Shows what the player's hands hold on the character, and whether those weapons are drawn or sheathed on the back.
+ * Shows what the player's hands hold on the character, whether those weapons are drawn or sheathed on the back, and the backpack being worn.
  * The items themselves belong to the inventory, so this only ever follows it.
  */
 UCLASS(ClassGroup = (Inventory), meta = (BlueprintSpawnableComponent))
@@ -62,7 +63,12 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category = "Equipment|Sockets")
 	FTransform LeftSheathOffset = FTransform(FRotator(130.0, 0.0, 0.0), FVector(16.0, -18.0, 18.0));
 
-	// Follows this inventory's hands. Null shows nothing.
+	// Where the worn backpack's mesh goes, with no offset because backpack meshes are made with their pivot at this bone.
+	// The character's mesh has a backpack of its own skinned to this bone, which is hidden so that only the worn one shows.
+	UPROPERTY(EditDefaultsOnly, Category = "Equipment|Sockets")
+	FName BackpackBone = TEXT("BackpackBone");
+
+	// Follows this inventory's hands and backpack. Null shows nothing.
 	void SetInventory(UFSInventoryComponent* NewInventory);
 
 	UFUNCTION(BlueprintPure, Category = "Equipment")
@@ -83,18 +89,25 @@ public:
 	// The stance to animate with right now. Null only if Unarmed Stance isn't set.
 	const UFSWeaponStance* GetCurrentStance() const;
 
-	// Hides the weapons without changing where they are, such as while the camera is inside the character's head
+	// Hides the weapons and backpack without changing where they are, such as while the camera is inside the character's head
 	void SetMeshesHidden(bool bHidden);
 
 	// Null until something has been shown in that hand
 	FORCEINLINE UStaticMeshComponent* GetHandMesh(EFSHand Hand) const { return HandMeshes[static_cast<int32>(Hand)]; }
 
+	// Null until a backpack has been worn
+	FORCEINLINE UStaticMeshComponent* GetBackpackMesh() const { return BackpackMesh; }
+
 private:
 	void HandleHandItemsChanged();
 
-	// Matches the meshes to what's held and where it should be
+	// Matches the meshes to what's held and worn, and where they should be
 	void RefreshMeshes();
 	void RefreshMesh(EFSHand Hand);
+	void RefreshBackpackMesh();
+
+	// A mesh to show an item on the character
+	UStaticMeshComponent* CreateAttachedMesh(USkeletalMeshComponent* CharacterMesh) const;
 
 	bool IsHoldingAnything() const;
 	EFSWeaponType GetHeldWeaponType(EFSHand Hand) const;
@@ -104,6 +117,9 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UStaticMeshComponent> HandMeshes[2];
+
+	UPROPERTY(Transient)
+	TObjectPtr<UStaticMeshComponent> BackpackMesh;
 
 	bool bDrawn = false;
 	bool bMeshesHidden = false;

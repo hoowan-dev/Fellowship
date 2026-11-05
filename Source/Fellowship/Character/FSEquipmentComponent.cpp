@@ -23,6 +23,7 @@ void UFSEquipmentComponent::SetInventory(UFSInventoryComponent* NewInventory)
 	if (Inventory)
 	{
 		Inventory->OnHandItemsChanged.RemoveAll(this);
+		Inventory->OnBackpackChanged.RemoveAll(this);
 	}
 
 	Inventory = NewInventory;
@@ -30,6 +31,7 @@ void UFSEquipmentComponent::SetInventory(UFSInventoryComponent* NewInventory)
 	if (Inventory)
 	{
 		Inventory->OnHandItemsChanged.AddUObject(this, &UFSEquipmentComponent::HandleHandItemsChanged);
+		Inventory->OnBackpackChanged.AddUObject(this, &UFSEquipmentComponent::RefreshBackpackMesh);
 	}
 
 	HandleHandItemsChanged();
@@ -108,6 +110,61 @@ void UFSEquipmentComponent::RefreshMeshes()
 {
 	RefreshMesh(EFSHand::Right);
 	RefreshMesh(EFSHand::Left);
+	RefreshBackpackMesh();
+}
+
+void UFSEquipmentComponent::RefreshBackpackMesh()
+{
+	const ACharacter* Character = Cast<ACharacter>(GetOwner());
+	USkeletalMeshComponent* CharacterMesh = Character ? Character->GetMesh() : nullptr;
+	if (!CharacterMesh)
+	{
+		return;
+	}
+
+	// Done every time because the inventory view shows this bone again as it closes, if it's set up to hide it. Bones keep their
+	// transforms while hidden, so the worn mesh still follows it.
+	CharacterMesh->HideBoneByName(BackpackBone, PBO_None);
+
+	const UFSItemDefinition* Backpack = Inventory ? Inventory->GetBackpack() : nullptr;
+	UStaticMesh* Mesh = Backpack ? Backpack->Mesh.Get() : nullptr;
+
+	if (!Mesh)
+	{
+		if (BackpackMesh)
+		{
+			BackpackMesh->SetStaticMesh(nullptr);
+			BackpackMesh->SetVisibility(false);
+		}
+		return;
+	}
+
+	if (!BackpackMesh)
+	{
+		BackpackMesh = CreateAttachedMesh(CharacterMesh);
+	}
+
+	// A missing bone attaches to the mesh's root without complaint, leaving the backpack at the character's feet
+	if (CharacterMesh->GetSkeletalMeshAsset() && !CharacterMesh->DoesSocketExist(BackpackBone))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("%s has no socket or bone called %s for a backpack to attach to"), *GetNameSafe(CharacterMesh->GetSkeletalMeshAsset()), *BackpackBone.ToString());
+	}
+
+	BackpackMesh->SetStaticMesh(Mesh);
+	BackpackMesh->AttachToComponent(CharacterMesh, FAttachmentTransformRules::SnapToTargetNotIncludingScale, BackpackBone);
+	BackpackMesh->SetRelativeTransform(FTransform::Identity);
+	BackpackMesh->SetVisibility(!bMeshesHidden);
+}
+
+UStaticMeshComponent* UFSEquipmentComponent::CreateAttachedMesh(USkeletalMeshComponent* CharacterMesh) const
+{
+	UStaticMeshComponent* Mesh = NewObject<UStaticMeshComponent>(GetOwner());
+	Mesh->SetMobility(EComponentMobility::Movable);
+	Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	Mesh->SetCanEverAffectNavigation(false);
+	Mesh->SetupAttachment(CharacterMesh);
+	Mesh->RegisterComponent();
+	return Mesh;
 }
 
 void UFSEquipmentComponent::RefreshMesh(EFSHand Hand)
@@ -132,12 +189,7 @@ void UFSEquipmentComponent::RefreshMesh(EFSHand Hand)
 
 	if (!HandMesh)
 	{
-		HandMesh = NewObject<UStaticMeshComponent>(GetOwner());
-		HandMesh->SetMobility(EComponentMobility::Movable);
-		HandMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-		HandMesh->SetCanEverAffectNavigation(false);
-		HandMesh->SetupAttachment(CharacterMesh);
-		HandMesh->RegisterComponent();
+		HandMesh = CreateAttachedMesh(CharacterMesh);
 	}
 
 	const bool bRight = Hand == EFSHand::Right;

@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "Inventory/FSInventoryComponent.h"
 #include "FSItemPickup.generated.h"
 
 class ACharacter;
@@ -37,7 +38,13 @@ public:
 	UFUNCTION(BlueprintSetter)
 	void SetItem(UFSItemDefinition* NewItem);
 
-	// Moves the item into the inventory and removes this actor. Returns false, changing nothing, if it doesn't fit.
+	// Whether this pickup is a backpack, which is worn rather than stored
+	bool IsBackpack() const;
+
+	// What a dropped backpack still has inside it, which goes back on with it
+	void SetBackpackContents(const FFSBackpackContents& Contents);
+
+	// Moves the item into the inventory and removes this actor. Returns false, changing nothing, if it doesn't fit, or if it's a backpack and one is already on.
 	bool TryPickUp(UFSInventoryComponent* Inventory);
 
 	// Moves the item onto the inventory's cursor, which needs no room in the grid, and removes this actor. Returns false, changing nothing, if that can't be done.
@@ -65,4 +72,7 @@ protected:
 
 private:
 	void LogPickedUp() const;
+
+	UPROPERTY(Transient)
+	FFSBackpackContents BackpackContents;
 };

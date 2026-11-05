@@ -124,11 +124,6 @@ const FFSInventoryItem* AFSPlayerController::GetHoveredInventoryItem() const
 	return Inventory->FindItemAt(InventoryRig->GetHoveredCell());
 }
 
-const AFSInventoryRig* AFSPlayerController::GetInventoryRigDefaults() const
-{
-	return InventoryRigClass ? InventoryRigClass->GetDefaultObject<AFSInventoryRig>() : nullptr;
-}
-
 void AFSPlayerController::Interact()
 {
 	if (InventoryViewState != EFSInventoryViewState::Closed || !FSCharacter)
@@ -138,6 +133,11 @@ void AFSPlayerController::Interact()
 
 	AFSItemPickup* Pickup = FSCharacter->GetNearestPickup();
 	UFSInventoryComponent* Inventory = GetInventory();
+
+	if (Pickup && Pickup->IsBackpack() && Inventory && Inventory->HasBackpack())
+	{
+		DropBackpack();
+	}
 
 	if (!Pickup || Pickup->TryPickUp(Inventory))
 	{
@@ -157,8 +157,12 @@ void AFSPlayerController::SelectAtInventoryCursor()
 	{
 		UpdateHoveredInventoryCell();
 
-		// Outside the grid means tossing the carried item, so the hands and quick slots have to be checked first
-		if (InventoryRig->GetHoveredHandSlot() != INDEX_NONE)
+		// Outside the grid means tossing the carried item, so the button, hands and quick slots have to be checked first
+		if (InventoryRig->IsDropBackpackButtonHovered())
+		{
+			DropBackpack();
+		}
+		else if (InventoryRig->GetHoveredHandSlot() != INDEX_NONE)
 		{
 			SelectInventoryHand(AFSInventoryRig::GetHandOfSlot(InventoryRig->GetHoveredHandSlot()));
 		}
@@ -232,13 +236,41 @@ void AFSPlayerController::TossCarriedItem()
 		return;
 	}
 
-	const TSubclassOf<AFSItemPickup> PickupClass = TossedItemClass ? TossedItemClass : TSubclassOf<AFSItemPickup>(AFSItemPickup::StaticClass());
-
 	// Spawning fails while the world is being torn down, and the item is then still on the cursor rather than lost
-	if (AFSItemPickup::DropAtFeet(PickupClass, Inventory->GetCarriedItem().Definition, *FSCharacter))
+	if (AFSItemPickup::DropAtFeet(GetDroppedItemClass(), Inventory->GetCarriedItem().Definition, *FSCharacter))
 	{
 		Inventory->ClearCarriedItem();
 	}
+}
+
+void AFSPlayerController::DropBackpack()
+{
+	UFSInventoryComponent* Inventory = GetInventory();
+	if (!Inventory || !Inventory->HasBackpack() || !FSCharacter)
+	{
+		return;
+	}
+
+	// Spawning fails while the world is being torn down, and the backpack is then still being worn rather than lost
+	AFSItemPickup* Pickup = AFSItemPickup::DropAtFeet(GetDroppedItemClass(), Inventory->GetBackpack(), *FSCharacter);
+	if (!Pickup)
+	{
+		return;
+	}
+
+	FFSBackpackContents Contents;
+	Inventory->RemoveBackpack(Contents);
+	Pickup->SetBackpackContents(Contents);
+
+	if (InventoryViewState != EFSInventoryViewState::Closed)
+	{
+		RefreshInventoryView();
+	}
+}
+
+TSubclassOf<AFSItemPickup> AFSPlayerController::GetDroppedItemClass() const
+{
+	return TossedItemClass ? TossedItemClass : TSubclassOf<AFSItemPickup>(AFSItemPickup::StaticClass());
 }
 
 void AFSPlayerController::RefreshInventoryView()
@@ -462,9 +494,11 @@ void AFSPlayerController::UpdateHoveredInventoryCell()
 	FIntPoint Cell(INDEX_NONE, INDEX_NONE);
 	int32 HandSlot = INDEX_NONE;
 	int32 QuickSlot = INDEX_NONE;
+	bool bOverDropBackpackButton = false;
 
 	if (DeprojectMousePositionToWorld(RayOrigin, RayDirection))
 	{
+		bOverDropBackpackButton = InventoryRig->IsDropBackpackButtonOnWorldRay(RayOrigin, RayDirection);
 		InventoryRig->GetCellFromWorldRay(RayOrigin, RayDirection, Cell);
 		InventoryRig->GetHandSlotFromWorldRay(RayOrigin, RayDirection, HandSlot);
 		InventoryRig->GetQuickSlotFromWorldRay(RayOrigin, RayDirection, QuickSlot);
@@ -474,4 +508,5 @@ void AFSPlayerController::UpdateHoveredInventoryCell()
 	InventoryRig->SetHoveredCell(Cell);
 	InventoryRig->SetHoveredHandSlot(HandSlot);
 	InventoryRig->SetHoveredQuickSlot(QuickSlot);
+	InventoryRig->SetDropBackpackButtonHovered(bOverDropBackpackButton);
 }

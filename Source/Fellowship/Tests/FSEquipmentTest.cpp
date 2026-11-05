@@ -11,6 +11,7 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/Engine.h"
+#include "Engine/SkeletalMesh.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
 #include "GameFramework/WorldSettings.h"
@@ -63,6 +64,11 @@ namespace
 
 			AFSPlayerState* PlayerState = World->SpawnActor<AFSPlayerState>();
 			Inventory = PlayerState->GetInventory();
+
+			UFSItemDefinition* Backpack = NewObject<UFSItemDefinition>();
+			Backpack->ItemType = EFSItemType::Backpack;
+			Backpack->Size = FIntPoint(12, 8);
+			Inventory->EquipBackpack(Backpack);
 
 			Controller = World->SpawnActor<AFSPlayerController>();
 			Controller->PlayerState = PlayerState;
@@ -392,6 +398,62 @@ bool FFSEquipmentClimbingTest::RunTest(const FString& Parameters)
 	Test.Character->GetCharacterMovement()->SetMovementMode(MOVE_Walking);
 	TestFalse(TEXT("They stay sheathed after climbing"), Test.Equipment->IsDrawn());
 	TestTrue(TEXT("Until drawn again"), Test.Equipment->Draw());
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSWornBackpackTest, "Fellowship.Equipment.Backpack.AttachesToTheBackpackBone", EquipmentTestFlags)
+
+bool FFSWornBackpackTest::RunTest(const FString& Parameters)
+{
+	USkeletalMesh* CharacterMeshAsset = LoadObject<USkeletalMesh>(nullptr, TEXT("/Game/Meshes/TinyHero/OneMeshCharacter/OneMeshCharacter01_SK.OneMeshCharacter01_SK"));
+	UStaticMesh* Cube = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
+	if (!TestNotNull(TEXT("The character's mesh loads"), CharacterMeshAsset) || !TestNotNull(TEXT("The test mesh loads"), Cube))
+	{
+		return false;
+	}
+
+	const FName BoneName(TEXT("BackpackBone"));
+
+	FEquipmentTestWorld Test;
+	USkeletalMeshComponent* CharacterMesh = Test.Character->GetMesh();
+	CharacterMesh->SetSkeletalMeshAsset(CharacterMeshAsset);
+	TestTrue(TEXT("The character's mesh has the bone"), CharacterMesh->DoesSocketExist(BoneName));
+
+	// The test world's backpack has no mesh of its own to show
+	FFSBackpackContents Contents;
+	Test.Inventory->RemoveBackpack(Contents);
+	TestTrue(TEXT("With no backpack, the character's own is hidden"), CharacterMesh->IsBoneHiddenByName(BoneName));
+
+	UFSItemDefinition* Backpack = NewObject<UFSItemDefinition>();
+	Backpack->ItemType = EFSItemType::Backpack;
+	Backpack->Size = FIntPoint(8, 8);
+	Backpack->Mesh = Cube;
+	Test.Inventory->EquipBackpack(Backpack);
+
+	UStaticMeshComponent* Worn = Test.Equipment->GetBackpackMesh();
+	if (!TestNotNull(TEXT("Putting one on shows it"), Worn))
+	{
+		return false;
+	}
+
+	TestTrue(TEXT("It's the backpack's mesh"), Worn->GetStaticMesh() == Cube);
+	TestTrue(TEXT("It's attached to the character's mesh"), Worn->GetAttachParent() == CharacterMesh);
+	TestEqual(TEXT("At the bone"), Worn->GetAttachSocketName(), BoneName);
+	TestTrue(TEXT("With no offset"), Worn->GetRelativeTransform().Equals(FTransform::Identity, 0.001));
+	TestTrue(TEXT("It's visible"), Worn->IsVisible());
+	TestTrue(TEXT("The character's own stays hidden"), CharacterMesh->IsBoneHiddenByName(BoneName));
+
+	Test.Character->SetInventoryViewBonesHidden(true);
+	TestFalse(TEXT("It's hidden in the inventory view"), Worn->IsVisible());
+
+	Test.Character->SetInventoryViewBonesHidden(false);
+	TestTrue(TEXT("And shown again afterwards"), Worn->IsVisible());
+	TestTrue(TEXT("Without bringing back the character's own"), CharacterMesh->IsBoneHiddenByName(BoneName));
+
+	Test.Inventory->RemoveBackpack(Contents);
+	TestFalse(TEXT("Taking it off removes it"), Worn->IsVisible());
+	TestNull(TEXT("And its mesh"), Worn->GetStaticMesh().Get());
 
 	return true;
 }

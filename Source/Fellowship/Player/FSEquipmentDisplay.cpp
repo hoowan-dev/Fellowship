@@ -7,7 +7,6 @@
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Inventory/FSInventoryComponent.h"
-#include "Inventory/FSInventoryRig.h"
 #include "Inventory/FSItemDefinition.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
@@ -280,8 +279,8 @@ void AFSEquipmentDisplay::Tick(float DeltaTime)
 	UpdateItem(EFSEquipmentSlot::RightHand, Inventory->GetHandItem(EFSHand::Right));
 	UpdateItem(EFSEquipmentSlot::RightQuickSlot, Inventory->GetQuickSlotItem(EFSQuickSlot::Right));
 
-	const AFSInventoryRig* Rig = PlayerController->GetInventoryRigDefaults();
-	UpdateSlot(*PlayerController, EFSEquipmentSlot::Backpack, Rig ? Rig->GetPackMesh() : nullptr, Rig ? Rig->GetPackRotation() : FRotator::ZeroRotator);
+	const UFSItemDefinition* Backpack = Inventory->GetBackpack();
+	UpdateSlot(*PlayerController, EFSEquipmentSlot::Backpack, Backpack ? Backpack->Mesh.Get() : nullptr, Backpack ? Backpack->InventoryMeshRotation : FRotator::ZeroRotator);
 
 	UpdateCompass(*PlayerController);
 }

@@ -93,9 +93,6 @@ public:
 	// The item under the mouse in the open inventory, or null if there isn't one
 	const FFSInventoryItem* GetHoveredInventoryItem() const;
 
-	// The settings of the inventory rig, which is available before the rig itself is spawned. Null if no class is set.
-	const AFSInventoryRig* GetInventoryRigDefaults() const;
-
 	UFUNCTION(BlueprintCallable, Category = "Inventory")
 	void OpenInventory();
 
@@ -105,8 +102,12 @@ public:
 
 	// Picks up the nearest item, if there's one in range and the inventory is closed. An item with no room
 	// goes on the cursor instead, and the inventory opens so the player can make room for it.
+	// A backpack replaces the one being worn, which is left on the ground.
 	UFUNCTION(BlueprintCallable, Category = "Inventory")
 	void Interact();
+
+	// Leaves the backpack on the floor with the grid and quick slots still inside it. The hands and the cursor keep what they hold.
+	void DropBackpack();
 
 	// What selecting a cell does in the open inventory: picks up the item there or places the carried one. INDEX_NONE means outside the grid, which tosses the carried item.
 	void SelectInventoryCell(const FIntPoint& Cell);
@@ -133,6 +134,9 @@ private:
 	void SelectAtInventoryCursor();
 	void TossCarriedItem();
 	void RefreshInventoryView();
+
+	// What a dropped item is spawned as
+	TSubclassOf<AFSItemPickup> GetDroppedItemClass() const;
 
 	// Puts everything back without a camera blend, for when the character is going away
 	void CloseInventoryImmediately();

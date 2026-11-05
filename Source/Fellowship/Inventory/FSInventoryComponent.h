@@ -35,6 +35,7 @@ enum class EFSQuickSlot : uint8
 };
 
 DECLARE_MULTICAST_DELEGATE(FFSOnHandItemsChanged);
+DECLARE_MULTICAST_DELEGATE(FFSOnBackpackChanged);
 
 USTRUCT()
 struct FELLOWSHIP_API FFSInventoryItem
@@ -56,9 +57,23 @@ struct FELLOWSHIP_API FFSInventoryItem
 	uint8 Rotation = 0;
 };
 
+// What's inside a backpack, which stays with it when it's dropped
+USTRUCT()
+struct FELLOWSHIP_API FFSBackpackContents
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	TArray<FFSInventoryItem> Items;
+
+	UPROPERTY()
+	FFSInventoryItem QuickSlotItems[2];
+};
+
 /**
  * The items a player owns. Lives on the player state, so it outlasts the character.
  * One item at a time can be carried on the cursor, and each hand and quick slot can hold one. Those items cover no cells and aren't in GetItems().
+ * The grid and the quick slots belong to the backpack, so without one only the hands and the cursor can hold anything.
  */
 UCLASS(ClassGroup = (Inventory), meta = (BlueprintSpawnableComponent))
 class FELLOWSHIP_API UFSInventoryComponent : public UActorComponent
@@ -74,11 +89,31 @@ public:
 	// What the player sees a quick slot called
 	static FText GetQuickSlotName(EFSQuickSlot QuickSlot);
 
-	// Whether there's space for the item, in either orientation
+	// Whether there's a backpack with space for the item in its grid, in either orientation
 	bool CanAddItem(const UFSItemDefinition* Definition) const;
 
-	// Puts the item in the first open space. Returns false, changing nothing, if it doesn't fit.
+	// Puts the item in the first open space in the grid. Returns false, changing nothing, if it doesn't fit or there's no backpack.
 	bool AddItem(UFSItemDefinition* Definition);
+
+	// Whether StoreItem has somewhere to put the item
+	bool CanStoreItem(const UFSItemDefinition* Definition) const;
+
+	// Puts a newly picked up item in the first of these with room: the right hand, the left hand, the right quick slot, the left quick slot, then the grid.
+	// Returns false, changing nothing, if there's no room or the item is a backpack.
+	bool StoreItem(UFSItemDefinition* Definition);
+
+	// Puts on a backpack, along with what's inside it. Returns false, changing nothing, if one is already on or the item isn't a backpack.
+	bool EquipBackpack(UFSItemDefinition* NewBackpack, const FFSBackpackContents& Contents = FFSBackpackContents());
+
+	// Takes off the backpack, handing over what's inside it. The hands and the cursor keep what they hold. Returns false if there's no backpack.
+	bool RemoveBackpack(FFSBackpackContents& OutContents);
+
+	FORCEINLINE bool HasBackpack() const { return Backpack != nullptr; }
+
+	// The backpack being worn, or null if there isn't one
+	FORCEINLINE UFSItemDefinition* GetBackpack() const { return Backpack; }
+
+	FFSOnBackpackChanged OnBackpackChanged;
 
 	// The item covering a cell, or null if there isn't one
 	const FFSInventoryItem* FindItemAt(const FIntPoint& Cell) const;
@@ -86,7 +121,7 @@ public:
 	// Takes the item covering a cell out of the grid and carries it. Returns false, changing nothing, if there's no item there or one is already carried.
 	bool PickUpItemAt(const FIntPoint& Cell);
 
-	// Carries an item that wasn't in the inventory. Returns false, changing nothing, if there's no definition or one is already carried.
+	// Carries an item that wasn't in the inventory. Returns false, changing nothing, if there's no definition, one is already carried or the item is a backpack.
 	bool CarryNewItem(UFSItemDefinition* Definition);
 
 	// What would happen with the carried item's top left in this cell. Blocked if nothing is carried.
@@ -116,7 +151,7 @@ public:
 
 	FFSOnHandItemsChanged OnHandItemsChanged;
 
-	// Puts the carried item in a quick slot, and what the slot held becomes the carried item. Returns false, changing nothing, if both are empty.
+	// Puts the carried item in a quick slot, and what the slot held becomes the carried item. Returns false, changing nothing, if both are empty or there's no backpack.
 	bool SwapCarriedItemWithQuickSlot(EFSQuickSlot QuickSlot);
 
 	// What a quick slot holds. Its definition is null if the slot is empty.
@@ -125,19 +160,19 @@ public:
 	FORCEINLINE const FFSInventoryGrid& GetGrid() const { return Grid; }
 	FORCEINLINE const TArray<FFSInventoryItem>& GetItems() const { return Items; }
 
-protected:
-	UPROPERTY(EditDefaultsOnly, Category = "Inventory", meta = (ClampMin = "1"))
-	FIntPoint GridSize = FIntPoint(12, 8);
-
-	virtual void InitializeComponent() override;
-
 private:
 	// Moves an item from the grid to the cursor
 	void LiftItem(int32 ItemId);
 
+	// A new item for a hand or quick slot, which covers no cells
+	FFSInventoryItem MakeSlotItem(UFSItemDefinition* Definition);
+
 	// Swaps the carried item with one held outside the grid, logging what's unequipped and equipped. SlotName is where it's held.
 	// Returns false, changing nothing, if both are empty.
 	bool SwapCarriedItemWith(FFSInventoryItem& HeldItem, const FText& SlotName);
+
+	UPROPERTY(Transient)
+	TObjectPtr<UFSItemDefinition> Backpack;
 
 	UPROPERTY(Transient)
 	FFSInventoryGrid Grid;

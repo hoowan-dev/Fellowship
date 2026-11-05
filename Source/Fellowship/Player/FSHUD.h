@@ -29,7 +29,7 @@ private:
 	// Draws one of those circles, with what it's for named above and what it holds named underneath, if anything.
 	void DrawEquipmentSlot(const FVector2D& Centre, const FText& Name, const FText& SlotName);
 
-	// Draws the name of each hand and quick slot above its cell in the open inventory
+	// Draws the name of each hand and quick slot above its cell in the open inventory, and the label on the button that drops the backpack
 	void DrawInventorySlotNames();
 
 	// Draws a shaded ring, whose radius doesn't include its thickness. It's empty in the middle because

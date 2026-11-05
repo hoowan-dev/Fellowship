@@ -71,8 +71,6 @@ void AFSCharacter::SetMaxLookPitch(float NewMaxLookPitch)
 
 void AFSCharacter::SetInventoryViewBonesHidden(bool bHide)
 {
-	Equipment->SetMeshesHidden(bHide);
-
 	for (const FName& Bone : InventoryViewHiddenBones)
 	{
 		if (bHide)
@@ -84,6 +82,9 @@ void AFSCharacter::SetInventoryViewBonesHidden(bool bHide)
 			GetMesh()->UnHideBoneByName(Bone);
 		}
 	}
+
+	// Last, because the character's own backpack has to stay hidden even if its bone was just shown again
+	Equipment->SetMeshesHidden(bHide);
 }
 
 void AFSCharacter::AddNearbyPickup(AFSItemPickup* Pickup)

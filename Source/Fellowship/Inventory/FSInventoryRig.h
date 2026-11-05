@@ -9,6 +9,7 @@
 class ACharacter;
 class UCameraComponent;
 class UFSInventoryComponent;
+class UFSItemDefinition;
 class UInstancedStaticMeshComponent;
 class UMaterialInterface;
 class UPointLightComponent;
@@ -21,7 +22,8 @@ enum class EFSQuickSlot : uint8;
 
 /**
  * What the player sees with the inventory open: a first person camera looking at the held backpack, with the grid floating between them,
- * the player's forearms raised either side of it with a large cell over each hand, and a cell for each quick slot above it.
+ * the player's forearms raised either side of it with a large cell over each hand, a cell for each quick slot above it, and a button below it that drops the backpack.
+ * Without a backpack only the forearms and the hands' cells are there.
  * Exists only on the owning client. The grid's cells run from (0, 0) at the top left.
  */
 UCLASS()
@@ -54,9 +56,6 @@ public:
 	// Which of the inventory's quick slots an instance of the quick slots is for
 	static EFSQuickSlot GetQuickSlotOfIndex(int32 QuickSlotIndex);
 
-	FORCEINLINE UStaticMesh* GetPackMesh() const { return PackMeshAsset; }
-	FORCEINLINE const FRotator& GetPackRotation() const { return PackRotation; }
-
 	AFSInventoryRig();
 
 	virtual void Tick(float DeltaTime) override;
@@ -88,10 +87,18 @@ public:
 	// Highlights a quick slot, showing whether the carried item would go in it or swap with what's there. INDEX_NONE clears the highlight.
 	void SetHoveredQuickSlot(int32 QuickSlot);
 
+	// Whether a world space ray passes through the button that drops the backpack. There's no button without a backpack.
+	bool IsDropBackpackButtonOnWorldRay(const FVector& RayOrigin, const FVector& RayDirection) const;
+
+	// Highlights the button that drops the backpack, or clears the highlight
+	void SetDropBackpackButtonHovered(bool bHovered);
+
+	FORCEINLINE bool IsDropBackpackButtonHovered() const { return bDropBackpackButtonHovered; }
+
 	// Moves the light and the carried item to where the mouse points, given as a world space ray
 	void SetCursorRay(const FVector& RayOrigin, const FVector& RayDirection);
 
-	// Matches the grid, the item meshes, their borders and the carried item to what the inventory holds
+	// Matches the pack, the grid, the item meshes, their borders and the carried item to what the inventory holds
 	void ShowInventory(const UFSInventoryComponent& Inventory);
 
 	// Where a held item's mesh sits relative to the grid, upright and fitted to the hand's cell
@@ -121,6 +128,11 @@ public:
 	FORCEINLINE UStaticMeshComponent* GetQuickSlotItemMesh(int32 QuickSlot) const { return QuickSlot == LeftQuickSlot ? LeftQuickSlotItemMesh : RightQuickSlotItemMesh; }
 	FORCEINLINE int32 GetHoveredQuickSlot() const { return HoveredQuickSlot; }
 	FORCEINLINE UPoseableMeshComponent* GetArms() const { return Arms; }
+	FORCEINLINE UStaticMeshComponent* GetPack() const { return Pack; }
+	FORCEINLINE UInstancedStaticMeshComponent* GetDropBackpackButton() const { return DropBackpackButton; }
+
+	// Whether the last inventory shown had a backpack, which is what the grid, quick slots and button belong to. True until one is shown.
+	FORCEINLINE bool HasBackpack() const { return bHasBackpack; }
 
 	// The centre of a hand's cell on the plane of the grid, in cm from the grid's centre: X to the right and Y up
 	FVector2D GetHandSlotCentre(int32 HandSlot) const;
@@ -134,15 +146,28 @@ public:
 	// The point in the world to centre a quick slot's name on, just above its cell
 	FVector GetQuickSlotLabelLocation(int32 QuickSlot) const;
 
+	// The centre of the button that drops the backpack on the plane of the grid, in cm from the grid's centre: X to the right and Y up
+	FVector2D GetDropBackpackButtonCentre() const;
+
+	// The point in the world to centre the button's label on
+	FVector GetDropBackpackButtonLabelLocation() const;
+
 protected:
 	virtual void BeginPlay() override;
 
 	void BuildGrid();
 	void BuildHandSlots();
 	void BuildQuickSlots();
+	void BuildDropBackpackButton();
 	void PoseArms();
 	void PoseArm(bool bLeft);
-	void FitPackMesh();
+
+	// Shows the backpack's mesh in the background, turned by its Inventory Mesh Rotation. Null shows nothing.
+	void FitPackMesh(const UFSItemDefinition* Backpack);
+
+	// Shows the grid and everything on it if the display is showing and it's scaled in, except for what needs a backpack when there isn't one
+	void UpdateGridVisibility();
+
 	void AddItemBorder(const FFSInventoryItem& Item);
 	bool IsCellInGrid(const FIntPoint& Cell) const;
 
@@ -153,6 +178,7 @@ protected:
 	void HighlightCells(TArray<FIntPoint>&& Cells, int32 CellData);
 	FTransform GetSlotItemTransform(const FFSInventoryItem& Item, const FVector2D& SlotCentre, double SlotSize) const;
 	FVector GetSlotLabelLocation(const FVector2D& SlotCentre, double SlotSize) const;
+	FVector GetLocationOnGrid(const FVector2D& GridPoint) const;
 
 	// Moves a highlight between the cells of one kind of slot. Hovered and HoveredData are that kind's record of what it has set.
 	void SetHoveredSlot(UInstancedStaticMeshComponent& Slots, int32& Hovered, int32& HoveredData, int32 NewHovered, bool bNewHoveredTaken);
@@ -204,6 +230,10 @@ protected:
 	// Attached to the grid so it scales in and out along with it. Has no mesh while the slot is empty.
 	UPROPERTY(VisibleAnywhere, Category = "Inventory")
 	TObjectPtr<UStaticMeshComponent> RightQuickSlotItemMesh;
+
+	// A wide cell below the grid that drops the backpack when selected. Attached to the grid so it scales in and out along with it.
+	UPROPERTY(VisibleAnywhere, Category = "Inventory")
+	TObjectPtr<UInstancedStaticMeshComponent> DropBackpackButton;
 
 	// A copy of the character's mesh with its arms posed in the display's frame and the rest of its body shrunk away, since it's all one mesh
 	UPROPERTY(VisibleAnywhere, Category = "Inventory")
@@ -298,8 +328,16 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Quick Slots", meta = (ClampMin = "0.0", Units = cm))
 	float QuickSlotGap = 1.5f;
 
-	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Pack")
-	TObjectPtr<UStaticMesh> PackMeshAsset;
+	// Wide enough for its label
+	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Drop Backpack Button", meta = (ClampMin = "0.1", Units = cm))
+	float DropBackpackButtonWidth = 12.0f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Drop Backpack Button", meta = (ClampMin = "0.1", Units = cm))
+	float DropBackpackButtonHeight = 2.5f;
+
+	// Between the bottom of the grid and the button
+	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Drop Backpack Button", meta = (ClampMin = "0.0", Units = cm))
+	float DropBackpackButtonGap = 1.0f;
 
 	// From the camera to the centre of the pack
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Pack", meta = (ClampMin = "1.0", Units = cm))
@@ -308,10 +346,6 @@ protected:
 	// The pack is scaled so its longest side is this long, whatever size the mesh is
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Pack", meta = (ClampMin = "1.0", Units = cm))
 	float PackDisplaySize = 55.0f;
-
-	// Turns the mesh so its front faces the camera, which is towards -X
-	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Pack")
-	FRotator PackRotation = FRotator(0.0f, -90.0f, 0.0f);
 
 	// How far the camera looks down
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory|View", meta = (ClampMin = "-89.0", ClampMax = "89.0", Units = deg))
@@ -325,7 +359,7 @@ private:
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UStaticMeshComponent>> ItemMeshes;
 
-	// Replaced by the inventory's size when it's shown
+	// Replaced by the size of the backpack's grid when it's shown
 	int32 GridWidth = 8;
 	int32 GridHeight = 8;
 
@@ -342,6 +376,10 @@ private:
 
 	// Which of the cell custom data values the hovered quick slot has set
 	int32 HoveredQuickSlotData = CellHoveredData;
+
+	bool bDropBackpackButtonHovered = false;
+
+	bool bHasBackpack = true;
 
 	TArray<FIntPoint> HighlightedCells;
 

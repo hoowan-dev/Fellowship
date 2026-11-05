@@ -95,9 +95,20 @@ void AFSItemPickup::SetItem(UFSItemDefinition* NewItem)
 	Mesh->SetRelativeLocation(ItemMesh ? -ItemMesh->GetBounds().Origin : FVector::ZeroVector);
 }
 
+bool AFSItemPickup::IsBackpack() const
+{
+	return Item && Item->ItemType == EFSItemType::Backpack;
+}
+
+void AFSItemPickup::SetBackpackContents(const FFSBackpackContents& Contents)
+{
+	BackpackContents = Contents;
+}
+
 bool AFSItemPickup::TryPickUp(UFSInventoryComponent* Inventory)
 {
-	if (!Inventory || !Inventory->AddItem(Item))
+	const bool bPickedUp = Inventory && (IsBackpack() ? Inventory->EquipBackpack(Item, BackpackContents) : Inventory->StoreItem(Item));
+	if (!bPickedUp)
 	{
 		return false;
 	}
@@ -128,7 +139,14 @@ FText AFSItemPickup::GetPromptText(const UFSInventoryComponent* Inventory) const
 {
 	const FText ItemName = Item ? Item->DisplayName : FText::GetEmpty();
 
-	if (Inventory && Inventory->CanAddItem(Item))
+	if (IsBackpack())
+	{
+		return Inventory && Inventory->HasBackpack()
+			? FText::Format(LOCTEXT("SwapBackpackPrompt", "[E / X] Swap backpack for {0}"), ItemName)
+			: FText::Format(LOCTEXT("PickUpBackpackPrompt", "[E / X] Pick up {0}"), ItemName);
+	}
+
+	if (Inventory && Inventory->CanStoreItem(Item))
 	{
 		return FText::Format(LOCTEXT("PickUpPrompt", "[E / X] Pick up {0}"), ItemName);
 	}

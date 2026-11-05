@@ -65,9 +65,9 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, BlueprintSetter = SetMaxLookPitch, Category = "Camera", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", ClampMax = "89.9"))
 	float MaxLookPitch = 89.9f;
 
-	// Hidden while looking at the backpack in first person: the head would block the camera, and the pack is held in front instead
+	// Hidden while looking at the backpack in first person, because the head would block the camera. The worn backpack's mesh is hidden along with the weapons.
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory")
-	TArray<FName> InventoryViewHiddenBones = { TEXT("head"), TEXT("BackpackBone") };
+	TArray<FName> InventoryViewHiddenBones = { TEXT("head") };
 
 public:
 	// Sets default values for this character's properties

@@ -12,7 +12,10 @@ UENUM(BlueprintType)
 enum class EFSItemType : uint8
 {
 	Consumable,
-	Weapon
+	Weapon,
+
+	// Isn't stored in the inventory, but is what makes the grid and quick slots available. Its Size is the size of the grid, and its mesh and Inventory Mesh Rotation are what the HUD and the inventory screen show.
+	Backpack
 };
 
 // What kind of weapon an item is, which decides the stance it's held in. Items that aren't weapons are held like a Sword.
@@ -43,7 +46,7 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Item")
 	TObjectPtr<UStaticMesh> Mesh;
 
-	// Cells the item covers when upright: X is its width and Y its height
+	// Cells the item covers when upright: X is its width and Y its height. A backpack isn't stored in a grid, so for one this is the size of the grid it provides.
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Inventory", meta = (ClampMin = "1"))
 	FIntPoint Size = FIntPoint(1, 1);
 

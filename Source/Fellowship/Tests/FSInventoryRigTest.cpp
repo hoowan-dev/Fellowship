@@ -215,6 +215,52 @@ bool FFSInventoryRigQuickSlotsTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSInventoryRigDropButtonTest, "Fellowship.Inventory.Rig.PutsTheDropButtonBelowTheGrid", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FFSInventoryRigDropButtonTest::RunTest(const FString& Parameters)
+{
+	FInventoryRigTestWorld Test;
+	const UInstancedStaticMeshComponent* Button = Test.Rig->GetDropBackpackButton();
+	const double HalfGrid = GridSize * CellSize * 0.5;
+
+	TestEqual(TEXT("One button"), Button->GetInstanceCount(), 1);
+	TestEqual(TEXT("It has the same custom data as the grid's cells"), Button->NumCustomDataFloats, AFSInventoryRig::CellDataCount);
+
+	FTransform Placed;
+	Button->GetInstanceTransform(0, Placed);
+
+	// The plane mesh is 100cm across, and its X axis runs up the screen
+	const double HalfHeight = Placed.GetScale3D().X * 50.0;
+	const double HalfWidth = Placed.GetScale3D().Y * 50.0;
+	TestTrue(TEXT("It's below the grid"), Placed.GetLocation().Z + HalfHeight < -HalfGrid);
+	TestEqual(TEXT("It's centred under the grid"), Placed.GetLocation().Y, 0.0);
+	TestTrue(TEXT("It's wider than it's tall"), HalfWidth > HalfHeight);
+
+	// 90 degrees across a 16:9 screen, with the grid 40cm away
+	constexpr double HalfScreenHeight = 22.5;
+	TestTrue(TEXT("It's on a 16:9 screen"), Placed.GetLocation().Z - HalfHeight > -HalfScreenHeight);
+
+	const FVector Origin = Test.Rig->GetActorLocation();
+	const FVector2D Centre = Test.Rig->GetDropBackpackButtonCentre();
+	TestTrue(TEXT("A ray through its middle finds it"), Test.Rig->IsDropBackpackButtonOnWorldRay(Origin, Test.DirectionToGridPoint(Centre.X, Centre.Y)));
+	TestTrue(TEXT("So does one near its end"), Test.Rig->IsDropBackpackButtonOnWorldRay(Origin, Test.DirectionToGridPoint(Centre.X + HalfWidth - 0.1, Centre.Y)));
+	TestFalse(TEXT("A ray past its end misses it"), Test.Rig->IsDropBackpackButtonOnWorldRay(Origin, Test.DirectionToGridPoint(Centre.X + HalfWidth + 0.1, Centre.Y)));
+	TestFalse(TEXT("A ray through the grid misses it"), Test.Rig->IsDropBackpackButtonOnWorldRay(Origin, Test.DirectionToGridPoint(0.0, 0.0)));
+
+	FIntPoint Cell = NoCell;
+	TestFalse(TEXT("It isn't a cell of the grid"), Test.CellAt(Centre.X, Centre.Y, Cell));
+
+	Test.Rig->SetDropBackpackButtonHovered(true);
+	TestTrue(TEXT("Hovering remembers it"), Test.Rig->IsDropBackpackButtonHovered());
+	TestEqual(TEXT("And highlights it"), Button->PerInstanceSMCustomData[AFSInventoryRig::CellHoveredData], 1.0f);
+
+	Test.Rig->SetDropBackpackButtonHovered(false);
+	TestFalse(TEXT("And can be cleared"), Test.Rig->IsDropBackpackButtonHovered());
+	TestEqual(TEXT("Along with the highlight"), Button->PerInstanceSMCustomData[AFSInventoryRig::CellHoveredData], 0.0f);
+
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSInventoryRigSlotLabelsTest, "Fellowship.Inventory.Rig.PlacesSlotNamesAboveTheirCells", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FFSInventoryRigSlotLabelsTest::RunTest(const FString& Parameters)
