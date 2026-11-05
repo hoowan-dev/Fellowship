@@ -21,7 +21,7 @@ enum class EFSQuickSlot : uint8;
 
 /**
  * What the player sees with the inventory open: a first person camera looking at the held backpack, with the grid floating between them,
- * the player's forearms raised either side of it with a large cell over each hand, and a cell for each quick slot below it.
+ * the player's forearms raised either side of it with a large cell over each hand, and a cell for each quick slot above it.
  * Exists only on the owning client. The grid's cells run from (0, 0) at the top left.
  */
 UCLASS()
@@ -193,7 +193,7 @@ protected:
 	UPROPERTY(VisibleAnywhere, Category = "Inventory")
 	TObjectPtr<UStaticMeshComponent> RightHandItemMesh;
 
-	// A cell below the grid for each quick slot. Attached to the grid so they scale in and out along with it.
+	// A cell above the grid for each quick slot. Attached to the grid so they scale in and out along with it.
 	UPROPERTY(VisibleAnywhere, Category = "Inventory")
 	TObjectPtr<UInstancedStaticMeshComponent> QuickSlots;
 
@@ -290,11 +290,11 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Hands")
 	FVector UpperArmDirection = FVector(0.55, -0.3, 0.75);
 
-	// Small enough that the cells stay on a 16:9 screen below a grid of the default height
+	// Small enough that the cells stay on a 16:9 screen above a grid of the default height
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Quick Slots", meta = (ClampMin = "0.1", Units = cm))
 	float QuickSlotSize = 7.5f;
 
-	// Between the bottom of the grid and the quick slots' cells, and between the two cells
+	// Between the top of the grid and the quick slots' cells, and between the two cells
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Quick Slots", meta = (ClampMin = "0.0", Units = cm))
 	float QuickSlotGap = 1.5f;
 

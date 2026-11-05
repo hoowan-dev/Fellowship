@@ -9,14 +9,17 @@
 #include "Inventory/FSInventoryComponent.h"
 #include "Inventory/FSInventoryRig.h"
 #include "Inventory/FSItemDefinition.h"
+#include "Materials/MaterialInstanceDynamic.h"
+#include "Materials/MaterialInterface.h"
 #include "Player/FSPlayerController.h"
+#include "UObject/ConstructorHelpers.h"
 
 namespace
 {
 	// From the centre of one circle to the centre of the next, which leaves room for names beneath them
 	constexpr double SlotSpacing = 120.0;
 
-	// From the bottom of the screen to the centre of the circles, which leaves room for names beneath them
+	// From the top of the screen to the centre of the circles, which leaves room for names above them
 	constexpr double SlotHeight = 83.0;
 
 	// How far in front of the camera the meshes float. Just past the near clipping plane and the 12cm the camera boom keeps from walls, so nothing comes between them.
@@ -51,6 +54,20 @@ namespace
 	// Far enough apart in the noise that slots and channels don't look related. Not whole numbers, because the noise is zero at those.
 	constexpr float WobbleSlotGap = 37.31f;
 	constexpr float WobbleChannelGap = 11.73f;
+
+	// From the bottom right corner of the screen to the edges of the compass's case, the same as the event log's distance from its corner
+	constexpr double CompassMargin = 20.0;
+
+	// The size of each half of the needle, as fractions of the case's radius
+	constexpr double NeedleLength = 0.75;
+	constexpr double NeedleWidth = 0.22;
+	constexpr double NeedleThickness = 0.05;
+
+	const FLinearColor NorthNeedleColor(0.75f, 0.03f, 0.03f);
+	const FLinearColor SouthNeedleColor(0.8f, 0.8f, 0.8f);
+
+	// The parameter of the engine's basic shape material that sets its colour
+	const FName NeedleColorParameter(TEXT("Color"));
 }
 
 void FFSEquipmentShake::Update(const FVector& Velocity, bool bInAir, float DeltaTime)
@@ -92,11 +109,9 @@ AFSEquipmentDisplay::AFSEquipmentDisplay()
 
 	SetRootComponent(CreateDefaultSubobject<USceneComponent>(TEXT("Root")));
 
-	const FName SlotNames[] = { TEXT("LeftQuickSlotMesh"), TEXT("LeftHandMesh"), TEXT("BackpackMesh"), TEXT("RightHandMesh"), TEXT("RightQuickSlotMesh") };
-
-	for (int32 Index = 0; Index < static_cast<int32>(EFSEquipmentSlot::Count); ++Index)
+	const auto CreateDisplayMesh = [this](const FName Name)
 	{
-		UStaticMeshComponent* Mesh = CreateDefaultSubobject<UStaticMeshComponent>(SlotNames[Index]);
+		UStaticMeshComponent* Mesh = CreateDefaultSubobject<UStaticMeshComponent>(Name);
 		Mesh->SetupAttachment(RootComponent);
 		Mesh->SetMobility(EComponentMobility::Movable);
 		Mesh->SetUsingAbsoluteLocation(true);
@@ -118,7 +133,52 @@ AFSEquipmentDisplay::AFSEquipmentDisplay()
 		Mesh->ForcedLodModel = 1;
 		Mesh->bForceMipStreaming = true;
 
-		SlotMeshes[Index] = Mesh;
+		return Mesh;
+	};
+
+	const FName SlotNames[] = { TEXT("LeftQuickSlotMesh"), TEXT("LeftHandMesh"), TEXT("BackpackMesh"), TEXT("RightHandMesh"), TEXT("RightQuickSlotMesh"), TEXT("CompassMesh") };
+
+	for (int32 Index = 0; Index < static_cast<int32>(EFSEquipmentSlot::Count); ++Index)
+	{
+		SlotMeshes[Index] = CreateDisplayMesh(SlotNames[Index]);
+	}
+
+	NorthNeedleMesh = CreateDisplayMesh(TEXT("NorthNeedleMesh"));
+	SouthNeedleMesh = CreateDisplayMesh(TEXT("SouthNeedleMesh"));
+
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> CompassMesh(TEXT("/Game/Meshes/LowPolyProps/Misc/Flat/SM_compass_misc.SM_compass_misc"));
+	if (CompassMesh.Succeeded())
+	{
+		SlotMeshes[static_cast<int32>(EFSEquipmentSlot::Compass)]->SetStaticMesh(CompassMesh.Object);
+	}
+
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> ConeMesh(TEXT("/Engine/BasicShapes/Cone.Cone"));
+	if (ConeMesh.Succeeded())
+	{
+		NorthNeedleMesh->SetStaticMesh(ConeMesh.Object);
+		SouthNeedleMesh->SetStaticMesh(ConeMesh.Object);
+	}
+
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> NeedleMaterial(TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
+	if (NeedleMaterial.Succeeded())
+	{
+		NorthNeedleMesh->SetMaterial(0, NeedleMaterial.Object);
+		SouthNeedleMesh->SetMaterial(0, NeedleMaterial.Object);
+	}
+}
+
+void AFSEquipmentDisplay::BeginPlay()
+{
+	Super::BeginPlay();
+
+	if (UMaterialInstanceDynamic* NorthMaterial = NorthNeedleMesh->CreateDynamicMaterialInstance(0))
+	{
+		NorthMaterial->SetVectorParameterValue(NeedleColorParameter, NorthNeedleColor);
+	}
+
+	if (UMaterialInstanceDynamic* SouthMaterial = SouthNeedleMesh->CreateDynamicMaterialInstance(0))
+	{
+		SouthMaterial->SetVectorParameterValue(NeedleColorParameter, SouthNeedleColor);
 	}
 }
 
@@ -129,8 +189,13 @@ bool AFSEquipmentDisplay::IsShownFor(const AFSPlayerController& PlayerController
 
 FVector2D AFSEquipmentDisplay::GetSlotCentre(const FVector2D& ViewportSize, EFSEquipmentSlot Slot)
 {
+	if (Slot == EFSEquipmentSlot::Compass)
+	{
+		return ViewportSize - FVector2D(CompassMargin + CompassRadius);
+	}
+
 	const double FromMiddle = static_cast<int32>(Slot) - static_cast<int32>(EFSEquipmentSlot::Backpack);
-	return FVector2D(ViewportSize.X * 0.5 + FromMiddle * SlotSpacing, ViewportSize.Y - SlotHeight);
+	return FVector2D(ViewportSize.X * 0.5 + FromMiddle * SlotSpacing, SlotHeight);
 }
 
 FTransform AFSEquipmentDisplay::GetMeshTransform(const UStaticMesh& Mesh, const FRotator& MeshRotation, const FQuat& CameraRotation, const FVector& Centre, double Radius)
@@ -145,6 +210,40 @@ FTransform AFSEquipmentDisplay::GetMeshTransform(const UStaticMesh& Mesh, const 
 	// Mesh pivots are wherever suited the character holding them, so the mesh is centred by its bounds
 	const FQuat Rotation = CameraRotation * MeshRotation.Quaternion();
 	return FTransform(Rotation, Centre - Rotation.RotateVector(Bounds.Origin * Scale), FVector(Scale));
+}
+
+FQuat AFSEquipmentDisplay::GetCompassNeedleRotation(double CameraYaw)
+{
+	// A positive angle about the view axis is anticlockwise as seen from the camera. Turning right, north swings round to the left.
+	return FQuat(FVector::ForwardVector, FMath::DegreesToRadians(CameraYaw));
+}
+
+FTransform AFSEquipmentDisplay::GetCompassTransform(const UStaticMesh& Mesh, const FQuat& CameraRotation, const FVector& Centre, double Radius)
+{
+	const FBoxSphereBounds Bounds = Mesh.GetBounds();
+
+	// The mesh lies flat with its face towards +Z and its loop towards -X. Its pivot is the middle of the round part, whose width is the mesh's width along Y.
+	const FQuat Rotation = CameraRotation * FRotationMatrix::MakeFromXZ(FVector(0.0, 0.0, -1.0), FVector(-1.0, 0.0, 0.0)).ToQuat();
+	const double Scale = Radius / FMath::Max(Bounds.BoxExtent.Y, UE_KINDA_SMALL_NUMBER);
+
+	// It's the face that's on the plane, rather than the pivot, because the corner of the screen is far enough from its middle for depth to shift things sideways
+	const FVector Face(0.0, 0.0, (Bounds.Origin.Z + Bounds.BoxExtent.Z) * Scale);
+
+	return FTransform(Rotation, Centre - Rotation.RotateVector(Face), FVector(Scale));
+}
+
+FTransform AFSEquipmentDisplay::GetCompassNeedleTransform(const UStaticMesh& Cone, const FQuat& Rotation, const FVector& Centre, double Radius)
+{
+	const FBoxSphereBounds Bounds = Cone.GetBounds();
+	const double Length = NeedleLength * Radius;
+
+	const FVector Scale(
+		NeedleThickness * Radius / FMath::Max(Bounds.BoxExtent.X * 2.0, UE_KINDA_SMALL_NUMBER),
+		NeedleWidth * Radius / FMath::Max(Bounds.BoxExtent.Y * 2.0, UE_KINDA_SMALL_NUMBER),
+		Length / FMath::Max(Bounds.BoxExtent.Z * 2.0, UE_KINDA_SMALL_NUMBER));
+
+	// The cone's point is towards +Z, so its base goes on the middle of the case
+	return FTransform(Rotation, Centre + Rotation.RotateVector(FVector(0.0, 0.0, Length * 0.5) - Bounds.Origin * Scale), Scale);
 }
 
 void AFSEquipmentDisplay::Tick(float DeltaTime)
@@ -165,6 +264,8 @@ void AFSEquipmentDisplay::Tick(float DeltaTime)
 		{
 			Mesh->SetVisibility(false);
 		}
+		NorthNeedleMesh->SetVisibility(false);
+		SouthNeedleMesh->SetVisibility(false);
 		return;
 	}
 
@@ -181,11 +282,12 @@ void AFSEquipmentDisplay::Tick(float DeltaTime)
 
 	const AFSInventoryRig* Rig = PlayerController->GetInventoryRigDefaults();
 	UpdateSlot(*PlayerController, EFSEquipmentSlot::Backpack, Rig ? Rig->GetPackMesh() : nullptr, Rig ? Rig->GetPackRotation() : FRotator::ZeroRotator);
+
+	UpdateCompass(*PlayerController);
 }
 
-void AFSEquipmentDisplay::UpdateSlot(const AFSPlayerController& PlayerController, EFSEquipmentSlot Slot, UStaticMesh* Mesh, const FRotator& MeshRotation)
+bool AFSEquipmentDisplay::GetSlotPlacement(const AFSPlayerController& PlayerController, EFSEquipmentSlot Slot, float ScreenRadius, FVector& OutCentre, double& OutRadius, FQuat& OutRotation) const
 {
-	UStaticMeshComponent* Component = SlotMeshes[static_cast<int32>(Slot)];
 	const APlayerCameraManager* Camera = PlayerController.PlayerCameraManager;
 
 	int32 ViewportWidth = 0;
@@ -195,14 +297,13 @@ void AFSEquipmentDisplay::UpdateSlot(const AFSPlayerController& PlayerController
 	const FVector2D ScreenCentre = GetSlotCentre(FVector2D(ViewportWidth, ViewportHeight), Slot);
 
 	FVector CentreOrigin, CentreDirection, EdgeOrigin, EdgeDirection;
-	const bool bOnScreen = Mesh && Camera
+	const bool bOnScreen = Camera
 		&& PlayerController.DeprojectScreenPositionToWorld(ScreenCentre.X, ScreenCentre.Y, CentreOrigin, CentreDirection)
-		&& PlayerController.DeprojectScreenPositionToWorld(ScreenCentre.X + SlotRadius, ScreenCentre.Y, EdgeOrigin, EdgeDirection);
+		&& PlayerController.DeprojectScreenPositionToWorld(ScreenCentre.X + ScreenRadius, ScreenCentre.Y, EdgeOrigin, EdgeDirection);
 
-	Component->SetVisibility(bOnScreen);
 	if (!bOnScreen)
 	{
-		return;
+		return false;
 	}
 
 	const FVector CameraLocation = Camera->GetCameraLocation();
@@ -219,9 +320,56 @@ void AFSEquipmentDisplay::UpdateSlot(const AFSPlayerController& PlayerController
 	const double Radius = FVector::Distance(Centre, OnMeshPlane(EdgeOrigin, EdgeDirection));
 
 	const FVector2D Offset = Shake.GetOffset(Slot) * Radius;
-	const FVector ShakenCentre = Centre + CameraRotation.GetRightVector() * Offset.X + CameraRotation.GetUpVector() * Offset.Y;
-	const FQuat ShakenRotation = CameraRotation * Shake.GetTilt(Slot).Quaternion();
+
+	OutCentre = Centre + CameraRotation.GetRightVector() * Offset.X + CameraRotation.GetUpVector() * Offset.Y;
+	OutRadius = Radius;
+	OutRotation = CameraRotation * Shake.GetTilt(Slot).Quaternion();
+	return true;
+}
+
+void AFSEquipmentDisplay::UpdateSlot(const AFSPlayerController& PlayerController, EFSEquipmentSlot Slot, UStaticMesh* Mesh, const FRotator& MeshRotation)
+{
+	UStaticMeshComponent* Component = SlotMeshes[static_cast<int32>(Slot)];
+
+	FVector Centre;
+	double Radius = 0.0;
+	FQuat Rotation;
+	const bool bOnScreen = Mesh && GetSlotPlacement(PlayerController, Slot, SlotRadius, Centre, Radius, Rotation);
+
+	Component->SetVisibility(bOnScreen);
+	if (!bOnScreen)
+	{
+		return;
+	}
 
 	Component->SetStaticMesh(Mesh);
-	Component->SetWorldTransform(GetMeshTransform(*Mesh, MeshRotation, ShakenRotation, ShakenCentre, Radius));
+	Component->SetWorldTransform(GetMeshTransform(*Mesh, MeshRotation, Rotation, Centre, Radius));
+}
+
+void AFSEquipmentDisplay::UpdateCompass(const AFSPlayerController& PlayerController)
+{
+	UStaticMeshComponent* Case = SlotMeshes[static_cast<int32>(EFSEquipmentSlot::Compass)];
+	const UStaticMesh* CaseMesh = Case->GetStaticMesh();
+	const UStaticMesh* Cone = NorthNeedleMesh->GetStaticMesh();
+	const APlayerCameraManager* Camera = PlayerController.PlayerCameraManager;
+
+	FVector Centre;
+	double Radius = 0.0;
+	FQuat Rotation;
+	const bool bOnScreen = CaseMesh && Cone && Camera && GetSlotPlacement(PlayerController, EFSEquipmentSlot::Compass, CompassRadius, Centre, Radius, Rotation);
+
+	Case->SetVisibility(bOnScreen);
+	NorthNeedleMesh->SetVisibility(bOnScreen);
+	SouthNeedleMesh->SetVisibility(bOnScreen);
+	if (!bOnScreen)
+	{
+		return;
+	}
+
+	const FQuat North = Rotation * GetCompassNeedleRotation(Camera->GetCameraRotation().Yaw);
+	const FQuat South = North * FQuat(FVector::ForwardVector, UE_DOUBLE_PI);
+
+	Case->SetWorldTransform(GetCompassTransform(*CaseMesh, Rotation, Centre, Radius));
+	NorthNeedleMesh->SetWorldTransform(GetCompassNeedleTransform(*Cone, North, Centre, Radius));
+	SouthNeedleMesh->SetWorldTransform(GetCompassNeedleTransform(*Cone, South, Centre, Radius));
 }

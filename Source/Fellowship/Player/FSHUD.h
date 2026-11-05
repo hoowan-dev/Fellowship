@@ -23,7 +23,7 @@ protected:
 	virtual void BeginPlay() override;
 
 private:
-	// Draws a circle at the bottom centre of the screen around each mesh of the equipment display, with what it holds named underneath
+	// Draws a circle at the top centre of the screen around each mesh of the equipment display, with what it holds named underneath
 	void DrawEquipmentSlots();
 
 	// Draws one of those circles, with what it's for named above and what it holds named underneath, if anything.
@@ -42,7 +42,7 @@ private:
 	// Draws the name of the item under the mouse above the cursor
 	void DrawHoveredItemName();
 
-	// Draws a bar for each of the character's stats in the bottom right corner of the screen, stacked to the same height as the event log
+	// Draws a bar for each of the character's stats at the bottom centre of the screen, side by side with health in the middle
 	void DrawStatBars();
 
 	// Draws the most recent events in the bottom left corner of the screen, newest at the bottom

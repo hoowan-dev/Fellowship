@@ -774,7 +774,7 @@ bool FFSEquipmentDisplayLayoutTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("The right hand is to its right"), Right.X > Backpack.X);
 	TestTrue(TEXT("They're level"), Left.Y == Backpack.Y && Right.Y == Backpack.Y);
 	TestTrue(TEXT("They don't overlap"), Backpack.X - Left.X > AFSEquipmentDisplay::SlotRadius * 2.0f);
-	TestTrue(TEXT("They're at the bottom of the screen"), Backpack.Y > 900.0 && Backpack.Y + AFSEquipmentDisplay::SlotRadius < Viewport.Y);
+	TestTrue(TEXT("They're at the top of the screen"), Backpack.Y < 180.0 && Backpack.Y - AFSEquipmentDisplay::SlotRadius > 0.0);
 
 	const FVector2D LeftQuickSlot = AFSEquipmentDisplay::GetSlotCentre(Viewport, EFSEquipmentSlot::LeftQuickSlot);
 	const FVector2D RightQuickSlot = AFSEquipmentDisplay::GetSlotCentre(Viewport, EFSEquipmentSlot::RightQuickSlot);
@@ -804,6 +804,79 @@ bool FFSEquipmentDisplayLayoutTest::RunTest(const FString& Parameters)
 		const FVector FromCamera = Camera.UnrotateVector(Placed.TransformPosition(Corner) - Centre);
 		TestTrue(TEXT("A corner stays inside the circle"), FVector2D(FromCamera.Y, FromCamera.Z).Size() <= 1.0);
 	}
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSEquipmentCompassLayoutTest, "Fellowship.Equipment.Display.PlacesTheCompass", TestFlags)
+
+bool FFSEquipmentCompassLayoutTest::RunTest(const FString& Parameters)
+{
+	const FVector2D Viewport(1920.0, 1080.0);
+	const FVector2D ScreenCentre = AFSEquipmentDisplay::GetSlotCentre(Viewport, EFSEquipmentSlot::Compass);
+
+	TestTrue(TEXT("It's towards the right of the screen"), ScreenCentre.X > 1600.0 && ScreenCentre.X + AFSEquipmentDisplay::CompassRadius < Viewport.X);
+	TestTrue(TEXT("It's towards the bottom of the screen"), ScreenCentre.Y > 900.0 && ScreenCentre.Y + AFSEquipmentDisplay::CompassRadius < Viewport.Y);
+
+	const UStaticMesh* Case = LoadObject<UStaticMesh>(nullptr, TEXT("/Game/Meshes/LowPolyProps/Misc/Flat/SM_compass_misc.SM_compass_misc"));
+	const UStaticMesh* Cone = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cone.Cone"));
+	if (!TestNotNull(TEXT("The case loads"), Case) || !TestNotNull(TEXT("The cone loads"), Cone))
+	{
+		return false;
+	}
+
+	const FVector Centre(100.0, 200.0, 300.0);
+	const FQuat Camera = FRotator(-20.0f, 70.0f, 0.0f).Quaternion();
+	constexpr double Radius = 2.0;
+
+	const FBoxSphereBounds CaseBounds = Case->GetBounds();
+	const FTransform PlacedCase = AFSEquipmentDisplay::GetCompassTransform(*Case, Camera, Centre, Radius);
+	const auto FromCamera = [&Camera, &Centre](const FVector& Location)
+	{
+		return Camera.UnrotateVector(Location - Centre);
+	};
+
+	const double FaceHeight = CaseBounds.Origin.Z + CaseBounds.BoxExtent.Z;
+	const double LoopEnd = CaseBounds.Origin.X - CaseBounds.BoxExtent.X;
+
+	TestTrue(TEXT("The middle of its face is on the point"), PlacedCase.TransformPosition(FVector(0.0, 0.0, FaceHeight)).Equals(Centre, 0.001));
+	TestTrue(TEXT("Its face is towards the camera"), FromCamera(PlacedCase.TransformPosition(FVector::ZeroVector)).X > 0.0);
+	TestTrue(TEXT("Its loop is up the screen"), FromCamera(PlacedCase.TransformPosition(FVector(LoopEnd, 0.0, FaceHeight))).Z > Radius);
+	TestEqual(TEXT("Its round part has the radius"), FromCamera(PlacedCase.TransformPosition(FVector(0.0, CaseBounds.BoxExtent.Y, FaceHeight))).Size(), Radius, 0.001);
+
+	const FVector ScreenUp = FVector::UpVector;
+	TestTrue(TEXT("Facing north, north is up the screen"), AFSEquipmentDisplay::GetCompassNeedleRotation(0.0).RotateVector(ScreenUp).Equals(FVector(0.0, 0.0, 1.0), 0.001));
+	TestTrue(TEXT("Facing east, north is to the left"), AFSEquipmentDisplay::GetCompassNeedleRotation(90.0).RotateVector(ScreenUp).Equals(FVector(0.0, -1.0, 0.0), 0.001));
+	TestTrue(TEXT("Facing south, north is down the screen"), AFSEquipmentDisplay::GetCompassNeedleRotation(180.0).RotateVector(ScreenUp).Equals(FVector(0.0, 0.0, -1.0), 0.001));
+	TestTrue(TEXT("Facing west, north is to the right"), AFSEquipmentDisplay::GetCompassNeedleRotation(-90.0).RotateVector(ScreenUp).Equals(FVector(0.0, 1.0, 0.0), 0.001));
+
+	const FBoxSphereBounds ConeBounds = Cone->GetBounds();
+	const FTransform PlacedNeedle = AFSEquipmentDisplay::GetCompassNeedleTransform(*Cone, Camera, Centre, Radius);
+	const FVector ConeBase = ConeBounds.Origin - FVector(0.0, 0.0, ConeBounds.BoxExtent.Z);
+	const FVector ConePoint = ConeBounds.Origin + FVector(0.0, 0.0, ConeBounds.BoxExtent.Z);
+
+	TestTrue(TEXT("The needle starts at the middle of the case"), PlacedNeedle.TransformPosition(ConeBase).Equals(Centre, 0.001));
+
+	const FVector NeedlePoint = FromCamera(PlacedNeedle.TransformPosition(ConePoint));
+	TestTrue(TEXT("It runs along the rotation's +Z"), NeedlePoint.Z > 0.0 && FMath::IsNearlyZero(NeedlePoint.X, 0.001) && FMath::IsNearlyZero(NeedlePoint.Y, 0.001));
+	TestTrue(TEXT("And stops inside the case"), NeedlePoint.Z < Radius);
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSEquipmentCompassShakeTest, "Fellowship.Equipment.Display.ShakesTheCompass", TestFlags)
+
+bool FFSEquipmentCompassShakeTest::RunTest(const FString& Parameters)
+{
+	FFSEquipmentShake Shake;
+	for (int32 Frame = 0; Frame < 60; ++Frame)
+	{
+		Shake.Update(FVector(600.0, 0.0, 0.0), false, 1.0f / 60.0f);
+	}
+
+	const FVector2D CompassOffset = Shake.GetOffset(EFSEquipmentSlot::Compass);
+	TestTrue(TEXT("A run moves the compass"), !CompassOffset.IsNearlyZero());
+	TestFalse(TEXT("In its own direction"), CompassOffset.Equals(Shake.GetOffset(EFSEquipmentSlot::Backpack), 0.0001));
 
 	return true;
 }

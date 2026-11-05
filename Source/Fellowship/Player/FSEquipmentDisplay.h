@@ -10,7 +10,7 @@ class AFSPlayerController;
 class UStaticMesh;
 class UStaticMeshComponent;
 
-// The circles at the bottom of the HUD, from left to right
+// What the display shows: the circles at the top of the HUD from left to right, then the compass at the bottom right, which has no circle
 enum class EFSEquipmentSlot : uint8
 {
 	LeftQuickSlot,
@@ -18,6 +18,7 @@ enum class EFSEquipmentSlot : uint8
 	Backpack,
 	RightHand,
 	RightQuickSlot,
+	Compass,
 	Count
 };
 
@@ -62,6 +63,9 @@ public:
 	// The radius of a circle on the screen, in pixels
 	static constexpr float SlotRadius = 40.0f;
 
+	// The radius of the compass's round case on the screen, in pixels
+	static constexpr float CompassRadius = 45.0f;
+
 	AFSEquipmentDisplay();
 
 	virtual void Tick(float DeltaTime) override;
@@ -69,17 +73,41 @@ public:
 	// Whether the circles and meshes are showing. They make way for the inventory.
 	static bool IsShownFor(const AFSPlayerController& PlayerController);
 
-	// The centre of a slot's circle on the screen, in pixels
+	// The centre of a slot's circle, or of the compass's case, on the screen, in pixels
 	static FVector2D GetSlotCentre(const FVector2D& ViewportSize, EFSEquipmentSlot Slot);
 
 	// Places a mesh turned by MeshRotation relative to the camera, so that it's centred on a point and fits inside a circle facing the camera there
 	static FTransform GetMeshTransform(const UStaticMesh& Mesh, const FRotator& MeshRotation, const FQuat& CameraRotation, const FVector& Centre, double Radius);
 
+	// How the north half of the needle turns relative to the camera, for a camera with this yaw. Its +Z points up the screen when the camera faces north, which is +X in the world.
+	static FQuat GetCompassNeedleRotation(double CameraYaw);
+
+	// Places the compass's case so that the middle of its face is on a point, its loop is up the screen and its round part has this radius
+	static FTransform GetCompassTransform(const UStaticMesh& Mesh, const FQuat& CameraRotation, const FVector& Centre, double Radius);
+
+	// Places a cone as half of the needle, running from a point at the middle of the case along Rotation's +Z, flattened to face the camera
+	static FTransform GetCompassNeedleTransform(const UStaticMesh& Cone, const FQuat& Rotation, const FVector& Centre, double Radius);
+
+protected:
+	virtual void BeginPlay() override;
+
 private:
+	// Finds where a slot's mesh goes for what the camera sees right now, including the shaking. ScreenRadius is in pixels and OutRadius is what it comes to on the plane the meshes float on. Returns false if it can't be worked out.
+	bool GetSlotPlacement(const AFSPlayerController& PlayerController, EFSEquipmentSlot Slot, float ScreenRadius, FVector& OutCentre, double& OutRadius, FQuat& OutRotation) const;
+
 	void UpdateSlot(const AFSPlayerController& PlayerController, EFSEquipmentSlot Slot, UStaticMesh* Mesh, const FRotator& MeshRotation);
+	void UpdateCompass(const AFSPlayerController& PlayerController);
 
 	UPROPERTY(VisibleAnywhere, Category = "Equipment")
 	TObjectPtr<UStaticMeshComponent> SlotMeshes[static_cast<int32>(EFSEquipmentSlot::Count)];
+
+	// The half of the compass's needle that points north
+	UPROPERTY(VisibleAnywhere, Category = "Equipment")
+	TObjectPtr<UStaticMeshComponent> NorthNeedleMesh;
+
+	// The half of the compass's needle that points south
+	UPROPERTY(VisibleAnywhere, Category = "Equipment")
+	TObjectPtr<UStaticMeshComponent> SouthNeedleMesh;
 
 	FFSEquipmentShake Shake;
 };

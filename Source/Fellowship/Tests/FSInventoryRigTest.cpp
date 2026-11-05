@@ -185,7 +185,7 @@ bool FFSInventoryRigHandSlotsTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSInventoryRigQuickSlotsTest, "Fellowship.Inventory.Rig.PutsTwoCellsBelowTheGrid", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSInventoryRigQuickSlotsTest, "Fellowship.Inventory.Rig.PutsTwoCellsAboveTheGrid", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FFSInventoryRigQuickSlotsTest::RunTest(const FString& Parameters)
 {
@@ -203,14 +203,14 @@ bool FFSInventoryRigQuickSlotsTest::RunTest(const FString& Parameters)
 
 	// The plane mesh is 100cm across
 	const double HalfSlot = LeftSlot.GetScale3D().X * 50.0;
-	TestTrue(TEXT("The left slot is below the grid"), LeftSlot.GetLocation().Z + HalfSlot < -HalfGrid);
+	TestTrue(TEXT("The left slot is above the grid"), LeftSlot.GetLocation().Z - HalfSlot > HalfGrid);
 	TestEqual(TEXT("The slots are level"), LeftSlot.GetLocation().Z, RightSlot.GetLocation().Z);
 	TestTrue(TEXT("They don't overlap"), RightSlot.GetLocation().Y - LeftSlot.GetLocation().Y > HalfSlot * 2.0);
-	TestEqual(TEXT("They're centred under the grid"), LeftSlot.GetLocation().Y, -RightSlot.GetLocation().Y);
+	TestEqual(TEXT("They're centred over the grid"), LeftSlot.GetLocation().Y, -RightSlot.GetLocation().Y);
 
 	// 90 degrees across a 16:9 screen, with the grid 40cm away
 	constexpr double HalfScreenHeight = 22.5;
-	TestTrue(TEXT("They're on a 16:9 screen"), LeftSlot.GetLocation().Z - HalfSlot > -HalfScreenHeight);
+	TestTrue(TEXT("They're on a 16:9 screen"), LeftSlot.GetLocation().Z + HalfSlot < HalfScreenHeight);
 
 	return true;
 }
@@ -224,7 +224,6 @@ bool FFSInventoryRigSlotLabelsTest::RunTest(const FString& Parameters)
 	// Matches the rig's defaults
 	constexpr double HandSlotSize = 12.0;
 	constexpr double QuickSlotSize = 7.5;
-	constexpr double QuickSlotGap = 1.5;
 
 	// Where on the grid a location is seen, as a direction from the camera that can be compared to the point it should be over
 	const auto TestLabel = [this, &Test](const TCHAR* Name, const FVector& Location, const FVector2D& SlotCentre, double SlotSize)
@@ -240,9 +239,10 @@ bool FFSInventoryRigSlotLabelsTest::RunTest(const FString& Parameters)
 	TestLabel(TEXT("Left quick slot"), Test.Rig->GetQuickSlotLabelLocation(AFSInventoryRig::LeftQuickSlot), Test.Rig->GetQuickSlotCentre(AFSInventoryRig::LeftQuickSlot), QuickSlotSize);
 	TestLabel(TEXT("Right quick slot"), Test.Rig->GetQuickSlotLabelLocation(AFSInventoryRig::RightQuickSlot), Test.Rig->GetQuickSlotCentre(AFSInventoryRig::RightQuickSlot), QuickSlotSize);
 
-	// In the gap under the grid rather than over its bottom row
+	// 90 degrees across a 16:9 screen, with the grid 40cm away
+	constexpr double HalfScreenHeight = 22.5;
 	const double LabelUp = Test.Rig->GetQuickSlotCentre(AFSInventoryRig::LeftQuickSlot).Y + QuickSlotSize * 0.5 + 0.75;
-	TestEqual(TEXT("A quick slot's name is halfway between its cell and the grid"), LabelUp, -(GridSize * CellSize * 0.5 + QuickSlotGap * 0.5), 0.001);
+	TestTrue(TEXT("A quick slot's name is on a 16:9 screen"), LabelUp < HalfScreenHeight);
 
 	return true;
 }

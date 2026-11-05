@@ -56,7 +56,7 @@ namespace
 	// A carried item is never pulled closer to the camera than this fraction of the way
 	constexpr double MinCarriedItemPull = 0.2;
 
-	// From the top of a slot's cell to the middle of its name. Half the default gap between the grid and the quick slots, so their names sit in that gap.
+	// From the top of a slot's cell to the middle of its name
 	constexpr double SlotLabelHeight = 0.75;
 
 	bool IsPointInSlot(const FVector2D& Point, const FVector2D& SlotCentre, double SlotSize)
@@ -239,7 +239,7 @@ void AFSInventoryRig::BuildGrid()
 	BuildHandSlots();
 	PoseArms();
 
-	// The quick slots' cells are placed below the grid, so they move with its height
+	// The quick slots' cells are placed above the grid, so they move with its height
 	BuildQuickSlots();
 }
 
@@ -302,7 +302,7 @@ FVector2D AFSInventoryRig::GetQuickSlotCentre(int32 QuickSlot) const
 	const double FromMiddle = (QuickSlotSize + QuickSlotGap) * 0.5;
 	return FVector2D(
 		QuickSlot == LeftQuickSlot ? -FromMiddle : FromMiddle,
-		-(GridHeight * CellSize * 0.5 + QuickSlotGap + QuickSlotSize * 0.5));
+		GridHeight * CellSize * 0.5 + QuickSlotGap + QuickSlotSize * 0.5);
 }
 
 FVector AFSInventoryRig::GetHandSlotLabelLocation(int32 HandSlot) const

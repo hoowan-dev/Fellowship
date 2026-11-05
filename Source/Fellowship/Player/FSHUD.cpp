@@ -34,8 +34,8 @@ namespace
 
 	constexpr int32 EventLogVisibleLines = 8;
 
-	// The width inside the borders of the event log and the stat bars, which match
-	constexpr float CornerPanelWidth = 260.0f;
+	// The width inside the event log's border
+	constexpr float EventLogWidth = 260.0f;
 
 	// The space between the event log's border and its text
 	constexpr float EventLogPadding = 8.0f;
@@ -45,8 +45,12 @@ namespace
 	const FLinearColor BorderLitColor(1.0f, 1.0f, 1.0f, 0.35f);
 	const FLinearColor BorderShadowColor(0.0f, 0.0f, 0.0f, 0.6f);
 
-	// The height inside a stat bar's border. The gaps between the bars are whatever spreads them over the height of the event log.
+	// The size inside a stat bar's border. Narrow enough that the row stays clear of the event log on a screen 1280 wide.
+	constexpr float StatBarWidth = 200.0f;
 	constexpr float StatBarHeight = 16.0f;
+
+	// Between the borders of neighbouring stat bars
+	constexpr float StatBarGap = 8.0f;
 
 	const FLinearColor StatBarEmptyColor(0.0f, 0.0f, 0.0f, 0.6f);
 
@@ -56,12 +60,12 @@ namespace
 		FLinearColor Color;
 	};
 
-	// From top to bottom
+	// From left to right
 	const FStatBar StatBars[] =
 	{
+		{ EFSStat::Stamina, FLinearColor(0.04f, 0.55f, 0.08f) },
 		{ EFSStat::Health, FLinearColor(0.75f, 0.03f, 0.03f) },
-		{ EFSStat::Magic, FLinearColor(0.04f, 0.15f, 0.8f) },
-		{ EFSStat::Stamina, FLinearColor(0.04f, 0.55f, 0.08f) }
+		{ EFSStat::Magic, FLinearColor(0.04f, 0.15f, 0.8f) }
 	};
 
 	// The height of the space inside the event log's border
@@ -275,25 +279,24 @@ void AFSHUD::DrawStatBars()
 		return;
 	}
 
-	// From the top of the first bar's border to the bottom of the last one's, the same as the event log's border
-	const float TotalHeight = GetEventLogHeight(*GEngine->GetMediumFont()) + BorderThickness * 2.0f;
-
 	const int32 BarCount = UE_ARRAY_COUNT(StatBars);
-	const float BarOuterHeight = StatBarHeight + BorderThickness * 2.0f;
-	const float BarSpacing = (TotalHeight - BarOuterHeight) / (BarCount - 1);
+	const float BarOuterWidth = StatBarWidth + BorderThickness * 2.0f;
+	const float TotalWidth = BarCount * BarOuterWidth + (BarCount - 1) * StatBarGap;
 
-	const float Left = Canvas->SizeX - CornerMargin - BorderThickness - CornerPanelWidth;
-	float Top = Canvas->SizeY - CornerMargin - TotalHeight + BorderThickness;
+	float Left = (Canvas->SizeX - TotalWidth) * 0.5f + BorderThickness;
+
+	// The bottom of the borders lines up with the event log's
+	const float Top = Canvas->SizeY - CornerMargin - BorderThickness - StatBarHeight;
 
 	for (const FStatBar& Bar : StatBars)
 	{
-		const float FilledWidth = CornerPanelWidth * Stats->GetFraction(Bar.Stat);
+		const float FilledWidth = StatBarWidth * Stats->GetFraction(Bar.Stat);
 
 		DrawRect(Bar.Color, Left, Top, FilledWidth, StatBarHeight);
-		DrawRect(StatBarEmptyColor, Left + FilledWidth, Top, CornerPanelWidth - FilledWidth, StatBarHeight);
-		DrawShadedBorder(Left, Top, CornerPanelWidth, StatBarHeight);
+		DrawRect(StatBarEmptyColor, Left + FilledWidth, Top, StatBarWidth - FilledWidth, StatBarHeight);
+		DrawShadedBorder(Left, Top, StatBarWidth, StatBarHeight);
 
-		Top += BarSpacing;
+		Left += BarOuterWidth + StatBarGap;
 	}
 }
 
@@ -327,7 +330,7 @@ void AFSHUD::DrawEventLog()
 	const float Bottom = Canvas->SizeY - CornerMargin - BorderThickness;
 	const float Top = Bottom - Height;
 
-	DrawShadedBorder(Left, Top, CornerPanelWidth, Height);
+	DrawShadedBorder(Left, Top, EventLogWidth, Height);
 
 	float LineY = Bottom - EventLogPadding;
 
