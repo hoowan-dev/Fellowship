@@ -2,13 +2,22 @@
 
 #include "FSItemPickup.h"
 #include "Character/FSCharacter.h"
+#include "Components/CapsuleComponent.h"
 #include "Components/SphereComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
+#include "Engine/World.h"
+#include "GameFramework/Character.h"
 #include "Inventory/FSInventoryComponent.h"
 #include "Inventory/FSItemDefinition.h"
 
 #define LOCTEXT_NAMESPACE "FSItemPickup"
+
+namespace
+{
+	// How far below a character to look for a floor. With none in reach, the item is left at the character's feet.
+	constexpr double MaxFloorDistance = 10000.0;
+}
 
 AFSItemPickup::AFSItemPickup()
 {
@@ -30,6 +39,36 @@ AFSItemPickup::AFSItemPickup()
 	Mesh->SetMobility(EComponentMobility::Movable);
 	Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	Mesh->SetCanEverAffectNavigation(false);
+}
+
+AFSItemPickup* AFSItemPickup::DropAtFeet(TSubclassOf<AFSItemPickup> PickupClass, UFSItemDefinition* DroppedItem, const ACharacter& Character)
+{
+	UWorld* World = Character.GetWorld();
+	const FVector CharacterLocation = Character.GetActorLocation();
+	FVector Feet = CharacterLocation - FVector(0.0, 0.0, Character.GetCapsuleComponent()->GetScaledCapsuleHalfHeight());
+
+	// The character is in the air if they were knocked off a ledge while the inventory was open
+	FHitResult Floor;
+	const FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(FSItemDrop), false, &Character);
+	if (World->LineTraceSingleByChannel(Floor, CharacterLocation, Feet - FVector(0.0, 0.0, MaxFloorDistance), ECC_Visibility, QueryParams))
+	{
+		Feet = Floor.ImpactPoint;
+	}
+
+	// The mesh is centred on the actor, so the actor sits half the mesh's height off the floor
+	const UStaticMesh* DroppedMesh = DroppedItem ? DroppedItem->Mesh : nullptr;
+	const FVector Location = Feet + FVector(0.0, 0.0, DroppedMesh ? DroppedMesh->GetBounds().BoxExtent.Z : 0.0);
+
+	FActorSpawnParameters SpawnParameters;
+	SpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+
+	AFSItemPickup* Pickup = World->SpawnActor<AFSItemPickup>(PickupClass, FTransform(Location), SpawnParameters);
+	if (Pickup)
+	{
+		Pickup->SetItem(DroppedItem);
+	}
+
+	return Pickup;
 }
 
 void AFSItemPickup::OnConstruction(const FTransform& Transform)
@@ -61,6 +100,17 @@ bool AFSItemPickup::TryPickUp(UFSInventoryComponent* Inventory)
 	return true;
 }
 
+bool AFSItemPickup::TryCarry(UFSInventoryComponent* Inventory)
+{
+	if (!Inventory || !Inventory->CarryNewItem(Item))
+	{
+		return false;
+	}
+
+	Destroy();
+	return true;
+}
+
 FText AFSItemPickup::GetPromptText(const UFSInventoryComponent* Inventory) const
 {
 	const FText ItemName = Item ? Item->DisplayName : FText::GetEmpty();
@@ -70,7 +120,7 @@ FText AFSItemPickup::GetPromptText(const UFSInventoryComponent* Inventory) const
 		return FText::Format(LOCTEXT("PickUpPrompt", "[E / X] Pick up {0}"), ItemName);
 	}
 
-	return FText::Format(LOCTEXT("NoRoomPrompt", "No room for {0}"), ItemName);
+	return FText::Format(LOCTEXT("MakeRoomPrompt", "[E / X] Make room for {0}"), ItemName);
 }
 
 FVector AFSItemPickup::GetPromptLocation() const

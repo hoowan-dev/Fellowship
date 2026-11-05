@@ -6,6 +6,7 @@
 #include "GameFramework/Actor.h"
 #include "FSItemPickup.generated.h"
 
+class ACharacter;
 class UFSInventoryComponent;
 class UFSItemDefinition;
 class UPrimitiveComponent;
@@ -24,6 +25,9 @@ class FELLOWSHIP_API AFSItemPickup : public AActor
 public:
 	AFSItemPickup();
 
+	// Leaves an item lying on the floor under a character's feet. Returns null if it couldn't be spawned.
+	static AFSItemPickup* DropAtFeet(TSubclassOf<AFSItemPickup> PickupClass, UFSItemDefinition* DroppedItem, const ACharacter& Character);
+
 	virtual void OnConstruction(const FTransform& Transform) override;
 
 	// Decides this pickup's name, inventory size and mesh
@@ -35,6 +39,9 @@ public:
 
 	// Moves the item into the inventory and removes this actor. Returns false, changing nothing, if it doesn't fit.
 	bool TryPickUp(UFSInventoryComponent* Inventory);
+
+	// Moves the item onto the inventory's cursor, which needs no room in the grid, and removes this actor. Returns false, changing nothing, if that can't be done.
+	bool TryCarry(UFSInventoryComponent* Inventory);
 
 	// What to tell a player standing near this pickup
 	FText GetPromptText(const UFSInventoryComponent* Inventory) const;

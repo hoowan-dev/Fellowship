@@ -9,6 +9,17 @@
 
 class UFSItemDefinition;
 
+// What putting the carried item in a cell would do
+enum class EFSItemPlacement : uint8
+{
+	// It hangs off the grid or lands on more than one item, so it can't go there
+	Blocked,
+	// It goes in open space
+	Open,
+	// It lands on one item, which it replaces on the cursor
+	Swap
+};
+
 USTRUCT()
 struct FELLOWSHIP_API FFSInventoryItem
 {
@@ -30,7 +41,8 @@ struct FELLOWSHIP_API FFSInventoryItem
 };
 
 /**
- * The items a player is carrying. Lives on the player state, so it outlasts the character.
+ * The items a player owns. Lives on the player state, so it outlasts the character.
+ * One item at a time can be carried on the cursor: a carried item covers no cells and isn't in GetItems().
  */
 UCLASS(ClassGroup = (Inventory), meta = (BlueprintSpawnableComponent))
 class FELLOWSHIP_API UFSInventoryComponent : public UActorComponent
@@ -46,6 +58,34 @@ public:
 	// Puts the item in the first open space. Returns false, changing nothing, if it doesn't fit.
 	bool AddItem(UFSItemDefinition* Definition);
 
+	// The item covering a cell, or null if there isn't one
+	const FFSInventoryItem* FindItemAt(const FIntPoint& Cell) const;
+
+	// Takes the item covering a cell out of the grid and carries it. Returns false, changing nothing, if there's no item there or one is already carried.
+	bool PickUpItemAt(const FIntPoint& Cell);
+
+	// Carries an item that wasn't in the inventory. Returns false, changing nothing, if there's no definition or one is already carried.
+	bool CarryNewItem(UFSItemDefinition* Definition);
+
+	// What would happen with the carried item's top left in this cell. Blocked if nothing is carried.
+	EFSItemPlacement GetCarriedItemPlacement(const FIntPoint& Cell) const;
+
+	FORCEINLINE bool CanPlaceCarriedItemAt(const FIntPoint& Cell) const { return GetCarriedItemPlacement(Cell) != EFSItemPlacement::Blocked; }
+
+	// Turns the carried item a quarter turn clockwise. Returns false if nothing is carried.
+	bool RotateCarriedItem();
+
+	// Puts the carried item in the grid, and any item it lands on becomes the carried item. Returns false, changing nothing, if CanPlaceCarriedItemAt doesn't allow it.
+	bool PlaceCarriedItem(const FIntPoint& Cell);
+
+	// Forgets the carried item, once it's somewhere else such as the world
+	void ClearCarriedItem();
+
+	FORCEINLINE bool IsCarryingItem() const { return CarriedItem.Definition != nullptr; }
+
+	// Only meaningful while IsCarryingItem is true
+	FORCEINLINE const FFSInventoryItem& GetCarriedItem() const { return CarriedItem; }
+
 	FORCEINLINE const FFSInventoryGrid& GetGrid() const { return Grid; }
 	FORCEINLINE const TArray<FFSInventoryItem>& GetItems() const { return Items; }
 
@@ -56,11 +96,17 @@ protected:
 	virtual void InitializeComponent() override;
 
 private:
+	// Moves an item from the grid to the cursor
+	void LiftItem(int32 ItemId);
+
 	UPROPERTY(Transient)
 	FFSInventoryGrid Grid;
 
 	UPROPERTY(Transient)
 	TArray<FFSInventoryItem> Items;
+
+	UPROPERTY(Transient)
+	FFSInventoryItem CarriedItem;
 
 	int32 NextItemId = 0;
 };

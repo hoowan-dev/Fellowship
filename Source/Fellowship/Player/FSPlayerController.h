@@ -8,9 +8,11 @@
 
 class AFSCharacter;
 class AFSInventoryRig;
+class AFSItemPickup;
 class UFSInventoryComponent;
 class UInputAction;
 class UInputMappingContext;
+struct FFSInventoryItem;
 
 UENUM()
 enum class EFSInventoryViewState : uint8
@@ -45,8 +47,20 @@ class FELLOWSHIP_API AFSPlayerController : public APlayerController
 	UPROPERTY(EditDefaultsOnly, Category = "Input")
 	TObjectPtr<UInputAction> InteractAction;
 
+	// Digital (bool). Picks up, places and tosses items while the inventory is open.
+	UPROPERTY(EditDefaultsOnly, Category = "Input")
+	TObjectPtr<UInputAction> InventorySelectAction;
+
+	// Digital (bool). Turns the carried item while the inventory is open.
+	UPROPERTY(EditDefaultsOnly, Category = "Input")
+	TObjectPtr<UInputAction> InventoryRotateAction;
+
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory")
 	TSubclassOf<AFSInventoryRig> InventoryRigClass;
+
+	// What a tossed item is spawned as. FSItemPickup itself is used if this isn't set.
+	UPROPERTY(EditDefaultsOnly, Category = "Inventory")
+	TSubclassOf<AFSItemPickup> TossedItemClass;
 
 	// How long the camera takes to move to and from the backpack
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory", meta = (ClampMin = "0.01", Units = s))
@@ -71,16 +85,26 @@ public:
 	// This player's inventory, or null if the player state hasn't arrived yet
 	UFSInventoryComponent* GetInventory() const;
 
+	// The item under the mouse in the open inventory, or null if there isn't one
+	const FFSInventoryItem* GetHoveredInventoryItem() const;
+
 	UFUNCTION(BlueprintCallable, Category = "Inventory")
 	void OpenInventory();
 
-	// Moves the camera back to the character
+	// Moves the camera back to the character, tossing any carried item at their feet
 	UFUNCTION(BlueprintCallable, Category = "Inventory")
 	void CloseInventory();
 
-	// Picks up the nearest item, if there's one in range and the inventory is closed
+	// Picks up the nearest item, if there's one in range and the inventory is closed. An item with no room
+	// goes on the cursor instead, and the inventory opens so the player can make room for it.
 	UFUNCTION(BlueprintCallable, Category = "Inventory")
 	void Interact();
+
+	// What selecting a cell does in the open inventory: picks up the item there or places the carried one. INDEX_NONE means outside the grid, which tosses the carried item.
+	void SelectInventoryCell(const FIntPoint& Cell);
+
+	// Turns the carried item a quarter turn clockwise, if the inventory is open and an item is carried
+	void RotateCarriedInventoryItem();
 
 protected:
 	virtual void BeginPlay() override;
@@ -92,6 +116,9 @@ protected:
 
 private:
 	void ToggleInventory();
+	void SelectAtInventoryCursor();
+	void TossCarriedItem();
+	void RefreshInventoryView();
 
 	// Puts everything back without a camera blend, for when the character is going away
 	void CloseInventoryImmediately();

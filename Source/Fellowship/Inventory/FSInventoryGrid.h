@@ -25,6 +25,12 @@ public:
 	// Marks the cells as covered. The placement has to be one CanPlace allows.
 	void Place(int32 ItemId, const FIntPoint& Cell, const FIntPoint& ItemSize, uint8 Rotation);
 
+	// Empties every cell the item covers
+	void Remove(int32 ItemId);
+
+	// Finds which items a placement would cover. Returns false if the placement doesn't fit inside the grid.
+	bool GetItemsCovered(const FIntPoint& Cell, const FIntPoint& ItemSize, uint8 Rotation, TArray<int32>& OutItemIds) const;
+
 	// Finds the first open space, going left to right then top to bottom. Items stay upright if they fit anywhere, and otherwise lie on their side.
 	bool FindFirstFit(const FIntPoint& ItemSize, FIntPoint& OutCell, uint8& OutRotation) const;
 
@@ -35,6 +41,8 @@ public:
 
 private:
 	FORCEINLINE int32 GetCellIndex(const FIntPoint& Cell) const { return Cell.Y * Size.X + Cell.X; }
+
+	bool IsInsideGrid(const FIntPoint& Cell, const FIntPoint& Footprint) const;
 
 	UPROPERTY()
 	FIntPoint Size = FIntPoint::ZeroValue;

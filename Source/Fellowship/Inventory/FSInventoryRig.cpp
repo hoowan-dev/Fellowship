@@ -3,6 +3,7 @@
 #include "FSInventoryRig.h"
 #include "Camera/CameraComponent.h"
 #include "Components/InstancedStaticMeshComponent.h"
+#include "Components/PointLightComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
@@ -29,8 +30,12 @@ namespace
 	constexpr float ItemBorderOffset = 0.05f;
 
 	// Pulls the rig's meshes towards the camera so they fit inside the character's capsule and don't clip through walls.
-	// It scales along rays from the camera, so what's under the cursor doesn't change.
+	// It scales along rays from the camera, so what's under the cursor doesn't change. It only moves meshes,
+	// so anything that has to line up with them as they're rendered, like a light, has to be placed by this scale too.
 	constexpr float FirstPersonScale = 0.4f;
+
+	// A carried item is never pulled closer to the camera than this fraction of the way
+	constexpr double MinCarriedItemPull = 0.2;
 }
 
 AFSInventoryRig::AFSInventoryRig()
@@ -74,6 +79,24 @@ AFSInventoryRig::AFSInventoryRig()
 	ItemBorders->SetCastShadow(false);
 	ItemBorders->SetCanEverAffectNavigation(false);
 
+	CarriedItemMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("CarriedItemMesh"));
+	CarriedItemMesh->SetupAttachment(Grid);
+	CarriedItemMesh->SetMobility(EComponentMobility::Movable);
+	CarriedItemMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	CarriedItemMesh->SetCastShadow(false);
+	CarriedItemMesh->SetCanEverAffectNavigation(false);
+
+	// Attached to the display rather than the grid, because the grid turns its children's visibility back on as it scales
+	CursorLight = CreateDefaultSubobject<UPointLightComponent>(TEXT("CursorLight"));
+	CursorLight->SetupAttachment(Display);
+	CursorLight->SetMobility(EComponentMobility::Movable);
+	CursorLight->SetCastShadows(false);
+	CursorLight->SetVisibility(false);
+
+	// An inverse square falloff has no upper limit, which burns out whatever's a few centimetres from the light
+	CursorLight->bUseInverseSquaredFalloff = false;
+	CursorLight->LightFalloffExponent = 2.0f;
+
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> PlaneMesh(TEXT("/Engine/BasicShapes/Plane.Plane"));
 	if (PlaneMesh.Succeeded())
 	{
@@ -91,6 +114,11 @@ void AFSInventoryRig::BeginPlay()
 	Pack->SetFirstPersonPrimitiveType(EFirstPersonPrimitiveType::FirstPerson);
 	Grid->SetFirstPersonPrimitiveType(EFirstPersonPrimitiveType::FirstPerson);
 	ItemBorders->SetFirstPersonPrimitiveType(EFirstPersonPrimitiveType::FirstPerson);
+	CarriedItemMesh->SetFirstPersonPrimitiveType(EFirstPersonPrimitiveType::FirstPerson);
+
+	CursorLight->SetIntensity(CursorLightIntensity);
+	CursorLight->SetAttenuationRadius(CursorLightRadius);
+	CursorLight->SetLightColor(CursorLightColor);
 
 	if (ItemBorderMaterial)
 	{
@@ -171,6 +199,7 @@ void AFSInventoryRig::ShowInventory(const UFSInventoryComponent& Inventory)
 	}
 	ItemMeshes.Reset();
 	ItemBorders->ClearInstances();
+	CarriedItemLift = CarriedItemClearance;
 
 	for (int32 Row = 0; Row < GridHeight; ++Row)
 	{
@@ -206,7 +235,14 @@ void AFSInventoryRig::ShowInventory(const UFSInventoryComponent& Inventory)
 		ItemMesh->RegisterComponent();
 
 		ItemMeshes.Add(ItemMesh);
+
+		// The grid's front is towards -X
+		const FBoxSphereBounds Bounds = Mesh->GetBounds();
+		const FBox ItemBox = FBox(Bounds.Origin - Bounds.BoxExtent, Bounds.Origin + Bounds.BoxExtent).TransformBy(ItemMesh->GetRelativeTransform());
+		CarriedItemLift = FMath::Max(CarriedItemLift, CarriedItemClearance - ItemBox.Min.X);
 	}
+
+	CarriedItemMesh->SetStaticMesh(Inventory.IsCarryingItem() ? Inventory.GetCarriedItem().Definition->Mesh.Get() : nullptr);
 }
 
 void AFSInventoryRig::AddItemBorder(const FFSInventoryItem& Item)
@@ -240,6 +276,24 @@ void AFSInventoryRig::AddItemBorder(const FFSInventoryItem& Item)
 
 FTransform AFSInventoryRig::GetItemTransform(const FFSInventoryItem& Item) const
 {
+	return GetItemTransformAt(Item, FVector2D(
+		(Item.Cell.X - GridWidth * 0.5) * CellSize,
+		(GridHeight * 0.5 - Item.Cell.Y) * CellSize));
+}
+
+FTransform AFSInventoryRig::GetCarriedItemTransform(const FFSInventoryItem& Item, const FVector2D& GridPoint) const
+{
+	const FTransform OnGrid = GetItemTransformAt(Item, GridPoint);
+
+	// Scaling about the camera moves the mesh along rays from it, so its image on screen doesn't change
+	const FVector Camera(-GridDistance, 0.0, 0.0);
+	const double Pull = FMath::Max(1.0 - CarriedItemLift / GridDistance, MinCarriedItemPull);
+
+	return FTransform(OnGrid.GetRotation(), Camera + (OnGrid.GetLocation() - Camera) * Pull, OnGrid.GetScale3D() * Pull);
+}
+
+FTransform AFSInventoryRig::GetItemTransformAt(const FFSInventoryItem& Item, const FVector2D& TopLeft) const
+{
 	const UStaticMesh* Mesh = Item.Definition ? Item.Definition->Mesh : nullptr;
 	if (!Mesh)
 	{
@@ -264,8 +318,8 @@ FTransform AFSInventoryRig::GetItemTransform(const FFSInventoryItem& Item) const
 	const FVector FootprintCentre(
 		// The back of the mesh rests just in front of the grid lines
 		-(UprightSize.X * Scale * 0.5 + 0.1),
-		(Item.Cell.X + Footprint.X * 0.5 - GridWidth * 0.5) * CellSize,
-		(GridHeight * 0.5 - Item.Cell.Y - Footprint.Y * 0.5) * CellSize);
+		TopLeft.X + Footprint.X * 0.5 * CellSize,
+		TopLeft.Y - Footprint.Y * 0.5 * CellSize);
 
 	return FTransform(Rotation, FootprintCentre - Rotation.RotateVector(Bounds.Origin * Scale), FVector(Scale));
 }
@@ -289,8 +343,9 @@ void AFSInventoryRig::SetPackVisible(bool bVisible)
 {
 	Display->SetVisibility(bVisible, true);
 
-	// Showing the display shows all of its children, including a grid that hasn't scaled in yet
+	// Showing the display shows all of its children, including a grid that hasn't scaled in yet and a light that isn't over it
 	Grid->SetVisibility(bVisible && GridScale > 0.0f, true);
+	CursorLight->SetVisibility(false);
 }
 
 void AFSInventoryRig::SetGridVisible(bool bVisible)
@@ -301,6 +356,7 @@ void AFSInventoryRig::SetGridVisible(bool bVisible)
 	if (!bVisible)
 	{
 		SetHoveredCell(FIntPoint(INDEX_NONE, INDEX_NONE));
+		CursorLight->SetVisibility(false);
 	}
 }
 
@@ -326,6 +382,31 @@ bool AFSInventoryRig::IsCellInGrid(const FIntPoint& Cell) const
 
 bool AFSInventoryRig::GetCellFromWorldRay(const FVector& RayOrigin, const FVector& RayDirection, FIntPoint& OutCell) const
 {
+	FVector2D GridPoint;
+	if (!GetGridPointFromWorldRay(RayOrigin, RayDirection, GridPoint))
+	{
+		return false;
+	}
+
+	const FIntPoint Cell = GetCellFromGridPoint(GridPoint);
+	if (!IsCellInGrid(Cell))
+	{
+		return false;
+	}
+
+	OutCell = Cell;
+	return true;
+}
+
+FIntPoint AFSInventoryRig::GetCellFromGridPoint(const FVector2D& GridPoint) const
+{
+	return FIntPoint(
+		FMath::FloorToInt32(GridPoint.X / CellSize + GridWidth * 0.5),
+		FMath::FloorToInt32(GridHeight * 0.5 - GridPoint.Y / CellSize));
+}
+
+bool AFSInventoryRig::GetGridPointFromWorldRay(const FVector& RayOrigin, const FVector& RayDirection, FVector2D& OutGridPoint) const
+{
 	const FTransform& DisplayTransform = Display->GetComponentTransform();
 	const FVector Origin = DisplayTransform.InverseTransformPositionNoScale(RayOrigin);
 	const FVector Direction = DisplayTransform.InverseTransformVectorNoScale(RayDirection);
@@ -337,17 +418,30 @@ bool AFSInventoryRig::GetCellFromWorldRay(const FVector& RayOrigin, const FVecto
 	}
 
 	const FVector Hit = Origin + Direction * ((GridDistance - Origin.X) / Direction.X);
-	const FIntPoint Cell(
-		FMath::FloorToInt32(Hit.Y / CellSize + GridWidth * 0.5),
-		FMath::FloorToInt32(GridHeight * 0.5 - Hit.Z / CellSize));
+	OutGridPoint = FVector2D(Hit.Y, Hit.Z);
+	return true;
+}
 
-	if (!IsCellInGrid(Cell))
+void AFSInventoryRig::SetCursorRay(const FVector& RayOrigin, const FVector& RayDirection)
+{
+	FVector2D GridPoint;
+	if (!GetGridPointFromWorldRay(RayOrigin, RayDirection, GridPoint))
 	{
-		return false;
+		CursorLight->SetVisibility(false);
+		return;
 	}
 
-	OutCell = Cell;
-	return true;
+	CursorLight->SetVisibility(IsCellInGrid(GetCellFromGridPoint(GridPoint)));
+
+	// The camera is the display's origin, so this stays on the ray through the mouse
+	const FVector OnGrid(GridDistance, GridPoint.X, GridPoint.Y);
+	CursorLight->SetRelativeLocation(OnGrid * (1.0 - CursorLightHeight / GridDistance) * FirstPersonScale);
+
+	const UFSInventoryComponent* Inventory = ShownInventory.Get();
+	if (Inventory && Inventory->IsCarryingItem())
+	{
+		CarriedItemMesh->SetRelativeTransform(GetCarriedItemTransform(Inventory->GetCarriedItem(), GridPoint));
+	}
 }
 
 void AFSInventoryRig::SetHoveredCell(const FIntPoint& Cell)
@@ -360,7 +454,7 @@ void AFSInventoryRig::SetHoveredCell(const FIntPoint& Cell)
 
 	for (const FIntPoint& HighlightedCell : HighlightedCells)
 	{
-		Grid->SetCustomDataValue(GetCellIndex(HighlightedCell), CellHoveredData, 0.0f, true);
+		Grid->SetCustomDataValue(GetCellIndex(HighlightedCell), HighlightedCellData, 0.0f, true);
 	}
 	HighlightedCells.Reset();
 
@@ -372,11 +466,37 @@ void AFSInventoryRig::SetHoveredCell(const FIntPoint& Cell)
 	}
 
 	const UFSInventoryComponent* Inventory = ShownInventory.Get();
+	TArray<FIntPoint> Cells;
+
+	if (Inventory && Inventory->IsCarryingItem())
+	{
+		const FFSInventoryItem& Carried = Inventory->GetCarriedItem();
+		const FIntPoint Footprint = FFSInventoryGrid::GetFootprint(Carried.Definition->Size, Carried.Rotation);
+
+		// An item hanging off the grid only previews the part that's on it
+		for (int32 Row = NewCell.Y; Row < NewCell.Y + Footprint.Y; ++Row)
+		{
+			for (int32 Column = NewCell.X; Column < NewCell.X + Footprint.X; ++Column)
+			{
+				if (IsCellInGrid(FIntPoint(Column, Row)))
+				{
+					Cells.Add(FIntPoint(Column, Row));
+				}
+			}
+		}
+
+		const EFSItemPlacement Placement = Inventory->GetCarriedItemPlacement(NewCell);
+		const int32 PreviewData = Placement == EFSItemPlacement::Open ? CellCanPlaceData : Placement == EFSItemPlacement::Swap ? CellCanSwapData : CellCannotPlaceData;
+
+		HighlightCells(MoveTemp(Cells), PreviewData);
+		return;
+	}
+
 	const int32 ItemId = Inventory ? Inventory->GetGrid().GetItemAt(NewCell) : INDEX_NONE;
 
 	if (ItemId == INDEX_NONE)
 	{
-		HighlightedCells.Add(NewCell);
+		Cells.Add(NewCell);
 	}
 	else
 	{
@@ -387,14 +507,22 @@ void AFSInventoryRig::SetHoveredCell(const FIntPoint& Cell)
 				const FIntPoint GridCell(Column, Row);
 				if (Inventory->GetGrid().GetItemAt(GridCell) == ItemId)
 				{
-					HighlightedCells.Add(GridCell);
+					Cells.Add(GridCell);
 				}
 			}
 		}
 	}
 
+	HighlightCells(MoveTemp(Cells), CellHoveredData);
+}
+
+void AFSInventoryRig::HighlightCells(TArray<FIntPoint>&& Cells, int32 CellData)
+{
+	HighlightedCells = MoveTemp(Cells);
+	HighlightedCellData = CellData;
+
 	for (const FIntPoint& HighlightedCell : HighlightedCells)
 	{
-		Grid->SetCustomDataValue(GetCellIndex(HighlightedCell), CellHoveredData, 1.0f, true);
+		Grid->SetCustomDataValue(GetCellIndex(HighlightedCell), HighlightedCellData, 1.0f, true);
 	}
 }

@@ -11,6 +11,7 @@ class UCameraComponent;
 class UFSInventoryComponent;
 class UInstancedStaticMeshComponent;
 class UMaterialInterface;
+class UPointLightComponent;
 class UStaticMesh;
 class UStaticMeshComponent;
 struct FFSInventoryItem;
@@ -28,7 +29,10 @@ public:
 	// The instance custom data each grid cell has, which M_InventoryGridCell reads. Each is 1 or 0.
 	static constexpr int32 CellHoveredData = 0;
 	static constexpr int32 CellTakenData = 1;
-	static constexpr int32 CellDataCount = 2;
+	static constexpr int32 CellCanPlaceData = 2;
+	static constexpr int32 CellCannotPlaceData = 3;
+	static constexpr int32 CellCanSwapData = 4;
+	static constexpr int32 CellDataCount = 5;
 
 	AFSInventoryRig();
 
@@ -45,16 +49,26 @@ public:
 	// Finds the cell a world space ray passes through. Returns false if it misses the grid.
 	bool GetCellFromWorldRay(const FVector& RayOrigin, const FVector& RayDirection, FIntPoint& OutCell) const;
 
-	// Highlights a cell, or every cell an item covers if there's one in it. Any cell outside the grid clears the highlight.
+	// Highlights a cell, or every cell an item covers if there's one in it. While an item is carried, previews the cells it would
+	// cover with its top left in this cell instead, showing whether it can go there. Any cell outside the grid clears the highlight.
 	void SetHoveredCell(const FIntPoint& Cell);
 
-	// Matches the grid, the item meshes and their borders to what the inventory holds
+	// Moves the light and the carried item to where the mouse points, given as a world space ray
+	void SetCursorRay(const FVector& RayOrigin, const FVector& RayDirection);
+
+	// Matches the grid, the item meshes, their borders and the carried item to what the inventory holds
 	void ShowInventory(const UFSInventoryComponent& Inventory);
 
 	// Where an item's mesh sits relative to the grid, fitted to the cells it covers
 	FTransform GetItemTransform(const FFSInventoryItem& Item) const;
 
+	// Where a carried item's mesh sits relative to the grid, with the top left of its cells at a point on the grid. It's closer to the camera
+	// than every item in the grid, and shrunk by just enough to look the same size and in the same place as if it were on the grid.
+	FTransform GetCarriedItemTransform(const FFSInventoryItem& Item, const FVector2D& GridPoint) const;
+
 	FORCEINLINE const TArray<TObjectPtr<UStaticMeshComponent>>& GetItemMeshes() const { return ItemMeshes; }
+	FORCEINLINE UStaticMeshComponent* GetCarriedItemMesh() const { return CarriedItemMesh; }
+	FORCEINLINE UPointLightComponent* GetCursorLight() const { return CursorLight; }
 	FORCEINLINE const FIntPoint& GetHoveredCell() const { return HoveredCell; }
 	FORCEINLINE UInstancedStaticMeshComponent* GetGrid() const { return Grid; }
 	FORCEINLINE UInstancedStaticMeshComponent* GetItemBorders() const { return ItemBorders; }
@@ -67,6 +81,12 @@ protected:
 	void FitPackMesh();
 	void AddItemBorder(const FFSInventoryItem& Item);
 	bool IsCellInGrid(const FIntPoint& Cell) const;
+
+	// Finds where a world space ray meets the plane of the grid, in cm from the grid's centre: X to the right and Y up. Returns false if it never does.
+	bool GetGridPointFromWorldRay(const FVector& RayOrigin, const FVector& RayDirection, FVector2D& OutGridPoint) const;
+	FIntPoint GetCellFromGridPoint(const FVector2D& GridPoint) const;
+	FTransform GetItemTransformAt(const FFSInventoryItem& Item, const FVector2D& TopLeft) const;
+	void HighlightCells(TArray<FIntPoint>&& Cells, int32 CellData);
 
 	UPROPERTY(VisibleAnywhere, Category = "Inventory")
 	TObjectPtr<USceneComponent> Root;
@@ -87,6 +107,14 @@ protected:
 	// Four bars around each item in the inventory. Attached to the grid so they scale in and out along with it.
 	UPROPERTY(VisibleAnywhere, Category = "Inventory")
 	TObjectPtr<UInstancedStaticMeshComponent> ItemBorders;
+
+	// Attached to the grid so it scales in and out along with it. Has no mesh while nothing is carried.
+	UPROPERTY(VisibleAnywhere, Category = "Inventory")
+	TObjectPtr<UStaticMeshComponent> CarriedItemMesh;
+
+	// Follows the mouse over the grid, shining on the items and the pack. The grid's own cells are unlit, so it doesn't brighten them.
+	UPROPERTY(VisibleAnywhere, Category = "Inventory")
+	TObjectPtr<UPointLightComponent> CursorLight;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Grid", meta = (ClampMin = "0.1", Units = cm))
 	float CellSize = 3.0f;
@@ -111,6 +139,24 @@ protected:
 	// How much of the cells it covers an item fills, leaving a gap so it doesn't touch the lines
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Grid", meta = (ClampMin = "0.1", ClampMax = "1.0"))
 	float ItemFillFraction = 0.9f;
+
+	// The gap between a carried item and the tallest item in the grid
+	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Grid", meta = (ClampMin = "0.01", Units = cm))
+	float CarriedItemClearance = 1.0f;
+
+	// How far in front of the grid the light under the mouse sits
+	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Cursor Light", meta = (ClampMin = "0.0", Units = cm))
+	float CursorLightHeight = 8.0f;
+
+	// How far the light reaches, as it's rendered: the meshes it shines on are drawn at FirstPersonScale of their size
+	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Cursor Light", meta = (ClampMin = "0.1", Units = cm))
+	float CursorLightRadius = 7.0f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Cursor Light", meta = (ClampMin = "0.0"))
+	float CursorLightIntensity = 2.0f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Cursor Light")
+	FLinearColor CursorLightColor = FLinearColor(1.0f, 0.85f, 0.65f);
 
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Pack")
 	TObjectPtr<UStaticMesh> PackMeshAsset;
@@ -148,6 +194,13 @@ private:
 
 	FIntPoint HoveredCell = FIntPoint(INDEX_NONE, INDEX_NONE);
 	TArray<FIntPoint> HighlightedCells;
+
+	// Which of the cell custom data values HighlightedCells have set
+	int32 HighlightedCellData = CellHoveredData;
+
+	// How far in front of the grid a carried item sits, which ShowInventory finds from the items in the grid
+	double CarriedItemLift = 1.0;
+
 	float GridScale = 0.0f;
 	float GridScaleTarget = 0.0f;
 };

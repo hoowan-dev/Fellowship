@@ -75,12 +75,36 @@ void AFSPlayerController::SetupInputComponent()
 	{
 		UE_LOG(LogTemp, Warning, TEXT("Items can't be picked up: EnhancedInput=%d InteractAction=%s"), EnhancedInput != nullptr, *GetNameSafe(InteractAction));
 	}
+
+	if (EnhancedInput && InventorySelectAction)
+	{
+		EnhancedInput->BindAction(InventorySelectAction, ETriggerEvent::Started, this, &AFSPlayerController::SelectAtInventoryCursor);
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Inventory items can't be selected: EnhancedInput=%d InventorySelectAction=%s"), EnhancedInput != nullptr, *GetNameSafe(InventorySelectAction));
+	}
+
+	if (EnhancedInput && InventoryRotateAction)
+	{
+		EnhancedInput->BindAction(InventoryRotateAction, ETriggerEvent::Started, this, &AFSPlayerController::RotateCarriedInventoryItem);
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Carried items can't be rotated: EnhancedInput=%d InventoryRotateAction=%s"), EnhancedInput != nullptr, *GetNameSafe(InventoryRotateAction));
+	}
 }
 
 UFSInventoryComponent* AFSPlayerController::GetInventory() const
 {
 	const AFSPlayerState* FSPlayerState = GetPlayerState<AFSPlayerState>();
 	return FSPlayerState ? FSPlayerState->GetInventory() : nullptr;
+}
+
+const FFSInventoryItem* AFSPlayerController::GetHoveredInventoryItem() const
+{
+	const UFSInventoryComponent* Inventory = GetInventory();
+	return Inventory && InventoryRig && InventoryViewState == EFSInventoryViewState::Open ? Inventory->FindItemAt(InventoryRig->GetHoveredCell()) : nullptr;
 }
 
 void AFSPlayerController::Interact()
@@ -90,9 +114,87 @@ void AFSPlayerController::Interact()
 		return;
 	}
 
-	if (AFSItemPickup* Pickup = FSCharacter->GetNearestPickup())
+	AFSItemPickup* Pickup = FSCharacter->GetNearestPickup();
+	UFSInventoryComponent* Inventory = GetInventory();
+
+	if (!Pickup || Pickup->TryPickUp(Inventory))
 	{
-		Pickup->TryPickUp(GetInventory());
+		return;
+	}
+
+	// Checked first so the item stays in the world if the inventory can't open
+	if (InventoryRigClass && CanOpenInventory() && Pickup->TryCarry(Inventory))
+	{
+		OpenInventory();
+	}
+}
+
+void AFSPlayerController::SelectAtInventoryCursor()
+{
+	if (InventoryViewState == EFSInventoryViewState::Open)
+	{
+		UpdateHoveredInventoryCell();
+		SelectInventoryCell(InventoryRig->GetHoveredCell());
+	}
+}
+
+void AFSPlayerController::SelectInventoryCell(const FIntPoint& Cell)
+{
+	UFSInventoryComponent* Inventory = GetInventory();
+	if (!Inventory || InventoryViewState != EFSInventoryViewState::Open)
+	{
+		return;
+	}
+
+	if (!Inventory->IsCarryingItem())
+	{
+		Inventory->PickUpItemAt(Cell);
+	}
+	else if (Cell == FIntPoint(INDEX_NONE, INDEX_NONE))
+	{
+		TossCarriedItem();
+	}
+	else
+	{
+		Inventory->PlaceCarriedItem(Cell);
+	}
+
+	RefreshInventoryView();
+}
+
+void AFSPlayerController::RotateCarriedInventoryItem()
+{
+	UFSInventoryComponent* Inventory = GetInventory();
+	if (Inventory && InventoryViewState == EFSInventoryViewState::Open && Inventory->RotateCarriedItem())
+	{
+		RefreshInventoryView();
+	}
+}
+
+void AFSPlayerController::TossCarriedItem()
+{
+	UFSInventoryComponent* Inventory = GetInventory();
+	if (!Inventory || !Inventory->IsCarryingItem() || !FSCharacter)
+	{
+		return;
+	}
+
+	const TSubclassOf<AFSItemPickup> PickupClass = TossedItemClass ? TossedItemClass : TSubclassOf<AFSItemPickup>(AFSItemPickup::StaticClass());
+
+	// Spawning fails while the world is being torn down, and the item is then still on the cursor rather than lost
+	if (AFSItemPickup::DropAtFeet(PickupClass, Inventory->GetCarriedItem().Definition, *FSCharacter))
+	{
+		Inventory->ClearCarriedItem();
+	}
+}
+
+void AFSPlayerController::RefreshInventoryView()
+{
+	const UFSInventoryComponent* Inventory = GetInventory();
+	if (Inventory && InventoryRig)
+	{
+		InventoryRig->ShowInventory(*Inventory);
+		UpdateHoveredInventoryCell();
 	}
 }
 
@@ -193,6 +295,9 @@ void AFSPlayerController::CloseInventory()
 		return;
 	}
 
+	TossCarriedItem();
+	RefreshInventoryView();
+
 	InventoryViewState = EFSInventoryViewState::Closing;
 	InventoryRig->SetGridVisible(false);
 	SetInventoryInputActive(false);
@@ -208,6 +313,9 @@ void AFSPlayerController::CloseInventoryImmediately()
 
 	GetWorldTimerManager().ClearTimer(InventoryMidpointTimer);
 	GetWorldTimerManager().ClearTimer(InventoryFinishedTimer);
+
+	TossCarriedItem();
+	RefreshInventoryView();
 
 	InventoryRig->SetGridVisible(false);
 	SetInventoryInputActive(false);
@@ -303,6 +411,7 @@ void AFSPlayerController::UpdateHoveredInventoryCell()
 	if (DeprojectMousePositionToWorld(RayOrigin, RayDirection))
 	{
 		InventoryRig->GetCellFromWorldRay(RayOrigin, RayDirection, Cell);
+		InventoryRig->SetCursorRay(RayOrigin, RayDirection);
 	}
 
 	InventoryRig->SetHoveredCell(Cell);

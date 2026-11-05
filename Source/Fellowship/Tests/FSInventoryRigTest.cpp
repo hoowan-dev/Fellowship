@@ -14,7 +14,7 @@ namespace
 {
 	// Matches the rig's defaults
 	constexpr int32 GridSize = 8;
-	constexpr double CellSize = 4.0;
+	constexpr double CellSize = 3.0;
 	constexpr double GridDistance = 40.0;
 	constexpr double ViewPitchDown = 20.0;
 
