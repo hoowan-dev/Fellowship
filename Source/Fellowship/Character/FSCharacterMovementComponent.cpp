@@ -43,6 +43,10 @@ UFSCharacterMovementComponent::UFSCharacterMovementComponent()
 {
 	// Negative is unlimited, so the easing alone controls turn speed; set a positive yaw to cap it
 	RotationRate = FRotator(0.0f, -1.0f, 0.0f);
+
+	// A jump mostly commits to the direction it left the ground in
+	AirControl = 0.025f;
+	AirControlBoostMultiplier = 1.0f;
 }
 
 float UFSCharacterMovementComponent::GetMaxAcceleration() const
@@ -240,6 +244,7 @@ void UFSCharacterMovementComponent::OnMovementModeChanged(EMovementMode Previous
 			RestoreStandingCapsule();
 			NextClimbAttachTime = GetWorld()->GetTimeSeconds() + ClimbReattachDelay;
 			bInClimbCorner = false;
+			bOnClimbLedgePath = false;
 		}
 	}
 
@@ -308,6 +313,12 @@ void UFSCharacterMovementComponent::PhysClimbing(float DeltaTime)
 		return;
 	}
 
+	if (bOnClimbLedgePath)
+	{
+		UpdateClimbLedge(DeltaTime);
+		return;
+	}
+
 	// Checked first because sensing stops finding a surface once the character is past an outside corner
 	if (bInClimbCorner || TryStartClimbCorner())
 	{
@@ -315,14 +326,21 @@ void UFSCharacterMovementComponent::PhysClimbing(float DeltaTime)
 		return;
 	}
 
-	FVector SensedNormal;
-	if (!SenseClimbSurface(SensedNormal))
+	const FClimbSense Sense = SenseClimbSurface();
+
+	if (Sense.bTopHalfAboveLedge && TryStartClimbLedge(Sense.LedgeSurfaceDistance))
 	{
-		LoseClimbGrip(TEXT("Fell: no surface found"));
+		UpdateClimbLedge(DeltaTime);
 		return;
 	}
 
-	ClimbSurfaceNormal = FMath::VInterpTo(ClimbSurfaceNormal, SensedNormal, DeltaTime, ClimbNormalInterpSpeed).GetSafeNormal();
+	if (!Sense.bBottomHalfOnSurface)
+	{
+		LoseClimbGrip(TEXT("Fell: bottom half off the surface"));
+		return;
+	}
+
+	ClimbSurfaceNormal = FMath::VInterpTo(ClimbSurfaceNormal, Sense.Normal, DeltaTime, ClimbNormalInterpSpeed).GetSafeNormal();
 	if (!IsClimbableNormal(ClimbSurfaceNormal))
 	{
 		LoseClimbGrip(ClimbSurfaceNormal.Z > 0.0f ? TEXT("Fell: surface became walkable") : TEXT("Fell: overhang too steep"));
@@ -565,6 +583,98 @@ void UFSCharacterMovementComponent::UpdateClimbCorner(float DeltaTime)
 	DrawDebugClimbing();
 }
 
+bool UFSCharacterMovementComponent::TryStartClimbLedge(double SurfaceDistance)
+{
+	const UCapsuleComponent* Capsule = CharacterOwner->GetCapsuleComponent();
+	const float Radius = Capsule->GetScaledCapsuleRadius();
+	const float StandingHalfHeight = StandingCapsuleHalfHeight * Capsule->GetShapeScale();
+	const FVector Center = UpdatedComponent->GetComponentLocation();
+
+	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(ClimbLedge), false, CharacterOwner);
+	FCollisionResponseParams ResponseParams;
+	UpdatedPrimitive->InitSweepCollisionParams(QueryParams, ResponseParams);
+	const ECollisionChannel Channel = UpdatedComponent->GetCollisionObjectType();
+
+	// Just far enough past the surface for the whole capsule to stand on the ledge
+	const FVector SurfacePoint = Center - ClimbSurfaceNormal * SurfaceDistance;
+	const FVector StandPoint = SurfacePoint + (-ClimbSurfaceNormal).GetSafeNormal2D() * (Radius + ClimbSurfaceGap);
+
+	// A sphere finds the same ground as the bottom of the standing capsule without needing room for all of it.
+	// Starts high enough to find ground rising away from the edge, as far as the character could step up.
+	const FVector GroundStart(StandPoint.X, StandPoint.Y, Center.Z + MaxStepHeight + Radius);
+	const FVector GroundEnd(StandPoint.X, StandPoint.Y, Center.Z - Capsule->GetScaledCapsuleHalfHeight());
+
+	FHitResult GroundHit;
+	GetWorld()->SweepSingleByChannel(GroundHit, GroundStart, GroundEnd, FQuat::Identity, Channel, FCollisionShape::MakeSphere(Radius), QueryParams, ResponseParams);
+
+	if (GroundHit.bStartPenetrating || !IsClimbableHit(GroundHit) || !IsWalkable(GroundHit))
+	{
+		DrawDebugClimbStatus(TEXT("Can't climb onto ledge: nothing to stand on"), FColor::Orange);
+		return false;
+	}
+
+	FClimbLedgePath Path;
+	Path.StartLocation = Center;
+	Path.EndLocation = FVector(StandPoint.X, StandPoint.Y, GroundHit.Location.Z - Radius + StandingHalfHeight + MAX_FLOOR_DIST);
+	Path.RaisedLocation = FVector(Center.X, Center.Y, FMath::Max(Center.Z, Path.EndLocation.Z));
+
+	const FCollisionShape StandingShape = FCollisionShape::MakeCapsule(Radius, StandingHalfHeight);
+
+	// Slightly smaller than the capsule because it starts close to the surface
+	const FCollisionShape PathShape = UpdatedPrimitive->GetCollisionShape(-1.0f);
+
+	if (GetWorld()->OverlapBlockingTestByChannel(Path.EndLocation, FQuat::Identity, Channel, StandingShape, QueryParams, ResponseParams)
+		|| GetWorld()->SweepTestByChannel(Path.StartLocation, Path.RaisedLocation, FQuat::Identity, Channel, PathShape, QueryParams, ResponseParams)
+		|| GetWorld()->SweepTestByChannel(Path.RaisedLocation, Path.EndLocation, FQuat::Identity, Channel, PathShape, QueryParams, ResponseParams))
+	{
+		DrawDebugClimbStatus(TEXT("Can't climb onto ledge: no room"), FColor::Orange);
+		return false;
+	}
+
+	ClimbLedgePath = Path;
+	bOnClimbLedgePath = true;
+
+	DrawDebugClimbEvent(TEXT("Climbing onto ledge"), FColor::Green);
+	return true;
+}
+
+void UFSCharacterMovementComponent::UpdateClimbLedge(float DeltaTime)
+{
+	ClimbLedgePath.Distance += ClimbLedgeSpeed * DeltaTime;
+
+	bJustTeleported = false;
+	const FVector OldLocation = UpdatedComponent->GetComponentLocation();
+
+	FHitResult Hit;
+	SafeMoveUpdatedComponent(ClimbLedgePath.GetLocation() - OldLocation, GetClimbFacingRotation(DeltaTime), true, Hit);
+
+	Velocity = ((UpdatedComponent->GetComponentLocation() - OldLocation) / DeltaTime).GetClampedToMaxSize(ClimbSpeed);
+
+	if (ClimbLedgePath.IsFinished())
+	{
+		DrawDebugClimbEvent(TEXT("Climbed onto ledge"), FColor::Green);
+		SetMovementMode(MOVE_Walking);
+		return;
+	}
+
+	DrawDebugClimbing();
+}
+
+FVector UFSCharacterMovementComponent::FClimbLedgePath::GetLocation() const
+{
+	const FVector Rise = RaisedLocation - StartLocation;
+	const double RiseDistance = Rise.Size();
+
+	return Distance < RiseDistance
+		? StartLocation + Rise.GetClampedToMaxSize(Distance)
+		: RaisedLocation + (EndLocation - RaisedLocation).GetClampedToMaxSize(Distance - RiseDistance);
+}
+
+bool UFSCharacterMovementComponent::FClimbLedgePath::IsFinished() const
+{
+	return Distance >= FVector::Dist(StartLocation, RaisedLocation) + FVector::Dist(RaisedLocation, EndLocation);
+}
+
 FVector UFSCharacterMovementComponent::FClimbCorner::GetLocation(float InAlpha) const
 {
 	if (!bOutside)
@@ -605,7 +715,7 @@ void UFSCharacterMovementComponent::DrawDebugClimbing() const
 #endif
 }
 
-bool UFSCharacterMovementComponent::SenseClimbSurface(FVector& OutNormal) const
+UFSCharacterMovementComponent::FClimbSense UFSCharacterMovementComponent::SenseClimbSurface() const
 {
 	float Radius, HalfHeight;
 	CharacterOwner->GetCapsuleComponent()->GetScaledCapsuleSize(Radius, HalfHeight);
@@ -622,19 +732,35 @@ bool UFSCharacterMovementComponent::SenseClimbSurface(FVector& OutNormal) const
 	UpdatedPrimitive->InitSweepCollisionParams(QueryParams, ResponseParams);
 
 	FVector NormalSum = FVector::ZeroVector;
+	FClimbSense Sense;
+	bool bSurfaceAboveBottom = false;
 
-	const FVector Offsets[] = { FVector::ZeroVector, Right, -Right, Up, -Up };
-	for (const FVector& Offset : Offsets)
+	// The three in the middle are level with the capsule's center, where the top half meets the bottom half
+	constexpr int32 BottomIndex = 0;
+	constexpr int32 TopIndex = 4;
+	const FVector Offsets[] = { -Up, FVector::ZeroVector, Right, -Right, Up };
+
+	for (int32 Index = 0; Index < UE_ARRAY_COUNT(Offsets); ++Index)
 	{
+		const FVector& Offset = Offsets[Index];
 		FHitResult Hit;
 		const FVector Start = Center + Offset;
 		const FVector End = Start + TraceDelta;
 		GetWorld()->LineTraceSingleByChannel(Hit, Start, End, UpdatedComponent->GetCollisionObjectType(), QueryParams, ResponseParams);
 
-		const bool bUsable = IsClimbableHit(Hit) && FVector::DotProduct(Hit.ImpactNormal, ClimbSurfaceNormal) > 0.0f;
+		// A walkable surface is the ground past a ledge rather than more of the climbed surface
+		const bool bUsable = IsClimbableHit(Hit) && IsClimbableNormal(Hit.ImpactNormal) && FVector::DotProduct(Hit.ImpactNormal, ClimbSurfaceNormal) > 0.0f;
 		if (bUsable)
 		{
 			NormalSum += Hit.ImpactNormal;
+
+			Sense.bBottomHalfOnSurface |= Index != TopIndex;
+			bSurfaceAboveBottom |= Index != BottomIndex;
+
+			if (Index == BottomIndex)
+			{
+				Sense.LedgeSurfaceDistance = Hit.Distance;
+			}
 		}
 
 #if ENABLE_DRAW_DEBUG
@@ -645,8 +771,9 @@ bool UFSCharacterMovementComponent::SenseClimbSurface(FVector& OutNormal) const
 #endif
 	}
 
-	OutNormal = NormalSum.GetSafeNormal();
-	return !OutNormal.IsZero();
+	Sense.Normal = NormalSum.GetSafeNormal();
+	Sense.bTopHalfAboveLedge = Sense.bBottomHalfOnSurface && !bSurfaceAboveBottom;
+	return Sense;
 }
 
 bool UFSCharacterMovementComponent::SnapToClimbSurface(float DeltaTime, const FQuat& Rotation)
@@ -912,6 +1039,11 @@ void UFSCharacterMovementComponent::AppendPredictedSamples(float DeltaTime)
 FRotator UFSCharacterMovementComponent::ComputeOrientToMovementRotation(const FRotator& CurrentRotation, float DeltaTime, FRotator& DeltaRotation) const
 {
 	const FRotator TargetRotation = Super::ComputeOrientToMovementRotation(CurrentRotation, DeltaTime, DeltaRotation);
+
+	if (IsFalling())
+	{
+		DeltaRotation.Yaw = AirMaxTurnRate * DeltaTime;
+	}
 
 	if (FacingInterpSpeed <= 0.0f)
 	{

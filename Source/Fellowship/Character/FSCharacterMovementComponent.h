@@ -126,6 +126,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Movement: Climbing", meta = (ClampMin = "0.0", UIMin = "0.0", ForceUnits = "cm"))
 	float ClimbDismountFloorDistance = 5.0f;
 
+	// How quickly the character moves along its path up and over a ledge once its top half is above it. Once started, the path always finishes unless the character lets go.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Movement: Climbing", meta = (ClampMin = "1.0", UIMin = "1.0", ForceUnits = "cm/s"))
+	float ClimbLedgeSpeed = 200.0f;
+
 	// How far above the floor the character's standing feet have to get before reaching the floor climbs off onto it. Keeps a grab made from the ground from ending straight away.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Movement: Climbing", meta = (ClampMin = "0.0", UIMin = "0.0", ForceUnits = "cm"))
 	float ClimbDismountArmHeight = 30.0f;
@@ -135,6 +139,10 @@ public:
 	// Marks where the character grabbed on and let go, and why it let go. Not available in Shipping builds.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Movement: Climbing")
 	bool bDrawDebugClimb = true;
+
+	// Fastest the character can turn while in the air. 0 keeps it facing the way it left the ground.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Movement: Jumping", meta = (ClampMin = "0.0", UIMin = "0.0", UIMax = "360.0", ForceUnits = "deg/s"))
+	float AirMaxTurnRate = 90.0f;
 
 	// While airborne, draws the path taken (cyan for a jump, magenta for a fall), the predicted path (yellow) and the vertical speed.
 	// Marks the takeoff, apex and landing, with the height gained, distance and air time. Not available in Shipping builds.
@@ -149,6 +157,10 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Character Movement: Climbing")
 	bool IsClimbing() const;
+
+	// Whether the character is on its path up and over a ledge. It counts as climbing until it reaches the top.
+	UFUNCTION(BlueprintPure, Category = "Character Movement: Climbing")
+	bool IsClimbingOntoLedge() const { return IsClimbing() && bOnClimbLedgePath; }
 
 	// Lets go of the surface and starts falling. Does nothing when not climbing.
 	UFUNCTION(BlueprintCallable, Category = "Character Movement: Climbing")
@@ -180,8 +192,23 @@ private:
 
 	void PhysClimbing(float DeltaTime);
 
-	// Averages the normals of traces around the capsule. Returns false if none of them found a climbable surface.
-	bool SenseClimbSurface(FVector& OutNormal) const;
+	// What the traces around the capsule found
+	struct FClimbSense
+	{
+		// Average direction out of the surfaces found
+		FVector Normal = FVector::ZeroVector;
+
+		// Whether the surface is level with any of the capsule's bottom half
+		bool bBottomHalfOnSurface = false;
+
+		// Whether the surface reaches no higher than the capsule's bottom half
+		bool bTopHalfAboveLedge = false;
+
+		// How far the surface is from the capsule's center along its normal. Only set when the top half is above a ledge.
+		double LedgeSurfaceDistance = 0.0;
+	};
+
+	FClimbSense SenseClimbSurface() const;
 
 	// Moves towards or away from the surface to hold the gap. Returns false if the surface has fallen out of reach.
 	bool SnapToClimbSurface(float DeltaTime, const FQuat& Rotation);
@@ -220,6 +247,23 @@ private:
 	bool StartClimbCorner(FClimbCorner Corner);
 
 	void UpdateClimbCorner(float DeltaTime);
+
+	// A move up until level with the top of a ledge, then forward onto it, on a path that's fixed when it starts
+	struct FClimbLedgePath
+	{
+		FVector StartLocation = FVector::ZeroVector;
+		FVector RaisedLocation = FVector::ZeroVector;
+		FVector EndLocation = FVector::ZeroVector;
+		double Distance = 0.0;
+
+		FVector GetLocation() const;
+		bool IsFinished() const;
+	};
+
+	// Starts moving onto the ledge if it has walkable ground to stand on and the capsule fits along the whole path
+	bool TryStartClimbLedge(double SurfaceDistance);
+
+	void UpdateClimbLedge(float DeltaTime);
 
 	bool ClimbLineTrace(FHitResult& OutHit, const FVector& Start, const FVector& End) const;
 	bool ClimbCapsuleSweep(FHitResult& OutHit, const FVector& Start, const FVector& End) const;
@@ -273,6 +317,9 @@ private:
 
 	FClimbCorner ClimbCorner;
 	bool bInClimbCorner = false;
+
+	FClimbLedgePath ClimbLedgePath;
+	bool bOnClimbLedgePath = false;
 
 	// Whether the feet have been far enough from the floor since grabbing on for reaching it to climb off
 	bool bClimbDismountArmed = false;

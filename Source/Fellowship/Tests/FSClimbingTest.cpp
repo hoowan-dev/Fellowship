@@ -106,6 +106,15 @@ namespace
 			Character->StopJumping();
 		}
 
+		// Climbs until the character starts onto a ledge or stops climbing
+		void ClimbUntilOffSurface(float UpInput, float MaxSeconds = 6.0f)
+		{
+			for (float Elapsed = 0.0f; Elapsed < MaxSeconds && Movement->IsClimbing() && !Movement->IsClimbingOntoLedge(); Elapsed += TickTime)
+			{
+				Climb(TickTime, 0.0f, UpInput);
+			}
+		}
+
 		FVector Location() const { return Character->GetActorLocation(); }
 	};
 }
@@ -206,19 +215,93 @@ bool FFSClimbingLetGoTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSClimbingLosesSurfaceTest, "Fellowship.Climbing.FallsWhenSurfaceEnds", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
-bool FFSClimbingLosesSurfaceTest::RunTest(const FString& Parameters)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSClimbingLedgeTest, "Fellowship.Climbing.ClimbsOntoLedgeWhenTopHalfIsAbove", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FFSClimbingLedgeTest::RunTest(const FString& Parameters)
 {
-	FClimbingTestWorld Test;
-	Test.AddWall(300.0f);
-	Test.JumpForward();
-	if (!TestTrue(TEXT("Climbing"), Test.Movement->IsClimbing()))
 	{
-		return false;
-	}
+		FClimbingTestWorld Test;
+		Test.AddWall(300.0f);
+		Test.JumpForward();
+		if (TestTrue(TEXT("Climbing"), Test.Movement->IsClimbing()))
+		{
+			Test.ClimbUntilOffSurface(1.0f);
+			TestTrue(TEXT("Starts onto the ledge"), Test.Movement->IsClimbingOntoLedge());
+			TestTrue(TEXT("Starts when the capsule's center passes the top"), Test.Location().Z >= 300.0 && Test.Location().Z < 310.0);
+			TestTrue(TEXT("Still in front of the wall when starting"), Test.Location().X < 100.0);
 
-	Test.Climb(4.0f, 0.0f, 1.0f);
-	TestFalse(TEXT("Not climbing above the top of the wall"), Test.Movement->IsClimbing());
+			Test.Step(2.0f, FVector::ZeroVector);
+			TestFalse(TEXT("No longer climbing"), Test.Movement->IsClimbing());
+			TestTrue(TEXT("Walking on the ledge"), Test.Movement->IsMovingOnGround());
+			TestTrue(TEXT("Standing past the edge"), Test.Location().X > 100.0);
+			TestTrue(TEXT("Standing on top"), Test.Location().Z >= 300.0 + StandingHalfHeight && Test.Location().Z < 300.0 + StandingHalfHeight + 5.0);
+			TestNearlyEqual(TEXT("Capsule restored"), Test.Character->GetCapsuleComponent()->GetUnscaledCapsuleHalfHeight(), StandingHalfHeight, 0.01f);
+		}
+	}
+	{
+		// A wall thinner than the capsule still has an edge to get over
+		FClimbingTestWorld Test;
+		Test.AddBox(FVector(110.0f, 0.0f, 150.0f), FVector(10.0f, 2000.0f, 150.0f));
+		Test.JumpForward();
+		Test.ClimbUntilOffSurface(1.0f);
+		TestTrue(TEXT("Starts onto a thin wall"), Test.Movement->IsClimbingOntoLedge());
+		Test.Step(1.0f, FVector::ZeroVector);
+		TestFalse(TEXT("No longer climbing after a thin wall"), Test.Movement->IsClimbing());
+		TestTrue(TEXT("Past the near face of a thin wall"), Test.Location().X > 100.0);
+	}
+	{
+		// A walkable ramp rising away from the top of the near face
+		FClimbingTestWorld Test;
+		Test.AddWall(300.0f);
+		const FRotator Rotation(30.0f, 0.0f, 0.0f);
+		const FVector Extent(200.0f, 2000.0f, 50.0f);
+		Test.AddBox(FVector(100.0f, 0.0f, 300.0f) - Rotation.RotateVector(FVector(-Extent.X, 0.0f, Extent.Z)), Extent, Rotation);
+		Test.JumpForward();
+		Test.ClimbUntilOffSurface(1.0f);
+		TestTrue(TEXT("Starts onto a ramp"), Test.Movement->IsClimbingOntoLedge());
+		Test.Step(2.0f, FVector::ZeroVector);
+		TestTrue(TEXT("Walking on the ramp"), Test.Movement->IsMovingOnGround());
+		TestTrue(TEXT("Above the bottom of the ramp"), Test.Location().Z > 300.0 + StandingHalfHeight);
+	}
+	{
+		// The standing capsule doesn't fit under the ceiling, so the character keeps hanging on
+		FClimbingTestWorld Test;
+		Test.AddWall(300.0f);
+		Test.AddBox(FVector(200.0f, 0.0f, 470.0f), FVector(300.0f, 2000.0f, 50.0f));
+		Test.JumpForward();
+		Test.Climb(4.0f, 0.0f, 1.0f);
+		TestFalse(TEXT("Doesn't start onto a ledge without room"), Test.Movement->IsClimbingOntoLedge());
+		TestTrue(TEXT("Keeps climbing below the ceiling"), Test.Movement->IsClimbing());
+		TestTrue(TEXT("Stays in front of the wall below the ceiling"), Test.Location().X < 100.0);
+	}
+	{
+		// Nothing climbable to stand on, so going further up takes the bottom half off the wall
+		FClimbingTestWorld Test;
+		Test.AddWall(300.0f);
+		Test.AddBox(FVector(200.0f, 0.0f, 305.0f), FVector(100.0f, 2000.0f, 5.0f), FRotator::ZeroRotator, EComponentMobility::Movable);
+		Test.JumpForward();
+		Test.ClimbUntilOffSurface(1.0f);
+		TestFalse(TEXT("Doesn't climb onto a movable surface"), Test.Movement->IsClimbingOntoLedge());
+		TestTrue(TEXT("Falls instead"), Test.Movement->IsFalling());
+		TestTrue(TEXT("Falls in front of the wall"), Test.Location().X < 100.0);
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSClimbingBottomHalfTest, "Fellowship.Climbing.FallsWhenBottomHalfComesOffWall", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FFSClimbingBottomHalfTest::RunTest(const FString& Parameters)
+{
+	// A wall hanging in the air, with its bottom edge at Z = 300
+	FClimbingTestWorld Test;
+	Test.AddBox(FVector(200.0f, 0.0f, 800.0f), FVector(100.0f, 2000.0f, 500.0f));
+	Test.Character->SetActorLocation(FVector(40.0f, 0.0f, 600.0f));
+	Test.Movement->SetMovementMode(MOVE_Falling);
+	Test.Step(0.3f, FVector::ForwardVector);
+	if (TestTrue(TEXT("Grabbed in mid air"), Test.Movement->IsClimbing()))
+	{
+		Test.ClimbUntilOffSurface(-1.0f);
+		TestTrue(TEXT("Falls off the bottom of the wall"), Test.Movement->IsFalling());
+		TestTrue(TEXT("Falls when the capsule's center passes the bottom edge"), Test.Location().Z <= 300.0 && Test.Location().Z > 290.0);
+	}
 	return true;
 }
 
@@ -474,6 +557,33 @@ bool FFSClimbingDismountTest::RunTest(const FString& Parameters)
 			TestTrue(TEXT("Dismounts after grabbing from high up"), Test.Movement->IsMovingOnGround());
 		}
 	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSAirMovementTest, "Fellowship.Movement.LimitsMovementAndTurningInTheAir", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FFSAirMovementTest::RunTest(const FString& Parameters)
+{
+	FClimbingTestWorld Test;
+
+	Test.Character->Jump();
+	Test.Step(0.5f, FVector::RightVector);
+	Test.Character->StopJumping();
+
+	if (TestTrue(TEXT("In the air"), Test.Movement->IsFalling()))
+	{
+		const double ExpectedYaw = 0.5 * Test.Movement->AirMaxTurnRate;
+		TestNearlyEqual(TEXT("Turning is capped in the air"), static_cast<double>(FRotator::NormalizeAxis(Test.Character->GetActorRotation().Yaw)), ExpectedYaw, 5.0);
+		TestTrue(TEXT("Input still moves the character a little"), Test.Location().Y > 1.0);
+		TestTrue(TEXT("Input barely moves the character"), Test.Location().Y < 10.0);
+	}
+
+	// Lands, then turns and moves freely again
+	Test.Step(1.0f, FVector::ZeroVector);
+	const double LandedY = Test.Location().Y;
+	Test.Step(0.5f, FVector::RightVector);
+	TestTrue(TEXT("Back on the ground"), Test.Movement->IsMovingOnGround());
+	TestTrue(TEXT("Turning is free on the ground"), FMath::IsNearlyEqual(FRotator::NormalizeAxis(Test.Character->GetActorRotation().Yaw), 90.0, 5.0));
+	TestTrue(TEXT("Movement is free on the ground"), Test.Location().Y > LandedY + 50.0);
 	return true;
 }
 
