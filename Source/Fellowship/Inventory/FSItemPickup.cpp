@@ -7,6 +7,7 @@
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
+#include "Game/FSEventLog.h"
 #include "GameFramework/Character.h"
 #include "Inventory/FSInventoryComponent.h"
 #include "Inventory/FSItemDefinition.h"
@@ -66,6 +67,11 @@ AFSItemPickup* AFSItemPickup::DropAtFeet(TSubclassOf<AFSItemPickup> PickupClass,
 	if (Pickup)
 	{
 		Pickup->SetItem(DroppedItem);
+
+		if (DroppedItem)
+		{
+			UFSEventLog::Add(World, FText::Format(LOCTEXT("DroppedEvent", "Dropped {0}"), DroppedItem->DisplayName));
+		}
 	}
 
 	return Pickup;
@@ -96,6 +102,7 @@ bool AFSItemPickup::TryPickUp(UFSInventoryComponent* Inventory)
 		return false;
 	}
 
+	LogPickedUp();
 	Destroy();
 	return true;
 }
@@ -107,8 +114,14 @@ bool AFSItemPickup::TryCarry(UFSInventoryComponent* Inventory)
 		return false;
 	}
 
+	LogPickedUp();
 	Destroy();
 	return true;
+}
+
+void AFSItemPickup::LogPickedUp() const
+{
+	UFSEventLog::Add(this, FText::Format(LOCTEXT("PickedUpEvent", "Picked up {0}"), Item->DisplayName));
 }
 
 FText AFSItemPickup::GetPromptText(const UFSInventoryComponent* Inventory) const

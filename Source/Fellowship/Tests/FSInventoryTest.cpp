@@ -15,6 +15,7 @@
 #include "Engine/CollisionProfile.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
+#include "Game/FSEventLog.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/WorldSettings.h"
 #include "Inventory/FSInventoryComponent.h"
@@ -22,6 +23,7 @@
 #include "Inventory/FSInventoryRig.h"
 #include "Inventory/FSItemDefinition.h"
 #include "Inventory/FSItemPickup.h"
+#include "Player/FSEquipmentDisplay.h"
 #include "Player/FSPlayerController.h"
 #include "Player/FSPlayerState.h"
 #include "TimerManager.h"
@@ -669,6 +671,169 @@ bool FFSItemDropTest::RunTest(const FString& Parameters)
 
 	AFSItemPickup* Fallen = AFSItemPickup::DropAtFeet(AFSItemPickup::StaticClass(), Item, *Character);
 	TestEqual(TEXT("It rests on the floor below"), Fallen->GetActorLocation().Z, -950.0 + MeshHalfHeight, 0.01);
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSEquipmentDisplayVisibilityTest, "Fellowship.Equipment.Display.MakesWayForTheInventory", TestFlags)
+
+bool FFSEquipmentDisplayVisibilityTest::RunTest(const FString& Parameters)
+{
+	FInventoryPlayerTestWorld Test;
+
+	TestTrue(TEXT("It shows during play"), AFSEquipmentDisplay::IsShownFor(*Test.Controller));
+
+	Test.Controller->OpenInventory();
+	TestFalse(TEXT("It goes as soon as the inventory starts opening"), AFSEquipmentDisplay::IsShownFor(*Test.Controller));
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSEquipmentDisplayLayoutTest, "Fellowship.Equipment.Display.FitsMeshesInsideTheirCircles", TestFlags)
+
+bool FFSEquipmentDisplayLayoutTest::RunTest(const FString& Parameters)
+{
+	const FVector2D Viewport(1920.0, 1080.0);
+	const FVector2D Left = AFSEquipmentDisplay::GetSlotCentre(Viewport, EFSEquipmentSlot::LeftHand);
+	const FVector2D Backpack = AFSEquipmentDisplay::GetSlotCentre(Viewport, EFSEquipmentSlot::Backpack);
+	const FVector2D Right = AFSEquipmentDisplay::GetSlotCentre(Viewport, EFSEquipmentSlot::RightHand);
+
+	TestEqual(TEXT("The backpack is in the middle"), Backpack.X, 960.0);
+	TestTrue(TEXT("The left hand is to its left"), Left.X < Backpack.X);
+	TestTrue(TEXT("The right hand is to its right"), Right.X > Backpack.X);
+	TestTrue(TEXT("They're level"), Left.Y == Backpack.Y && Right.Y == Backpack.Y);
+	TestTrue(TEXT("They don't overlap"), Backpack.X - Left.X > AFSEquipmentDisplay::SlotRadius * 2.0f);
+	TestTrue(TEXT("They're at the bottom of the screen"), Backpack.Y > 900.0 && Backpack.Y + AFSEquipmentDisplay::SlotRadius < Viewport.Y);
+
+	const UStaticMesh* Cube = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
+	if (!TestNotNull(TEXT("The cube loads"), Cube))
+	{
+		return false;
+	}
+
+	const FVector Centre(100.0, 200.0, 300.0);
+	const FQuat Camera = FRotator(-20.0f, 70.0f, 0.0f).Quaternion();
+	const FRotator Turn(0.0f, 45.0f, 0.0f);
+	const FTransform Placed = AFSEquipmentDisplay::GetMeshTransform(*Cube, Turn, Camera, Centre, 1.0);
+
+	TestTrue(TEXT("The mesh is centred on the point"), Placed.TransformPosition(Cube->GetBounds().Origin).Equals(Centre, 0.001));
+	TestTrue(TEXT("It's turned along with the camera"), Placed.GetRotation().Equals(Camera * Turn.Quaternion(), 0.001));
+
+	// Seen from the camera, its corners have to stay inside the circle
+	const double Half = Cube->GetBounds().BoxExtent.X;
+	for (const FVector Corner : { FVector(Half, Half, Half), FVector(-Half, Half, -Half), FVector(Half, -Half, Half), FVector(-Half, -Half, -Half) })
+	{
+		const FVector FromCamera = Camera.UnrotateVector(Placed.TransformPosition(Corner) - Centre);
+		TestTrue(TEXT("A corner stays inside the circle"), FVector2D(FromCamera.Y, FromCamera.Z).Size() <= 1.0);
+	}
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSEquipmentShakeTest, "Fellowship.Equipment.Display.ShakesWithThePlayersMovement", TestFlags)
+
+bool FFSEquipmentShakeTest::RunTest(const FString& Parameters)
+{
+	constexpr float FrameTime = 1.0f / 60.0f;
+
+	// Runs long enough for the shaking to settle at a speed, and returns the furthest a slot was pushed
+	const auto Settle = [](FFSEquipmentShake& Shake, const FVector& Velocity, bool bInAir = false)
+	{
+		double Furthest = 0.0;
+		for (int32 Frame = 0; Frame < 300; ++Frame)
+		{
+			Shake.Update(Velocity, bInAir, FrameTime);
+			Furthest = FMath::Max(Furthest, Shake.GetOffset(EFSEquipmentSlot::Backpack).Size());
+		}
+		return Furthest;
+	};
+
+	FFSEquipmentShake Shake;
+	TestEqual(TEXT("Standing still doesn't shake"), Settle(Shake, FVector::ZeroVector), 0.0);
+
+	const double FurthestClimbing = Settle(Shake, FVector(0.0, 0.0, 150.0));
+	const float ClimbingStrength = Shake.GetStrength();
+	TestTrue(TEXT("Climbing shakes"), FurthestClimbing > 0.0);
+	TestEqual(TEXT("Climbing shakes a little"), ClimbingStrength, 0.25f, 0.01f);
+
+	Settle(Shake, FVector(250.0, 0.0, 0.0));
+	const float WalkingStrength = Shake.GetStrength();
+	TestEqual(TEXT("Walking shakes a little"), WalkingStrength, 250.0f / 600.0f, 0.01f);
+
+	const double FurthestRunning = Settle(Shake, FVector(600.0, 0.0, 0.0));
+	TestEqual(TEXT("Running shakes the most"), Shake.GetStrength(), 1.0f, 0.01f);
+	TestTrue(TEXT("It's kept within the limit"), FurthestRunning <= 0.1 * FMath::Sqrt(2.0));
+
+	Settle(Shake, FVector::ZeroVector);
+	TestTrue(TEXT("It dies away after stopping"), Shake.GetStrength() < 0.01f);
+
+	// A jump from standing still: the jolt comes first, and the rest of the jump is gravity slowing the character down
+	FVector Velocity(0.0, 0.0, 700.0);
+	Shake.Update(Velocity, true, FrameTime);
+	const float JumpStrength = Shake.GetStrength();
+	TestTrue(TEXT("Jumping jolts"), JumpStrength > 0.5f);
+
+	for (int32 Frame = 0; Frame < 60; ++Frame)
+	{
+		Velocity.Z -= 980.0 * FrameTime;
+		Shake.Update(Velocity, true, FrameTime);
+	}
+	TestTrue(TEXT("It's still in the air, even moving"), Shake.GetStrength() < 0.01f);
+
+	Shake.Update(FVector::ZeroVector, false, FrameTime);
+	TestTrue(TEXT("Landing jolts"), Shake.GetStrength() > 0.2f);
+
+	Settle(Shake, FVector::ZeroVector);
+
+	// Running off a ledge keeps its speed, so only the shaking from running should fade
+	Settle(Shake, FVector(600.0, 0.0, 0.0));
+	Settle(Shake, FVector(600.0, 0.0, 0.0), true);
+	TestTrue(TEXT("Falling at speed doesn't shake"), Shake.GetStrength() < 0.01f);
+
+	bool bSlotsDiffer = false;
+	for (int32 Frame = 0; Frame < 60; ++Frame)
+	{
+		Shake.Update(FVector(600.0, 0.0, 0.0), false, FrameTime);
+		bSlotsDiffer |= !Shake.GetOffset(EFSEquipmentSlot::LeftHand).Equals(Shake.GetOffset(EFSEquipmentSlot::RightHand), 0.001);
+	}
+	TestTrue(TEXT("Each mesh shakes in its own direction"), bSlotsDiffer);
+	TestFalse(TEXT("Tilting is part of the shaking"), Shake.GetTilt(EFSEquipmentSlot::Backpack).IsNearlyZero());
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSItemEventLogTest, "Fellowship.Inventory.Pickup.LogsPickingUpAndDropping", TestFlags)
+
+bool FFSItemEventLogTest::RunTest(const FString& Parameters)
+{
+	FInventoryPlayerTestWorld Test;
+	const TArray<FText>& Events = Test.World->GetSubsystem<UFSEventLog>()->GetEvents();
+	UFSItemDefinition* Sword = MakeItem(SwordSize);
+	UFSItemDefinition* TooLarge = MakeItem(FIntPoint(20, 20));
+
+	Test.SpawnPickup(Sword)->TryPickUp(Test.Inventory);
+	if (!TestEqual(TEXT("Picking up is logged"), Events.Num(), 1))
+	{
+		return false;
+	}
+	TestEqual(TEXT("It names the item"), Events[0].ToString(), FString(TEXT("Picked up Test Item")));
+
+	AFSItemPickup* Refused = Test.SpawnPickup(TooLarge);
+	Refused->TryPickUp(Test.Inventory);
+	TestEqual(TEXT("A refused pickup isn't logged"), Events.Num(), 1);
+
+	Refused->TryCarry(Test.Inventory);
+	TestEqual(TEXT("Lifting an item onto the cursor is a pick up too"), Events.Num(), 2);
+
+	Test.OpenInventory();
+	Test.Controller->SelectInventoryCell(FIntPoint(INDEX_NONE, INDEX_NONE));
+	if (TestEqual(TEXT("Tossing it is logged"), Events.Num(), 3))
+	{
+		TestEqual(TEXT("It names the item"), Events[2].ToString(), FString(TEXT("Dropped Test Item")));
+	}
+
+	Test.Inventory->PickUpItemAt(FIntPoint(0, 0));
+	TestEqual(TEXT("Moving an item around the inventory isn't logged"), Events.Num(), 3);
 
 	return true;
 }

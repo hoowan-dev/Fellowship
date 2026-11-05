@@ -89,6 +89,9 @@ public:
 	// The item under the mouse in the open inventory, or null if there isn't one
 	const FFSInventoryItem* GetHoveredInventoryItem() const;
 
+	// The settings of the inventory rig, which is available before the rig itself is spawned. Null if no class is set.
+	const AFSInventoryRig* GetInventoryRigDefaults() const;
+
 	UFUNCTION(BlueprintCallable, Category = "Inventory")
 	void OpenInventory();
 

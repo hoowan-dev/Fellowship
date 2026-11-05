@@ -118,6 +118,11 @@ const FFSInventoryItem* AFSPlayerController::GetHoveredInventoryItem() const
 	return Inventory->FindItemAt(InventoryRig->GetHoveredCell());
 }
 
+const AFSInventoryRig* AFSPlayerController::GetInventoryRigDefaults() const
+{
+	return InventoryRigClass ? InventoryRigClass->GetDefaultObject<AFSInventoryRig>() : nullptr;
+}
+
 void AFSPlayerController::Interact()
 {
 	if (InventoryViewState != EFSInventoryViewState::Closed || !FSCharacter)

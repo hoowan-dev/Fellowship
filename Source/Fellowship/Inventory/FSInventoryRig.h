@@ -45,6 +45,9 @@ public:
 	// Which hand a hand slot is for
 	static EFSHand GetHandOfSlot(int32 HandSlot);
 
+	FORCEINLINE UStaticMesh* GetPackMesh() const { return PackMeshAsset; }
+	FORCEINLINE const FRotator& GetPackRotation() const { return PackRotation; }
+
 	AFSInventoryRig();
 
 	virtual void Tick(float DeltaTime) override;

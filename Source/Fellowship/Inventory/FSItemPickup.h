@@ -62,4 +62,7 @@ protected:
 
 	UPROPERTY(EditAnywhere, Category = "Pickup", meta = (Units = cm))
 	float PromptHeight = 30.0f;
+
+private:
+	void LogPickedUp() const;
 };
