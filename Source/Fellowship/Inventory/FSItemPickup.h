@@ -41,7 +41,7 @@ public:
 	// Whether this pickup is a backpack, which is worn rather than stored
 	bool IsBackpack() const;
 
-	// What a dropped backpack still has inside it, which goes back on with it
+	// What a dropped backpack still has inside it, which goes back on with it. Its quick slots' items hang off its mesh.
 	void SetBackpackContents(const FFSBackpackContents& Contents);
 
 	// Moves the item into the inventory and removes this actor. Returns false, changing nothing, if it doesn't fit, or if it's a backpack and one is already on.
@@ -49,6 +49,9 @@ public:
 
 	// Moves the item onto the inventory's cursor, which needs no room in the grid, and removes this actor. Returns false, changing nothing, if that can't be done.
 	bool TryCarry(UFSInventoryComponent* Inventory);
+
+	// Null until something has hung on that side of this backpack
+	FORCEINLINE UStaticMeshComponent* GetHungItemMesh(EFSQuickSlot QuickSlot) const { return HungItemMeshes.Get(QuickSlot); }
 
 	// What to tell a player standing near this pickup
 	FText GetPromptText(const UFSInventoryComponent* Inventory) const;
@@ -75,4 +78,7 @@ private:
 
 	UPROPERTY(Transient)
 	FFSBackpackContents BackpackContents;
+
+	UPROPERTY(Transient)
+	FFSHungItemMeshes HungItemMeshes;
 };

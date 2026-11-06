@@ -77,4 +77,17 @@ public:
 	// Where the mesh sits relative to the sheath socket on the back
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Equipment", meta = (EditCondition = "bShowSheathed", EditConditionHides))
 	FTransform SheathedTransform = FTransform::Identity;
+
+	// How far up a backpack's sides the items in its quick slots hang from, as a fraction of its height. Ignored unless Item Type is Backpack.
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Equipment", meta = (ClampMin = "0.0", ClampMax = "1.0", EditCondition = "ItemType == EFSItemType::Backpack", EditConditionHides))
+	float HungItemHeight = 0.4f;
+
+	// How far in from the widest part of a backpack's mesh its sides are, where items hang against them. Ignored unless Item Type is Backpack.
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Equipment", meta = (ClampMin = "0.0", Units = cm, EditCondition = "ItemType == EFSItemType::Backpack", EditConditionHides))
+	float HungItemInset = 10.0f;
+
+	// Adjusts how the mesh hangs off the side of a backpack while in a quick slot. Weapons already hang point down with their flat against the backpack.
+	// Rotation and scale apply to the mesh as it hangs, and the location is added afterwards, where +X is away from the backpack on either side, +Y the character's front and +Z up.
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Equipment")
+	FTransform HungTransform = FTransform::Identity;
 };

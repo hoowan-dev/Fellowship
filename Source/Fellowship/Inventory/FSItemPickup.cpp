@@ -103,11 +103,13 @@ bool AFSItemPickup::IsBackpack() const
 void AFSItemPickup::SetBackpackContents(const FFSBackpackContents& Contents)
 {
 	BackpackContents = Contents;
+
+	HungItemMeshes.Show(*Mesh, Item, Contents.QuickSlotItems[static_cast<int32>(EFSQuickSlot::Left)].Definition, Contents.QuickSlotItems[static_cast<int32>(EFSQuickSlot::Right)].Definition);
 }
 
 bool AFSItemPickup::TryPickUp(UFSInventoryComponent* Inventory)
 {
-	const bool bPickedUp = Inventory && (IsBackpack() ? Inventory->EquipBackpack(Item, BackpackContents) : Inventory->StoreItem(Item));
+	const bool bPickedUp = Inventory && (IsBackpack() ? Inventory->EquipBackpack(Item, BackpackContents) : Inventory->AddItem(Item));
 	if (!bPickedUp)
 	{
 		return false;
@@ -146,7 +148,7 @@ FText AFSItemPickup::GetPromptText(const UFSInventoryComponent* Inventory) const
 			: FText::Format(LOCTEXT("PickUpBackpackPrompt", "[E / X] Pick up {0}"), ItemName);
 	}
 
-	if (Inventory && Inventory->CanStoreItem(Item))
+	if (Inventory && Inventory->CanAddItem(Item))
 	{
 		return FText::Format(LOCTEXT("PickUpPrompt", "[E / X] Pick up {0}"), ItemName);
 	}

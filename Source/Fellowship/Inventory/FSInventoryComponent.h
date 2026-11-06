@@ -27,7 +27,7 @@ enum class EFSHand : uint8
 	Right
 };
 
-// The slots that sit outside the hands on the HUD. For now an item in one is only shown there, never on the character.
+// The slots that sit outside the hands on the HUD. An item in one also hangs off that side of the backpack.
 enum class EFSQuickSlot : uint8
 {
 	Left,
@@ -36,6 +36,7 @@ enum class EFSQuickSlot : uint8
 
 DECLARE_MULTICAST_DELEGATE(FFSOnHandItemsChanged);
 DECLARE_MULTICAST_DELEGATE(FFSOnBackpackChanged);
+DECLARE_MULTICAST_DELEGATE(FFSOnQuickSlotItemsChanged);
 
 USTRUCT()
 struct FELLOWSHIP_API FFSInventoryItem
@@ -70,9 +71,38 @@ struct FELLOWSHIP_API FFSBackpackContents
 	FFSInventoryItem QuickSlotItems[2];
 };
 
+// The meshes of the quick slots' items, hanging off the sides of a backpack's mesh. A backpack looks the same wherever it is, so this is shared by the one being worn and the ones on the ground.
+USTRUCT()
+struct FELLOWSHIP_API FFSHungItemMeshes
+{
+	GENERATED_BODY()
+
+	// Where an item's mesh hangs relative to a backpack's mesh. Backpack meshes are made with +X towards the wearer's left, +Y towards their front and +Z up.
+	// It hangs from the backpack's hanging height, except that a long item is raised to stop at MaxDrop below the bottom of the backpack, so that it doesn't go through the floor.
+	// OutPivot is the point on the backpack that the item hangs from.
+	static FTransform GetTransform(const UFSItemDefinition& Backpack, const UFSItemDefinition& Item, EFSQuickSlot QuickSlot, double MaxDrop = 0.0, FVector* OutPivot = nullptr);
+
+	// Matches the meshes to what's in each quick slot, adding them to the backpack's mesh when they're first needed. They're as visible as it is.
+	void Show(UStaticMeshComponent& BackpackMesh, const UFSItemDefinition* Backpack, const UFSItemDefinition* LeftItem, const UFSItemDefinition* RightItem, double MaxDrop = 0.0);
+
+	// Null until something has hung on that side
+	FORCEINLINE UStaticMeshComponent* Get(EFSQuickSlot QuickSlot) const { return Meshes[static_cast<int32>(QuickSlot)]; }
+
+	// Where the last Show put a side's mesh, and the point it hangs from
+	FORCEINLINE const FTransform& GetRest(EFSQuickSlot QuickSlot) const { return Rests[static_cast<int32>(QuickSlot)]; }
+	FORCEINLINE const FVector& GetPivot(EFSQuickSlot QuickSlot) const { return Pivots[static_cast<int32>(QuickSlot)]; }
+
+private:
+	UPROPERTY(Transient)
+	TObjectPtr<UStaticMeshComponent> Meshes[2];
+
+	FTransform Rests[2];
+	FVector Pivots[2] = { FVector::ZeroVector, FVector::ZeroVector };
+};
+
 /**
  * The items a player owns. Lives on the player state, so it outlasts the character.
- * One item at a time can be carried on the cursor, and each hand and quick slot can hold one. Those items cover no cells and aren't in GetItems().
+ * One item at a time can be carried on the cursor, and each hand and quick slot can hold one. Those items cover no cells and aren't in GetItems(). They only get there from the cursor.
  * The grid and the quick slots belong to the backpack, so without one only the hands and the cursor can hold anything.
  */
 UCLASS(ClassGroup = (Inventory), meta = (BlueprintSpawnableComponent))
@@ -94,13 +124,6 @@ public:
 
 	// Puts the item in the first open space in the grid. Returns false, changing nothing, if it doesn't fit or there's no backpack.
 	bool AddItem(UFSItemDefinition* Definition);
-
-	// Whether StoreItem has somewhere to put the item
-	bool CanStoreItem(const UFSItemDefinition* Definition) const;
-
-	// Puts a newly picked up item in the first of these with room: the right hand, the left hand, the right quick slot, the left quick slot, then the grid.
-	// Returns false, changing nothing, if there's no room or the item is a backpack.
-	bool StoreItem(UFSItemDefinition* Definition);
 
 	// Puts on a backpack, along with what's inside it. Returns false, changing nothing, if one is already on or the item isn't a backpack.
 	bool EquipBackpack(UFSItemDefinition* NewBackpack, const FFSBackpackContents& Contents = FFSBackpackContents());
@@ -154,6 +177,8 @@ public:
 	// Puts the carried item in a quick slot, and what the slot held becomes the carried item. Returns false, changing nothing, if both are empty or there's no backpack.
 	bool SwapCarriedItemWithQuickSlot(EFSQuickSlot QuickSlot);
 
+	FFSOnQuickSlotItemsChanged OnQuickSlotItemsChanged;
+
 	// What a quick slot holds. Its definition is null if the slot is empty.
 	FORCEINLINE const FFSInventoryItem& GetQuickSlotItem(EFSQuickSlot QuickSlot) const { return QuickSlotItems[static_cast<int32>(QuickSlot)]; }
 
@@ -163,9 +188,6 @@ public:
 private:
 	// Moves an item from the grid to the cursor
 	void LiftItem(int32 ItemId);
-
-	// A new item for a hand or quick slot, which covers no cells
-	FFSInventoryItem MakeSlotItem(UFSItemDefinition* Definition);
 
 	// Swaps the carried item with one held outside the grid, logging what's unequipped and equipped. SlotName is where it's held.
 	// Returns false, changing nothing, if both are empty.

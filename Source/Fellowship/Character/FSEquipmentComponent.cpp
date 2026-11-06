@@ -8,9 +8,98 @@
 #include "Engine/StaticMesh.h"
 #include "GameFramework/Character.h"
 
+namespace
+{
+	// A long frame is simulated as if it were this long, because a spring given too long a step flies apart
+	constexpr double MaxSwingStep = 1.0 / 30.0;
+
+	// A swing past this far would flip what's hanging over, however hard a landing or teleport was
+	constexpr double SwingAngleLimit = 60.0;
+
+	// A little different for each mesh, so that they don't all swing as one
+	constexpr double HandSwingStiffnessScales[] = { 1.0, 0.88 };
+	constexpr double HungItemSwingStiffnessScales[] = { 1.06, 0.94 };
+}
+
 UFSEquipmentComponent::UFSEquipmentComponent()
 {
-	PrimaryComponentTick.bCanEverTick = false;
+	PrimaryComponentTick.bCanEverTick = true;
+
+	// After the character has moved and been animated, so that the swing starts from where it's being drawn this frame
+	PrimaryComponentTick.TickGroup = TG_PostPhysics;
+}
+
+void UFSEquipmentComponent::FSwing::Settle()
+{
+	Angle = FVector2D::ZeroVector;
+	AngleSpeed = FVector2D::ZeroVector;
+	bHasLastAttachLocation = false;
+}
+
+void UFSEquipmentComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+{
+	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+
+	if (DeltaTime <= 0.0f)
+	{
+		return;
+	}
+
+	for (const EFSHand Hand : { EFSHand::Left, EFSHand::Right })
+	{
+		const int32 Index = static_cast<int32>(Hand);
+
+		// Weapons only swing on the back. In the hands, they go where the animation takes them.
+		if (bDrawn)
+		{
+			HandSwings[Index].Settle();
+		}
+		else
+		{
+			UpdateSwing(HandSwings[Index], HandMeshes[Index], DeltaTime, HandSwingStiffnessScales[Index]);
+		}
+	}
+
+	for (const EFSQuickSlot QuickSlot : { EFSQuickSlot::Left, EFSQuickSlot::Right })
+	{
+		const int32 Index = static_cast<int32>(QuickSlot);
+		UpdateSwing(HungItemSwings[Index], HungItemMeshes.Get(QuickSlot), DeltaTime, HungItemSwingStiffnessScales[Index]);
+	}
+}
+
+void UFSEquipmentComponent::UpdateSwing(FSwing& Swing, UStaticMeshComponent* Mesh, float DeltaTime, double StiffnessScale) const
+{
+	const USceneComponent* AttachParent = Mesh ? Mesh->GetAttachParent() : nullptr;
+
+	if (!AttachParent || !Mesh->GetStaticMesh() || bMeshesHidden)
+	{
+		Swing.Settle();
+		return;
+	}
+
+	const FTransform Attach = AttachParent->GetSocketTransform(Mesh->GetAttachSocketName());
+	const FVector AttachLocation = Attach.GetLocation();
+
+	// Measured at the attachment, so it takes in the character's walk and its turning as well as where it's going
+	const FVector Move = Swing.bHasLastAttachLocation ? Attach.InverseTransformVectorNoScale(AttachLocation - Swing.LastAttachLocation) : FVector::ZeroVector;
+	Swing.LastAttachLocation = AttachLocation;
+	Swing.bHasLastAttachLocation = true;
+
+	// The hanging end trails behind the way it's being carried
+	const FVector2D TargetAngle = (FVector2D(-Move.X, -Move.Y) / DeltaTime * SwingPerSpeed).ClampAxes(-MaxSwing, MaxSwing);
+	const double Step = FMath::Min<double>(DeltaTime, MaxSwingStep);
+
+	// A damped spring, so that it overshoots a little and swings back when the character stops. Speed comes first, which keeps it stable.
+	Swing.AngleSpeed += ((TargetAngle - Swing.Angle) * SwingStiffness * StiffnessScale - Swing.AngleSpeed * SwingDamping) * Step;
+	Swing.Angle = (Swing.Angle + Swing.AngleSpeed * Step).ClampAxes(-SwingAngleLimit, SwingAngleLimit);
+
+	const FVector HangingEnd(FMath::Tan(FMath::DegreesToRadians(Swing.Angle.X)), FMath::Tan(FMath::DegreesToRadians(Swing.Angle.Y)), -1.0);
+	const FQuat Turn = FQuat::FindBetweenNormals(FVector::DownVector, HangingEnd.GetSafeNormal());
+
+	Mesh->SetRelativeTransform(FTransform(
+		Turn * Swing.Rest.GetRotation(),
+		Swing.Pivot + Turn.RotateVector(Swing.Rest.GetLocation() - Swing.Pivot),
+		Swing.Rest.GetScale3D()));
 }
 
 void UFSEquipmentComponent::SetInventory(UFSInventoryComponent* NewInventory)
@@ -24,6 +113,7 @@ void UFSEquipmentComponent::SetInventory(UFSInventoryComponent* NewInventory)
 	{
 		Inventory->OnHandItemsChanged.RemoveAll(this);
 		Inventory->OnBackpackChanged.RemoveAll(this);
+		Inventory->OnQuickSlotItemsChanged.RemoveAll(this);
 	}
 
 	Inventory = NewInventory;
@@ -32,6 +122,7 @@ void UFSEquipmentComponent::SetInventory(UFSInventoryComponent* NewInventory)
 	{
 		Inventory->OnHandItemsChanged.AddUObject(this, &UFSEquipmentComponent::HandleHandItemsChanged);
 		Inventory->OnBackpackChanged.AddUObject(this, &UFSEquipmentComponent::RefreshBackpackMesh);
+		Inventory->OnQuickSlotItemsChanged.AddUObject(this, &UFSEquipmentComponent::RefreshBackpackMesh);
 	}
 
 	HandleHandItemsChanged();
@@ -135,6 +226,7 @@ void UFSEquipmentComponent::RefreshBackpackMesh()
 		{
 			BackpackMesh->SetStaticMesh(nullptr);
 			BackpackMesh->SetVisibility(false);
+			HungItemMeshes.Show(*BackpackMesh, nullptr, nullptr, nullptr);
 		}
 		return;
 	}
@@ -154,6 +246,15 @@ void UFSEquipmentComponent::RefreshBackpackMesh()
 	BackpackMesh->AttachToComponent(CharacterMesh, FAttachmentTransformRules::SnapToTargetNotIncludingScale, BackpackBone);
 	BackpackMesh->SetRelativeTransform(FTransform::Identity);
 	BackpackMesh->SetVisibility(!bMeshesHidden);
+
+	HungItemMeshes.Show(*BackpackMesh, Backpack, Inventory->GetQuickSlotItem(EFSQuickSlot::Left).Definition, Inventory->GetQuickSlotItem(EFSQuickSlot::Right).Definition, HungItemMaxDrop);
+
+	for (const EFSQuickSlot QuickSlot : { EFSQuickSlot::Left, EFSQuickSlot::Right })
+	{
+		FSwing& Swing = HungItemSwings[static_cast<int32>(QuickSlot)];
+		Swing.Rest = HungItemMeshes.GetRest(QuickSlot);
+		Swing.Pivot = HungItemMeshes.GetPivot(QuickSlot);
+	}
 }
 
 UStaticMeshComponent* UFSEquipmentComponent::CreateAttachedMesh(USkeletalMeshComponent* CharacterMesh) const
@@ -207,6 +308,12 @@ void UFSEquipmentComponent::RefreshMesh(EFSHand Hand)
 	const FTransform& HandTransform = bDrawn ? (bRight ? RightHeldOffset : LeftHeldOffset) : (bRight ? RightSheathOffset : LeftSheathOffset);
 	HandMesh->SetRelativeTransform(ItemTransform * HandTransform);
 	HandMesh->SetVisibility(!bMeshesHidden);
+
+	// It swings about its grip, which is the mesh's pivot. A different socket is a different place to measure from.
+	FSwing& Swing = HandSwings[static_cast<int32>(Hand)];
+	Swing.Rest = HandMesh->GetRelativeTransform();
+	Swing.Pivot = Swing.Rest.GetLocation();
+	Swing.bHasLastAttachLocation = false;
 }
 
 bool UFSEquipmentComponent::IsHoldingAnything() const

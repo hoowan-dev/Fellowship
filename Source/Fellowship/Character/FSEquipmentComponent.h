@@ -12,7 +12,7 @@ class USkeletalMeshComponent;
 class UStaticMeshComponent;
 
 /**
- * Shows what the player's hands hold on the character, whether those weapons are drawn or sheathed on the back, and the backpack being worn.
+ * Shows what the player's hands hold on the character, whether those weapons are drawn or sheathed on the back, and the backpack being worn with the quick slots' items hanging off it.
  * The items themselves belong to the inventory, so this only ever follows it.
  */
 UCLASS(ClassGroup = (Inventory), meta = (BlueprintSpawnableComponent))
@@ -68,7 +68,28 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category = "Equipment|Sockets")
 	FName BackpackBone = TEXT("BackpackBone");
 
-	// Follows this inventory's hands and backpack. Null shows nothing.
+	// How far a long item hanging off the worn backpack can reach below it. The default stops just short of the floor when standing.
+	UPROPERTY(EditDefaultsOnly, Category = "Equipment|Swinging", meta = (ClampMin = "0.0", Units = cm))
+	float HungItemMaxDrop = 20.0f;
+
+	// How many degrees sheathed weapons and hung items swing back for each cm per second they're moving at
+	UPROPERTY(EditDefaultsOnly, Category = "Equipment|Swinging", meta = (ClampMin = "0.0"))
+	float SwingPerSpeed = 0.05f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Equipment|Swinging", meta = (ClampMin = "0.0", ClampMax = "60.0", Units = deg))
+	float MaxSwing = 25.0f;
+
+	// How hard they're pulled towards the angle their speed calls for. Higher swings faster.
+	UPROPERTY(EditDefaultsOnly, Category = "Equipment|Swinging", meta = (ClampMin = "1.0", ClampMax = "1000.0"))
+	float SwingStiffness = 60.0f;
+
+	// How quickly their swinging dies down. Lower swings back and forth more times when the character stops.
+	UPROPERTY(EditDefaultsOnly, Category = "Equipment|Swinging", meta = (ClampMin = "0.0", ClampMax = "60.0"))
+	float SwingDamping = 4.0f;
+
+	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+
+	// Follows this inventory's hands, quick slots and backpack. Null shows nothing.
 	void SetInventory(UFSInventoryComponent* NewInventory);
 
 	UFUNCTION(BlueprintPure, Category = "Equipment")
@@ -89,7 +110,7 @@ public:
 	// The stance to animate with right now. Null only if Unarmed Stance isn't set.
 	const UFSWeaponStance* GetCurrentStance() const;
 
-	// Hides the weapons and backpack without changing where they are, such as while the camera is inside the character's head
+	// Hides the weapons, backpack and what hangs off it without changing where they are, such as while the camera is inside the character's head
 	void SetMeshesHidden(bool bHidden);
 
 	// Null until something has been shown in that hand
@@ -98,7 +119,29 @@ public:
 	// Null until a backpack has been worn
 	FORCEINLINE UStaticMeshComponent* GetBackpackMesh() const { return BackpackMesh; }
 
+	// Null until something has hung on that side of the backpack
+	FORCEINLINE UStaticMeshComponent* GetHungItemMesh(EFSQuickSlot QuickSlot) const { return HungItemMeshes.Get(QuickSlot); }
+
 private:
+	// A mesh that swings about a point as what it's attached to moves
+	struct FSwing
+	{
+		// Where the mesh sits at rest, and the point it swings about, relative to what it's attached to
+		FTransform Rest;
+		FVector Pivot = FVector::ZeroVector;
+
+		// In degrees, along X and Y of what it's attached to
+		FVector2D Angle = FVector2D::ZeroVector;
+		FVector2D AngleSpeed = FVector2D::ZeroVector;
+
+		FVector LastAttachLocation = FVector::ZeroVector;
+		bool bHasLastAttachLocation = false;
+
+		void Settle();
+	};
+
+	void UpdateSwing(FSwing& Swing, UStaticMeshComponent* Mesh, float DeltaTime, double StiffnessScale) const;
+
 	void HandleHandItemsChanged();
 
 	// Matches the meshes to what's held and worn, and where they should be
@@ -120,6 +163,12 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UStaticMeshComponent> BackpackMesh;
+
+	UPROPERTY(Transient)
+	FFSHungItemMeshes HungItemMeshes;
+
+	FSwing HandSwings[2];
+	FSwing HungItemSwings[2];
 
 	bool bDrawn = false;
 	bool bMeshesHidden = false;

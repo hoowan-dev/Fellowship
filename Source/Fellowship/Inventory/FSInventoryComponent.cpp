@@ -1,10 +1,92 @@
 // Copyright HoowanDev 2026 all rights reserved.
 
 #include "FSInventoryComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/StaticMesh.h"
 #include "Game/FSEventLog.h"
 #include "Inventory/FSItemDefinition.h"
 
 #define LOCTEXT_NAMESPACE "FSInventoryComponent"
+
+FTransform FFSHungItemMeshes::GetTransform(const UFSItemDefinition& Backpack, const UFSItemDefinition& Item, EFSQuickSlot QuickSlot, double MaxDrop, FVector* OutPivot)
+{
+	const UStaticMesh* PackMesh = Backpack.Mesh;
+	const UStaticMesh* ItemMesh = Item.Mesh;
+	if (!PackMesh || !ItemMesh)
+	{
+		return FTransform::Identity;
+	}
+
+	// Weapons point along +Z from their grip, with their crossguards along X. This puts the point down and the crossguard along the backpack's side.
+	const FQuat WeaponHang = FQuat(FVector::RightVector, UE_DOUBLE_PI) * FQuat(FVector::UpVector, UE_DOUBLE_HALF_PI);
+
+	FTransform Transform = FTransform(Item.ItemType == EFSItemType::Weapon ? WeaponHang : FQuat::Identity) * Item.HungTransform;
+	Transform.SetTranslation(FVector::ZeroVector);
+
+	const FBoxSphereBounds ItemBounds = ItemMesh->GetBounds();
+	const FBox ItemBox = FBox(ItemBounds.Origin - ItemBounds.BoxExtent, ItemBounds.Origin + ItemBounds.BoxExtent).TransformBy(Transform);
+
+	const FBoxSphereBounds PackBounds = PackMesh->GetBounds();
+	const FBox PackBox(PackBounds.Origin - PackBounds.BoxExtent, PackBounds.Origin + PackBounds.BoxExtent);
+
+	const bool bLeft = QuickSlot == EFSQuickSlot::Left;
+	const double Top = PackBox.Min.Z + PackBox.GetSize().Z * Backpack.HungItemHeight;
+	const double Bottom = FMath::Max(Top - ItemBox.GetSize().Z, PackBox.Min.Z - MaxDrop);
+
+	const FVector Place(
+		bLeft ? PackBox.Max.X - Backpack.HungItemInset - ItemBox.Min.X : PackBox.Min.X + Backpack.HungItemInset - ItemBox.Max.X,
+		PackBounds.Origin.Y - ItemBox.GetCenter().Y,
+		Bottom - ItemBox.Min.Z);
+
+	const FVector Adjustment = Item.HungTransform.GetTranslation();
+	const FVector Location = Place + FVector(bLeft ? Adjustment.X : -Adjustment.X, Adjustment.Y, Adjustment.Z);
+	Transform.SetTranslation(Location);
+
+	if (OutPivot)
+	{
+		// Over the middle of the item, where it's tied on at the hanging height, however far a long item had to be raised
+		const FVector Centre = ItemBox.GetCenter() + Location;
+		*OutPivot = FVector(Centre.X, Centre.Y, Top + Adjustment.Z);
+	}
+
+	return Transform;
+}
+
+void FFSHungItemMeshes::Show(UStaticMeshComponent& BackpackMesh, const UFSItemDefinition* Backpack, const UFSItemDefinition* LeftItem, const UFSItemDefinition* RightItem, double MaxDrop)
+{
+	for (const EFSQuickSlot QuickSlot : { EFSQuickSlot::Left, EFSQuickSlot::Right })
+	{
+		const UFSItemDefinition* Item = QuickSlot == EFSQuickSlot::Left ? LeftItem : RightItem;
+		UStaticMesh* ItemMesh = Backpack && Backpack->Mesh && Item ? Item->Mesh.Get() : nullptr;
+		TObjectPtr<UStaticMeshComponent>& Mesh = Meshes[static_cast<int32>(QuickSlot)];
+
+		if (!ItemMesh)
+		{
+			if (Mesh)
+			{
+				Mesh->SetStaticMesh(nullptr);
+				Mesh->SetVisibility(false);
+			}
+			continue;
+		}
+
+		if (!Mesh)
+		{
+			Mesh = NewObject<UStaticMeshComponent>(BackpackMesh.GetOwner());
+			Mesh->SetMobility(EComponentMobility::Movable);
+			Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+			Mesh->SetCanEverAffectNavigation(false);
+			Mesh->SetupAttachment(&BackpackMesh);
+			Mesh->RegisterComponent();
+		}
+
+		Mesh->SetStaticMesh(ItemMesh);
+		const int32 Index = static_cast<int32>(QuickSlot);
+		Rests[Index] = GetTransform(*Backpack, *Item, QuickSlot, MaxDrop, &Pivots[Index]);
+		Mesh->SetRelativeTransform(Rests[Index]);
+		Mesh->SetVisibility(BackpackMesh.GetVisibleFlag());
+	}
+}
 
 UFSInventoryComponent::UFSInventoryComponent()
 {
@@ -44,57 +126,6 @@ bool UFSInventoryComponent::AddItem(UFSItemDefinition* Definition)
 	Items.Add(Item);
 
 	return true;
-}
-
-bool UFSInventoryComponent::CanStoreItem(const UFSItemDefinition* Definition) const
-{
-	if (!Definition || Definition->ItemType == EFSItemType::Backpack)
-	{
-		return false;
-	}
-
-	if (!GetHandItem(EFSHand::Right).Definition || !GetHandItem(EFSHand::Left).Definition)
-	{
-		return true;
-	}
-
-	return HasBackpack() && (!GetQuickSlotItem(EFSQuickSlot::Right).Definition || !GetQuickSlotItem(EFSQuickSlot::Left).Definition || CanAddItem(Definition));
-}
-
-bool UFSInventoryComponent::StoreItem(UFSItemDefinition* Definition)
-{
-	if (!Definition || Definition->ItemType == EFSItemType::Backpack)
-	{
-		return false;
-	}
-
-	for (const EFSHand Hand : { EFSHand::Right, EFSHand::Left })
-	{
-		FFSInventoryItem& HandItem = HandItems[static_cast<int32>(Hand)];
-		if (!HandItem.Definition)
-		{
-			HandItem = MakeSlotItem(Definition);
-			OnHandItemsChanged.Broadcast();
-			return true;
-		}
-	}
-
-	if (!HasBackpack())
-	{
-		return false;
-	}
-
-	for (const EFSQuickSlot QuickSlot : { EFSQuickSlot::Right, EFSQuickSlot::Left })
-	{
-		FFSInventoryItem& QuickSlotItem = QuickSlotItems[static_cast<int32>(QuickSlot)];
-		if (!QuickSlotItem.Definition)
-		{
-			QuickSlotItem = MakeSlotItem(Definition);
-			return true;
-		}
-	}
-
-	return AddItem(Definition);
 }
 
 bool UFSInventoryComponent::EquipBackpack(UFSItemDefinition* NewBackpack, const FFSBackpackContents& Contents)
@@ -149,14 +180,6 @@ bool UFSInventoryComponent::RemoveBackpack(FFSBackpackContents& OutContents)
 
 	OnBackpackChanged.Broadcast();
 	return true;
-}
-
-FFSInventoryItem UFSInventoryComponent::MakeSlotItem(UFSItemDefinition* Definition)
-{
-	FFSInventoryItem Item;
-	Item.Id = NextItemId++;
-	Item.Definition = Definition;
-	return Item;
 }
 
 const FFSInventoryItem* UFSInventoryComponent::FindItemAt(const FIntPoint& Cell) const
@@ -257,7 +280,13 @@ bool UFSInventoryComponent::SwapCarriedItemWithHand(EFSHand Hand)
 
 bool UFSInventoryComponent::SwapCarriedItemWithQuickSlot(EFSQuickSlot QuickSlot)
 {
-	return HasBackpack() && SwapCarriedItemWith(QuickSlotItems[static_cast<int32>(QuickSlot)], GetQuickSlotName(QuickSlot));
+	if (!HasBackpack() || !SwapCarriedItemWith(QuickSlotItems[static_cast<int32>(QuickSlot)], GetQuickSlotName(QuickSlot)))
+	{
+		return false;
+	}
+
+	OnQuickSlotItemsChanged.Broadcast();
+	return true;
 }
 
 bool UFSInventoryComponent::SwapCarriedItemWith(FFSInventoryItem& HeldItem, const FText& SlotName)

@@ -329,7 +329,7 @@ protected:
 
 	// How much of what's behind the grid is blocked out, once the grid has scaled in
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Background", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-	float BackgroundDarkness = 0.35f;
+	float BackgroundDarkness = 0.7f;
 
 	// How far in front of the grid the light under the mouse sits
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Cursor Light", meta = (ClampMin = "0.0", Units = cm))

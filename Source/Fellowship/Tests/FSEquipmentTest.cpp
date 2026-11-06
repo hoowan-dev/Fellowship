@@ -215,7 +215,7 @@ bool FFSQuickSlotSwapTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSQuickSlotCharacterTest, "Fellowship.Equipment.QuickSlots.DontAppearOnTheCharacter", EquipmentTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSQuickSlotCharacterTest, "Fellowship.Equipment.QuickSlots.DontCountAsHeld", EquipmentTestFlags)
 
 bool FFSQuickSlotCharacterTest::RunTest(const FString& Parameters)
 {
@@ -398,6 +398,218 @@ bool FFSEquipmentClimbingTest::RunTest(const FString& Parameters)
 	Test.Character->GetCharacterMovement()->SetMovementMode(MOVE_Walking);
 	TestFalse(TEXT("They stay sheathed after climbing"), Test.Equipment->IsDrawn());
 	TestTrue(TEXT("Until drawn again"), Test.Equipment->Draw());
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSHungItemsTest, "Fellowship.Equipment.Backpack.QuickSlotItemsHangOffItsSides", EquipmentTestFlags)
+
+bool FFSHungItemsTest::RunTest(const FString& Parameters)
+{
+	UStaticMesh* Cube = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
+	if (!TestNotNull(TEXT("The test mesh loads"), Cube))
+	{
+		return false;
+	}
+
+	FEquipmentTestWorld Test;
+
+	FFSBackpackContents Contents;
+	Test.Inventory->RemoveBackpack(Contents);
+
+	UFSItemDefinition* Backpack = NewObject<UFSItemDefinition>();
+	Backpack->ItemType = EFSItemType::Backpack;
+	Backpack->Size = FIntPoint(8, 8);
+	Backpack->Mesh = Cube;
+	Test.Inventory->EquipBackpack(Backpack);
+
+	// A 10cm cube, on a backpack that's a 100cm cube
+	UFSItemDefinition* Small = MakeWeapon(EFSWeaponType::Sword);
+	Small->ItemType = EFSItemType::Consumable;
+	Small->Mesh = Cube;
+	Small->HungTransform = FTransform(FQuat::Identity, FVector::ZeroVector, FVector(0.1));
+
+	// As tall as the backpack is
+	UFSItemDefinition* Long = MakeWeapon(EFSWeaponType::Sword);
+	Long->Mesh = Cube;
+
+	const FBoxSphereBounds Bounds = Cube->GetBounds();
+	const FBox CubeBox(Bounds.Origin - Bounds.BoxExtent, Bounds.Origin + Bounds.BoxExtent);
+
+	TestNull(TEXT("Nothing hangs from an empty slot"), Test.Equipment->GetHungItemMesh(EFSQuickSlot::Left));
+
+	Test.Inventory->CarryNewItem(Small);
+	Test.Inventory->SwapCarriedItemWithQuickSlot(EFSQuickSlot::Left);
+
+	UStaticMeshComponent* Left = Test.Equipment->GetHungItemMesh(EFSQuickSlot::Left);
+	if (!TestNotNull(TEXT("Putting an item in a slot hangs it"), Left))
+	{
+		return false;
+	}
+
+	UStaticMeshComponent* Worn = Test.Equipment->GetBackpackMesh();
+	TestTrue(TEXT("It's the item's mesh"), Left->GetStaticMesh() == Cube);
+	TestTrue(TEXT("It's attached to the backpack's mesh"), Left->GetAttachParent() == Worn);
+	TestTrue(TEXT("It's visible"), Left->IsVisible());
+	TestNull(TEXT("The other side is still empty"), Test.Equipment->GetHungItemMesh(EFSQuickSlot::Right));
+
+	const FBox LeftBox = CubeBox.TransformBy(Left->GetRelativeTransform());
+	TestEqual(TEXT("The left slot's touches the left side, which is +X"), LeftBox.Min.X, 50.0 - Backpack->HungItemInset, 0.01);
+	TestEqual(TEXT("It's centred front to back"), LeftBox.GetCenter().Y, 0.0, 0.01);
+	TestEqual(TEXT("It hangs from the backpack's hanging height"), LeftBox.Max.Z, -50.0 + 100.0 * Backpack->HungItemHeight, 0.01);
+
+	Test.Inventory->CarryNewItem(Long);
+	Test.Inventory->SwapCarriedItemWithQuickSlot(EFSQuickSlot::Right);
+
+	UStaticMeshComponent* Right = Test.Equipment->GetHungItemMesh(EFSQuickSlot::Right);
+	if (!TestNotNull(TEXT("The other slot hangs its item too"), Right))
+	{
+		return false;
+	}
+
+	const FBox RightBox = CubeBox.TransformBy(Right->GetRelativeTransform());
+	TestEqual(TEXT("The right slot's touches the right side, which is -X"), RightBox.Max.X, -50.0 + Backpack->HungItemInset, 0.01);
+	TestEqual(TEXT("A long item stops short of the floor"), RightBox.Min.Z, -50.0 - Test.Equipment->HungItemMaxDrop, 0.01);
+	TestTrue(TEXT("A weapon hangs point down"), Right->GetRelativeRotation().Quaternion().RotateVector(FVector::UpVector).Z < -0.99);
+
+	Test.Character->SetInventoryViewBonesHidden(true);
+	TestFalse(TEXT("They're hidden in the inventory view"), Left->IsVisible());
+	Test.Character->SetInventoryViewBonesHidden(false);
+	TestTrue(TEXT("And come back"), Left->IsVisible());
+
+	Test.Inventory->SwapCarriedItemWithQuickSlot(EFSQuickSlot::Right);
+	TestNull(TEXT("Taking an item out stops it hanging"), Right->GetStaticMesh().Get());
+	TestFalse(TEXT("And hides it"), Right->IsVisible());
+	Test.Inventory->ClearCarriedItem();
+
+	Test.Inventory->AddItem(Small);
+	TestNull(TEXT("An item going in the grid doesn't hang"), Right->GetStaticMesh().Get());
+
+	Test.Inventory->RemoveBackpack(Contents);
+	TestNull(TEXT("Taking the backpack off takes them with it"), Left->GetStaticMesh().Get());
+	TestFalse(TEXT("So they're not left in the air"), Left->IsVisible());
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSSwingTest, "Fellowship.Equipment.Swinging.HungItemsAndSheathedWeaponsTrailBehind", EquipmentTestFlags)
+
+bool FFSSwingTest::RunTest(const FString& Parameters)
+{
+	UStaticMesh* Cube = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
+	if (!TestNotNull(TEXT("The test mesh loads"), Cube))
+	{
+		return false;
+	}
+
+	FEquipmentTestWorld Test;
+	UFSEquipmentComponent* Equipment = Test.Equipment;
+
+	FFSBackpackContents Contents;
+	Test.Inventory->RemoveBackpack(Contents);
+
+	UFSItemDefinition* Backpack = NewObject<UFSItemDefinition>();
+	Backpack->ItemType = EFSItemType::Backpack;
+	Backpack->Size = FIntPoint(8, 8);
+	Backpack->Mesh = Cube;
+	Test.Inventory->EquipBackpack(Backpack);
+
+	// Small enough to hang from its top
+	UFSItemDefinition* Potion = MakeWeapon(EFSWeaponType::Sword);
+	Potion->ItemType = EFSItemType::Consumable;
+	Potion->Mesh = Cube;
+	Potion->HungTransform = FTransform(FQuat::Identity, FVector::ZeroVector, FVector(0.1));
+
+	UFSItemDefinition* Sword = MakeWeapon(EFSWeaponType::Sword);
+	Sword->Mesh = Cube;
+
+	Test.Inventory->CarryNewItem(Potion);
+	Test.Inventory->SwapCarriedItemWithQuickSlot(EFSQuickSlot::Left);
+	Test.Hold(Sword, EFSHand::Right);
+
+	UStaticMeshComponent* Hung = Equipment->GetHungItemMesh(EFSQuickSlot::Left);
+	UStaticMeshComponent* Sheathed = Equipment->GetHandMesh(EFSHand::Right);
+	if (!TestNotNull(TEXT("The item hangs"), Hung) || !TestNotNull(TEXT("The weapon's on the back"), Sheathed))
+	{
+		return false;
+	}
+
+	constexpr float Frame = 1.0f / 60.0f;
+
+	const auto TickFrames = [Equipment](int32 Frames, float DeltaTime)
+	{
+		for (int32 Index = 0; Index < Frames; ++Index)
+		{
+			Equipment->TickComponent(DeltaTime, LEVELTICK_All, nullptr);
+		}
+	};
+
+	FVector Location = Test.Character->GetActorLocation();
+
+	const auto MoveFrames = [&Test, Equipment, &Location](int32 Frames, const FVector& PerFrame)
+	{
+		for (int32 Index = 0; Index < Frames; ++Index)
+		{
+			Location += PerFrame;
+			Test.Character->SetActorLocation(Location);
+			Equipment->TickComponent(Frame, LEVELTICK_All, nullptr);
+		}
+	};
+
+	TickFrames(1, Frame);
+	const FTransform HungRest = Hung->GetRelativeTransform();
+	const FTransform SheathedRest = Sheathed->GetRelativeTransform();
+	const FVector Pivot = HungRest.GetLocation() + FVector(0.0, 0.0, 5.0);
+
+	TickFrames(10, Frame);
+	TestTrue(TEXT("Standing still nothing swings"), Hung->GetRelativeTransform().Equals(HungRest, 0.001));
+	TestTrue(TEXT("Not the weapon either"), Sheathed->GetRelativeTransform().Equals(SheathedRest, 0.001));
+
+	// Along the backpack's +X, at 300cm a second
+	MoveFrames(15, FVector(5.0, 0.0, 0.0));
+
+	const FVector HungUp = Hung->GetRelativeRotation().Quaternion().GetUpVector();
+	TestTrue(TEXT("The top of the item leans the way it's going, with the bottom trailing"), HungUp.X > 0.05);
+	TestEqual(TEXT("And no other way"), HungUp.Y, 0.0, 0.001);
+
+	// The 10cm cube's top is the point it hangs from, 5cm above its middle
+	const FVector HungTop = Hung->GetRelativeLocation() + Hung->GetRelativeRotation().RotateVector(FVector(0.0, 0.0, 5.0));
+	TestTrue(TEXT("The item swings about the point it hangs from"), HungTop.Equals(Pivot, 0.01));
+
+	TestFalse(TEXT("The sheathed weapon swings too"), Sheathed->GetRelativeRotation().Quaternion().Equals(SheathedRest.GetRotation(), 0.01));
+	TestTrue(TEXT("About its grip"), Sheathed->GetRelativeLocation().Equals(SheathedRest.GetLocation(), 0.001));
+
+	// Stopping
+	double Furthest = 0.0;
+	for (int32 Index = 0; Index < 240; ++Index)
+	{
+		TickFrames(1, Frame);
+		Furthest = FMath::Min(Furthest, Hung->GetRelativeRotation().Quaternion().GetUpVector().X);
+	}
+
+	TestTrue(TEXT("Stopping swings it back past upright"), Furthest < -0.005);
+	TestTrue(TEXT("Before it comes to rest"), Hung->GetRelativeTransform().Equals(HungRest, 0.01));
+	TestTrue(TEXT("The weapon does too"), Sheathed->GetRelativeTransform().Equals(SheathedRest, 0.01));
+
+	// A long hitch, or a teleport
+	Location += FVector(100000.0, 0.0, 0.0);
+	Test.Character->SetActorLocation(Location);
+	TickFrames(5, 1.0f);
+	TestTrue(TEXT("Nothing flies off"), Hung->GetRelativeRotation().Quaternion().GetUpVector().Z > 0.4);
+	TickFrames(240, Frame);
+
+	// Drawn weapons go where the animation takes them
+	TestTrue(TEXT("The weapon draws"), Equipment->Draw());
+	const FTransform DrawnRest = Sheathed->GetRelativeTransform();
+	MoveFrames(15, FVector(5.0, 0.0, 0.0));
+	TestTrue(TEXT("A drawn weapon doesn't swing"), Sheathed->GetRelativeTransform().Equals(DrawnRest, 0.001));
+	TestTrue(TEXT("What hangs from the backpack still does"), Hung->GetRelativeRotation().Quaternion().GetUpVector().X > 0.05);
+
+	// Hidden
+	Test.Character->SetInventoryViewBonesHidden(true);
+	MoveFrames(5, FVector(5.0, 0.0, 0.0));
+	TestTrue(TEXT("While hidden it rests"), Hung->GetRelativeTransform().Equals(HungRest, 0.001));
+	Test.Character->SetInventoryViewBonesHidden(false);
 
 	return true;
 }

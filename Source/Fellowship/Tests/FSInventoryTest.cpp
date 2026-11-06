@@ -251,14 +251,6 @@ bool FFSItemPickupTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Prompt offers to pick it up"), Pickup->GetPromptText(Test.Inventory).ToString().Contains(TEXT("Pick up Test Item")));
 	TestTrue(TEXT("It's picked up"), Pickup->TryPickUp(Test.Inventory));
 	TestTrue(TEXT("The actor is removed"), Pickup->IsActorBeingDestroyed());
-	TestTrue(TEXT("It's in the right hand"), Test.Inventory->GetHandItem(EFSHand::Right).Definition == Sword);
-
-	// The left hand and both quick slots
-	Test.Inventory->StoreItem(Sword);
-	Test.Inventory->StoreItem(Sword);
-	Test.Inventory->StoreItem(Sword);
-
-	TestTrue(TEXT("With them full it goes in the grid"), Test.SpawnPickup(Sword)->TryPickUp(Test.Inventory));
 	TestEqual(TEXT("It's in the grid"), Test.Inventory->GetItems().Num(), 1);
 
 	AFSItemPickup* TooLarge = Test.SpawnPickup(MakeItem(FIntPoint(20, 20)));
@@ -998,12 +990,6 @@ bool FFSItemEventLogTest::RunTest(const FString& Parameters)
 	}
 	TestEqual(TEXT("It names the item"), Events[0].ToString(), FString(TEXT("Picked up Test Item")));
 
-	// The left hand and both quick slots, so that only the grid is left, along with an item in it to move
-	Test.Inventory->StoreItem(Sword);
-	Test.Inventory->StoreItem(Sword);
-	Test.Inventory->StoreItem(Sword);
-	Test.Inventory->AddItem(Sword);
-
 	AFSItemPickup* Refused = Test.SpawnPickup(TooLarge);
 	Refused->TryPickUp(Test.Inventory);
 	TestEqual(TEXT("A refused pickup isn't logged"), Events.Num(), 1);
@@ -1332,14 +1318,9 @@ bool FFSInventoryNoRoomTest::RunTest(const FString& Parameters)
 
 	AFSItemPickup* Fits = Test.SpawnPickup(MakeItem(SwordSize));
 	Controller->Interact();
-	TestTrue(TEXT("An item with room goes straight to where it fits"), Inventory->GetHandItem(EFSHand::Right).Definition != nullptr);
+	TestEqual(TEXT("An item with room goes straight to where it fits"), Inventory->GetItems().Num(), 1);
 	TestTrue(TEXT("Without opening the inventory"), Controller->GetInventoryViewState() == EFSInventoryViewState::Closed);
 	Fits->Destroy();
-
-	// The left hand and both quick slots, so that only the grid is left
-	Inventory->StoreItem(MakeItem(SwordSize));
-	Inventory->StoreItem(MakeItem(SwordSize));
-	Inventory->StoreItem(MakeItem(SwordSize));
 
 	AFSItemPickup* NoRoom = Test.SpawnPickup(TooLarge);
 
@@ -1373,15 +1354,10 @@ bool FFSNoBackpackTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("The grid can't be added to"), Inventory->AddItem(Sword));
 	TestFalse(TEXT("Nor reports having room"), Inventory->CanAddItem(Sword));
 
-	TestTrue(TEXT("There's room in the hands"), Inventory->CanStoreItem(Sword));
-	TestTrue(TEXT("The first item is stored"), Inventory->StoreItem(Sword));
-	TestTrue(TEXT("In the right hand"), Inventory->GetHandItem(EFSHand::Right).Definition == Sword);
-	TestTrue(TEXT("The second is stored"), Inventory->StoreItem(Apple));
-	TestTrue(TEXT("In the left hand"), Inventory->GetHandItem(EFSHand::Left).Definition == Apple);
-
-	TestFalse(TEXT("With full hands there's no room"), Inventory->CanStoreItem(Apple));
-	TestFalse(TEXT("So a third is refused"), Inventory->StoreItem(Apple));
-	TestNull(TEXT("It doesn't go in a quick slot"), Inventory->GetQuickSlotItem(EFSQuickSlot::Right).Definition.Get());
+	AFSItemPickup* Pickup = Test.SpawnPickup(Sword);
+	TestTrue(TEXT("Picking up has to go through the cursor"), Pickup->GetPromptText(Inventory).ToString().Contains(TEXT("Make room for Test Item")));
+	TestFalse(TEXT("So it isn't picked up directly"), Pickup->TryPickUp(Inventory));
+	TestNull(TEXT("It doesn't go in a hand"), Inventory->GetHandItem(EFSHand::Right).Definition.Get());
 
 	TestTrue(TEXT("It can still be carried"), Inventory->CarryNewItem(Apple));
 	TestFalse(TEXT("But the quick slots won't take it"), Inventory->SwapCarriedItemWithQuickSlot(EFSQuickSlot::Right));
@@ -1392,46 +1368,42 @@ bool FFSNoBackpackTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSStoreOrderTest, "Fellowship.Inventory.Backpack.ItemsFillHandsThenQuickSlotsThenTheGrid", TestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSPickupSkipsSlotsTest, "Fellowship.Inventory.Pickup.NeverGoesInTheHandsOrQuickSlots", TestFlags)
 
-bool FFSStoreOrderTest::RunTest(const FString& Parameters)
+bool FFSPickupSkipsSlotsTest::RunTest(const FString& Parameters)
 {
 	FInventoryTestWorld Test;
 	UFSInventoryComponent* Inventory = Test.Inventory;
+	UFSItemDefinition* Sword = MakeItem(SwordSize);
 
-	UFSItemDefinition* First = MakeItem(SwordSize);
-	UFSItemDefinition* Second = MakeItem(SwordSize);
-	UFSItemDefinition* Third = MakeItem(SwordSize);
-	UFSItemDefinition* Fourth = MakeItem(SwordSize);
-	UFSItemDefinition* Fifth = MakeItem(SwordSize);
+	int32 HandChanges = 0;
+	int32 QuickSlotChanges = 0;
+	Inventory->OnHandItemsChanged.AddLambda([&HandChanges]() { ++HandChanges; });
+	Inventory->OnQuickSlotItemsChanged.AddLambda([&QuickSlotChanges]() { ++QuickSlotChanges; });
 
-	Inventory->StoreItem(First);
-	TestTrue(TEXT("First the right hand"), Inventory->GetHandItem(EFSHand::Right).Definition == First);
-	TestNull(TEXT("Only the right hand"), Inventory->GetHandItem(EFSHand::Left).Definition.Get());
-
-	Inventory->StoreItem(Second);
-	TestTrue(TEXT("Then the left hand"), Inventory->GetHandItem(EFSHand::Left).Definition == Second);
-
-	Inventory->StoreItem(Third);
-	TestTrue(TEXT("Then the right quick slot"), Inventory->GetQuickSlotItem(EFSQuickSlot::Right).Definition == Third);
-	TestNull(TEXT("Only the right quick slot"), Inventory->GetQuickSlotItem(EFSQuickSlot::Left).Definition.Get());
-
-	Inventory->StoreItem(Fourth);
-	TestTrue(TEXT("Then the left quick slot"), Inventory->GetQuickSlotItem(EFSQuickSlot::Left).Definition == Fourth);
-	TestEqual(TEXT("The grid is still empty"), Inventory->GetItems().Num(), 0);
-
-	Inventory->StoreItem(Fifth);
-	if (TestEqual(TEXT("Finally the grid"), Inventory->GetItems().Num(), 1))
+	const auto TestSlotsEmpty = [this, Inventory](const TCHAR* What)
 	{
-		TestTrue(TEXT("It's the right item"), Inventory->GetItems()[0].Definition == Fifth);
-	}
+		TestNull(What, Inventory->GetHandItem(EFSHand::Right).Definition.Get());
+		TestNull(What, Inventory->GetHandItem(EFSHand::Left).Definition.Get());
+		TestNull(What, Inventory->GetQuickSlotItem(EFSQuickSlot::Right).Definition.Get());
+		TestNull(What, Inventory->GetQuickSlotItem(EFSQuickSlot::Left).Definition.Get());
+	};
 
-	// Taking the right hand's item away means the next one goes there, rather than carrying on from where it got to
-	Inventory->SwapCarriedItemWithHand(EFSHand::Right);
-	Inventory->ClearCarriedItem();
-	UFSItemDefinition* Sixth = MakeItem(SwordSize);
-	Inventory->StoreItem(Sixth);
-	TestTrue(TEXT("An emptied hand is filled first"), Inventory->GetHandItem(EFSHand::Right).Definition == Sixth);
+	TestTrue(TEXT("With room in the grid it's picked up"), Test.SpawnPickup(Sword)->TryPickUp(Inventory));
+	if (TestEqual(TEXT("It goes in the grid"), Inventory->GetItems().Num(), 1))
+	{
+		TestTrue(TEXT("It's the right item"), Inventory->GetItems()[0].Definition == Sword);
+	}
+	TestSlotsEmpty(TEXT("The hands and quick slots stay empty"));
+
+	// Empty slots don't count as room for an item the grid can't take
+	AFSItemPickup* TooLarge = Test.SpawnPickup(MakeItem(FIntPoint(20, 20)));
+	TestFalse(TEXT("With no room in the grid it's refused"), TooLarge->TryPickUp(Inventory));
+	TestTrue(TEXT("And the prompt says so"), TooLarge->GetPromptText(Inventory).ToString().Contains(TEXT("Make room for Test Item")));
+	TestSlotsEmpty(TEXT("The hands and quick slots still stay empty"));
+
+	TestEqual(TEXT("The hands were never told of a change"), HandChanges, 0);
+	TestEqual(TEXT("Nor were the quick slots"), QuickSlotChanges, 0);
 
 	return true;
 }
@@ -1456,9 +1428,8 @@ bool FFSBackpackContentsTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("It's the backpack being worn"), Inventory->GetBackpack() == Backpack);
 	TestFalse(TEXT("A second doesn't go on top of it"), Inventory->EquipBackpack(MakeBackpack()));
 
-	TestFalse(TEXT("It isn't stored like an item"), Inventory->StoreItem(Backpack));
-	TestFalse(TEXT("Or reported as having room"), Inventory->CanStoreItem(Backpack));
 	TestFalse(TEXT("It doesn't go in the grid"), Inventory->AddItem(Backpack));
+	TestFalse(TEXT("Or report having room there"), Inventory->CanAddItem(Backpack));
 	TestFalse(TEXT("Or on the cursor"), Inventory->CarryNewItem(Backpack));
 
 	Inventory->CarryNewItem(InHand);
@@ -1479,7 +1450,8 @@ bool FFSBackpackContentsTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("The hands keep what they hold"), Inventory->GetHandItem(EFSHand::Right).Definition == InHand);
 
 	// Using up IDs while it's off, which shouldn't clash with the items coming back
-	Inventory->StoreItem(MakeItem(SwordSize));
+	Inventory->CarryNewItem(MakeItem(SwordSize));
+	Inventory->SwapCarriedItemWithHand(EFSHand::Left);
 
 	TestTrue(TEXT("It goes back on with its contents"), Inventory->EquipBackpack(Backpack, Contents));
 
@@ -1694,6 +1666,56 @@ bool FFSBackpackRigTest::RunTest(const FString& Parameters)
 	TestNull(TEXT("Dropping it removes the pack mesh"), Rig->GetPack()->GetStaticMesh().Get());
 	TestFalse(TEXT("And hides the grid again"), Rig->GetGrid()->GetVisibleFlag());
 	TestTrue(TEXT("But not the hands' cells"), Rig->GetHandSlots()->GetVisibleFlag());
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSBackpackPickupHungItemsTest, "Fellowship.Inventory.Backpack.ShowsItsQuickSlotItemsOnTheGround", TestFlags)
+
+bool FFSBackpackPickupHungItemsTest::RunTest(const FString& Parameters)
+{
+	FInventoryPlayerTestWorld Test(false);
+	UFSInventoryComponent* Inventory = Test.Inventory;
+
+	UStaticMesh* Cube = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
+	if (!TestNotNull(TEXT("The test mesh loads"), Cube))
+	{
+		return false;
+	}
+
+	UFSItemDefinition* Backpack = MakeBackpack(Cube);
+	UFSItemDefinition* Sword = MakeItem(SwordSize, Cube);
+
+	Inventory->EquipBackpack(Backpack);
+	Inventory->CarryNewItem(Sword);
+	Inventory->SwapCarriedItemWithQuickSlot(EFSQuickSlot::Left);
+
+	Test.Controller->DropBackpack();
+
+	AFSItemPickup* Pickup = Test.Character->GetNearestPickup();
+	if (!TestNotNull(TEXT("It's on the ground"), Pickup))
+	{
+		return false;
+	}
+
+	UStaticMeshComponent* Left = Pickup->GetHungItemMesh(EFSQuickSlot::Left);
+	if (!TestNotNull(TEXT("The left slot's item hangs off it"), Left))
+	{
+		return false;
+	}
+
+	TestTrue(TEXT("It's that item's mesh"), Left->GetStaticMesh() == Cube);
+	TestTrue(TEXT("It's visible"), Left->IsVisible());
+	TestEqual(TEXT("On the left side"), Left->GetRelativeTransform(), FFSHungItemMeshes::GetTransform(*Backpack, *Sword, EFSQuickSlot::Left));
+	TestNull(TEXT("Nothing hangs from the empty side"), Pickup->GetHungItemMesh(EFSQuickSlot::Right));
+
+	// The mesh sits with its bottom on the floor, and what hangs off it never goes lower
+	const FBoxSphereBounds Bounds = Cube->GetBounds();
+	const FBox HungBox = FBox(Bounds.Origin - Bounds.BoxExtent, Bounds.Origin + Bounds.BoxExtent).TransformBy(Left->GetComponentTransform());
+	TestTrue(TEXT("It stays above the bottom of the backpack"), HungBox.Min.Z >= Pickup->GetActorLocation().Z - Bounds.BoxExtent.Z - 0.01);
+
+	Test.Controller->Interact();
+	TestTrue(TEXT("Picking it back up puts the item back in the slot"), Inventory->GetQuickSlotItem(EFSQuickSlot::Left).Definition == Sword);
 
 	return true;
 }

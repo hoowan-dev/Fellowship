@@ -35,7 +35,7 @@ namespace
 	constexpr int32 EventLogVisibleLines = 8;
 
 	// The width inside the event log's border
-	constexpr float EventLogWidth = 260.0f;
+	constexpr float EventLogWidth = 320.0f;
 
 	// The space between the event log's border and its text
 	constexpr float EventLogPadding = 8.0f;
