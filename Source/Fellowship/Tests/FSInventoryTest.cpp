@@ -55,9 +55,9 @@ namespace
 		return Item;
 	}
 
-	UFSItemDefinition* MakeBackpack(UStaticMesh* Mesh = nullptr, const FIntPoint& GridSize = FIntPoint(InventoryWidth, InventoryHeight))
+	UFSItemDefinition* MakeBackpack(UStaticMesh* Mesh = nullptr, const FIntPoint& Size = FIntPoint(InventoryWidth, InventoryHeight))
 	{
-		UFSItemDefinition* Item = MakeItem(GridSize, Mesh);
+		UFSItemDefinition* Item = MakeItem(Size, Mesh);
 		Item->DisplayName = FText::FromString(TEXT("Test Backpack"));
 		Item->ItemType = EFSItemType::Backpack;
 		return Item;
