@@ -20,14 +20,14 @@ FTransform FFSHungItemMeshes::GetTransform(const UFSItemDefinition& Backpack, co
 	// Weapons point along +Z from their grip, with their crossguards along X. This puts the point down and the crossguard along the backpack's side.
 	const FQuat WeaponHang = FQuat(FVector::RightVector, UE_DOUBLE_PI) * FQuat(FVector::UpVector, UE_DOUBLE_HALF_PI);
 
-	FTransform Transform = FTransform(Item.ItemType == EFSItemType::Weapon ? WeaponHang : FQuat::Identity) * Item.HungTransform;
+	FTransform Transform = FTransform(FQuat::Identity, FVector::ZeroVector, Item.GlobalScale) * FTransform(Item.ItemType == EFSItemType::Weapon ? WeaponHang : FQuat::Identity) * Item.QuickStoredOffsetTransform;
 	Transform.SetTranslation(FVector::ZeroVector);
 
 	const FBoxSphereBounds ItemBounds = ItemMesh->GetBounds();
 	const FBox ItemBox = FBox(ItemBounds.Origin - ItemBounds.BoxExtent, ItemBounds.Origin + ItemBounds.BoxExtent).TransformBy(Transform);
 
 	const FBoxSphereBounds PackBounds = PackMesh->GetBounds();
-	const FBox PackBox(PackBounds.Origin - PackBounds.BoxExtent, PackBounds.Origin + PackBounds.BoxExtent);
+	const FBox PackBox = FBox(PackBounds.Origin - PackBounds.BoxExtent, PackBounds.Origin + PackBounds.BoxExtent).TransformBy(FTransform(FQuat::Identity, FVector::ZeroVector, Backpack.GlobalScale));
 
 	const bool bLeft = QuickSlot == EFSQuickSlot::Left;
 	const double Top = PackBox.Min.Z + PackBox.GetSize().Z * Backpack.HungItemHeight;
@@ -35,18 +35,22 @@ FTransform FFSHungItemMeshes::GetTransform(const UFSItemDefinition& Backpack, co
 
 	const FVector Place(
 		bLeft ? PackBox.Max.X - Backpack.HungItemInset - ItemBox.Min.X : PackBox.Min.X + Backpack.HungItemInset - ItemBox.Max.X,
-		PackBounds.Origin.Y - ItemBox.GetCenter().Y,
+		PackBox.GetCenter().Y - ItemBox.GetCenter().Y,
 		Bottom - ItemBox.Min.Z);
 
-	const FVector Adjustment = Item.HungTransform.GetTranslation();
+	const FVector Adjustment = Item.QuickStoredOffsetTransform.GetTranslation();
 	const FVector Location = Place + FVector(bLeft ? Adjustment.X : -Adjustment.X, Adjustment.Y, Adjustment.Z);
-	Transform.SetTranslation(Location);
+
+	// The mesh is attached to the backpack's, so this takes out the scale it inherits from it, and the item stays the size it's set to on any backpack
+	const FVector FromPackScale = FTransform::GetSafeScaleReciprocal(Backpack.GlobalScale);
+	Transform.SetTranslation(Location * FromPackScale);
+	Transform.SetScale3D(Transform.GetScale3D() * FromPackScale);
 
 	if (OutPivot)
 	{
 		// Over the middle of the item, where it's tied on at the hanging height, however far a long item had to be raised
 		const FVector Centre = ItemBox.GetCenter() + Location;
-		*OutPivot = FVector(Centre.X, Centre.Y, Top + Adjustment.Z);
+		*OutPivot = FVector(Centre.X, Centre.Y, Top + Adjustment.Z) * FromPackScale;
 	}
 
 	return Transform;
@@ -57,7 +61,7 @@ void FFSHungItemMeshes::Show(UStaticMeshComponent& BackpackMesh, const UFSItemDe
 	for (const EFSQuickSlot QuickSlot : { EFSQuickSlot::Left, EFSQuickSlot::Right })
 	{
 		const UFSItemDefinition* Item = QuickSlot == EFSQuickSlot::Left ? LeftItem : RightItem;
-		UStaticMesh* ItemMesh = Backpack && Backpack->Mesh && Item ? Item->Mesh.Get() : nullptr;
+		UStaticMesh* ItemMesh = Backpack && Backpack->Mesh && Item && Item->bShowQuickStored ? Item->Mesh.Get() : nullptr;
 		TObjectPtr<UStaticMeshComponent>& Mesh = Meshes[static_cast<int32>(QuickSlot)];
 
 		if (!ItemMesh)
@@ -107,14 +111,14 @@ bool UFSInventoryComponent::CanAddItem(const UFSItemDefinition* Definition) cons
 {
 	FIntPoint Cell;
 	uint8 Rotation;
-	return Definition && Definition->ItemType != EFSItemType::Backpack && HasBackpack() && Grid.FindFirstFit(Definition->Size, Cell, Rotation);
+	return Definition && Definition->ItemType != EFSItemType::Backpack && HasBackpack() && Grid.FindFirstFit(Definition->InventoryDimensions, Cell, Rotation);
 }
 
 bool UFSInventoryComponent::AddItem(UFSItemDefinition* Definition)
 {
 	FFSInventoryItem Item;
 
-	if (!Definition || Definition->ItemType == EFSItemType::Backpack || !HasBackpack() || !Grid.FindFirstFit(Definition->Size, Item.Cell, Item.Rotation))
+	if (!Definition || Definition->ItemType == EFSItemType::Backpack || !HasBackpack() || !Grid.FindFirstFit(Definition->InventoryDimensions, Item.Cell, Item.Rotation))
 	{
 		return false;
 	}
@@ -122,7 +126,7 @@ bool UFSInventoryComponent::AddItem(UFSItemDefinition* Definition)
 	Item.Id = NextItemId++;
 	Item.Definition = Definition;
 
-	Grid.Place(Item.Id, Item.Cell, Definition->Size, Item.Rotation);
+	Grid.Place(Item.Id, Item.Cell, Definition->InventoryDimensions, Item.Rotation);
 	Items.Add(Item);
 
 	return true;
@@ -136,14 +140,14 @@ bool UFSInventoryComponent::EquipBackpack(UFSItemDefinition* NewBackpack, const 
 	}
 
 	Backpack = NewBackpack;
-	Grid.Init(NewBackpack->Size);
+	Grid.Init(NewBackpack->InventoryDimensions);
 
 	// New IDs, because this inventory may have used the old ones while the backpack was on the ground
 	for (const FFSInventoryItem& ContainedItem : Contents.Items)
 	{
 		FFSInventoryItem& Item = Items.Add_GetRef(ContainedItem);
 		Item.Id = NextItemId++;
-		Grid.Place(Item.Id, Item.Cell, Item.Definition->Size, Item.Rotation);
+		Grid.Place(Item.Id, Item.Cell, Item.Definition->InventoryDimensions, Item.Rotation);
 	}
 
 	for (int32 Index = 0; Index < UE_ARRAY_COUNT(QuickSlotItems); ++Index)
@@ -217,7 +221,7 @@ bool UFSInventoryComponent::CarryNewItem(UFSItemDefinition* Definition)
 EFSItemPlacement UFSInventoryComponent::GetCarriedItemPlacement(const FIntPoint& Cell) const
 {
 	TArray<int32> CoveredItemIds;
-	if (!HasBackpack() || !IsCarryingItem() || !Grid.GetItemsCovered(Cell, CarriedItem.Definition->Size, CarriedItem.Rotation, CoveredItemIds) || CoveredItemIds.Num() > 1)
+	if (!HasBackpack() || !IsCarryingItem() || !Grid.GetItemsCovered(Cell, CarriedItem.Definition->InventoryDimensions, CarriedItem.Rotation, CoveredItemIds) || CoveredItemIds.Num() > 1)
 	{
 		return EFSItemPlacement::Blocked;
 	}
@@ -244,7 +248,7 @@ bool UFSInventoryComponent::PlaceCarriedItem(const FIntPoint& Cell)
 	}
 
 	TArray<int32> CoveredItemIds;
-	Grid.GetItemsCovered(Cell, CarriedItem.Definition->Size, CarriedItem.Rotation, CoveredItemIds);
+	Grid.GetItemsCovered(Cell, CarriedItem.Definition->InventoryDimensions, CarriedItem.Rotation, CoveredItemIds);
 
 	FFSInventoryItem PlacedItem = CarriedItem;
 	PlacedItem.Cell = Cell;
@@ -256,7 +260,7 @@ bool UFSInventoryComponent::PlaceCarriedItem(const FIntPoint& Cell)
 		LiftItem(CoveredItemIds[0]);
 	}
 
-	Grid.Place(PlacedItem.Id, Cell, PlacedItem.Definition->Size, PlacedItem.Rotation);
+	Grid.Place(PlacedItem.Id, Cell, PlacedItem.Definition->InventoryDimensions, PlacedItem.Rotation);
 	Items.Add(PlacedItem);
 
 	return true;
@@ -303,12 +307,12 @@ bool UFSInventoryComponent::SwapCarriedItemWith(FFSInventoryItem& HeldItem, cons
 	// What was held is now on the cursor
 	if (IsCarryingItem())
 	{
-		UFSEventLog::Add(this, FText::Format(LOCTEXT("UnequippedEvent", "Unequipped {0} from {1}"), CarriedItem.Definition->DisplayName, SlotName));
+		UFSEventLog::Add(this, FFSItemText::Format(LOCTEXT("UnequippedEvent", "Unequipped {0} from {1}"), CarriedItem.Definition, SlotName));
 	}
 
 	if (HeldItem.Definition)
 	{
-		UFSEventLog::Add(this, FText::Format(LOCTEXT("EquippedEvent", "Equipped {0} to {1}"), HeldItem.Definition->DisplayName, SlotName));
+		UFSEventLog::Add(this, FFSItemText::Format(LOCTEXT("EquippedEvent", "Equipped {0} to {1}"), HeldItem.Definition, SlotName));
 	}
 
 	return true;

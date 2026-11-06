@@ -6,6 +6,8 @@
 #include "GameFramework/HUD.h"
 #include "FSHUD.generated.h"
 
+struct FFSItemText;
+class UFSItemDefinition;
 class AFSEquipmentDisplay;
 
 /**
@@ -27,7 +29,7 @@ private:
 	void DrawEquipmentSlots();
 
 	// Draws one of those circles, with what it's for named above and what it holds named underneath, if anything.
-	void DrawEquipmentSlot(const FVector2D& Centre, const FText& Name, const FText& SlotName);
+	void DrawEquipmentSlot(const FVector2D& Centre, const UFSItemDefinition* Item, const FText& SlotName);
 
 	// Draws the name of each hand and quick slot above its cell in the open inventory, and the label on the button that drops the backpack
 	void DrawInventorySlotNames();
@@ -53,9 +55,13 @@ private:
 
 	// Draws text centred on a point of the screen, optionally with a dark box behind it
 	void DrawCentredText(const FString& Text, const FVector2D& Centre, bool bBackdrop = false);
+	void DrawCentredText(const FFSItemText& Text, const FVector2D& Centre, bool bBackdrop = false);
 
 	// Draws text with a dark copy behind it, which keeps it readable against bright scenery
-	void DrawShadowedText(const FString& Text, float X, float Y, UFont* Font);
+	void DrawShadowedText(const FString& Text, float X, float Y, UFont* Font, const FLinearColor& Color = FLinearColor::White);
+
+	// The same, with the name of any item in it drawn in the colour of its rarity
+	void DrawShadowedText(const FFSItemText& Text, float X, float Y, UFont* Font);
 
 	UPROPERTY(Transient)
 	TObjectPtr<AFSEquipmentDisplay> EquipmentDisplay;

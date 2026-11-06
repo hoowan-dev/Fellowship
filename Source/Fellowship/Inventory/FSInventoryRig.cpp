@@ -77,7 +77,14 @@ namespace
 	// Slow enough that auto exposure effectively stops, because it would otherwise brighten the view to make up for the shade
 	constexpr float FrozenExposureSpeed = 0.001f;
 
-	// Turns a mesh about the middle of its bounds, which needn't be its pivot, and moves it. The mesh is scaled evenly.
+	// The size of a scaled mesh once it's upright, where Y is its width on screen and Z its height
+	FVector GetUprightSize(const FBoxSphereBounds& Bounds, const FVector& Scale, const FQuat& Upright)
+	{
+		const FVector Extent = Bounds.BoxExtent * Scale.GetAbs();
+		return FBox(-Extent, Extent).TransformBy(FTransform(Upright)).GetSize();
+	}
+
+	// Turns a mesh about the middle of its bounds, which needn't be its pivot, and moves it
 	FTransform TurnAboutMeshCentre(const FTransform& Transform, const UStaticMesh& Mesh, const FQuat& Turn, const FVector& Shift = FVector::ZeroVector)
 	{
 		const FVector Origin = Mesh.GetBounds().Origin;
@@ -501,11 +508,12 @@ void AFSInventoryRig::FitPackMesh(const UFSItemDefinition* Backpack)
 
 	// The mesh's pivot is wherever it sat on the character, so it's centred by its bounds
 	const FBoxSphereBounds Bounds = PackMesh->GetBounds();
-	const double LongestSide = Bounds.BoxExtent.GetMax() * 2.0;
-	const double Scale = LongestSide > UE_KINDA_SMALL_NUMBER ? PackDisplaySize / LongestSide : 1.0;
+	const FVector& GlobalScale = Backpack->GlobalScale;
+	const double LongestSide = (Bounds.BoxExtent * GlobalScale.GetAbs()).GetMax() * 2.0;
+	const FVector Scale = GlobalScale * (LongestSide > UE_KINDA_SMALL_NUMBER ? PackDisplaySize / LongestSide : 1.0);
 	const FRotator& PackRotation = Backpack->InventoryMeshRotation;
 
-	Pack->SetRelativeScale3D(FVector(Scale));
+	Pack->SetRelativeScale3D(Scale);
 	Pack->SetRelativeRotation(PackRotation);
 	Pack->SetRelativeLocation(FVector(PackDistance, 0.0, 0.0) - PackRotation.RotateVector(Bounds.Origin * Scale));
 }
@@ -634,7 +642,7 @@ void AFSInventoryRig::AddItemBorder(const FFSInventoryItem& Item)
 		return;
 	}
 
-	const FIntPoint Footprint = FFSInventoryGrid::GetFootprint(Item.Definition->Size, Item.Rotation);
+	const FIntPoint Footprint = FFSInventoryGrid::GetFootprint(Item.Definition->InventoryDimensions, Item.Rotation);
 	const double Width = Footprint.X * CellSize;
 	const double Height = Footprint.Y * CellSize;
 	const double Left = (Item.Cell.X - GridWidth * 0.5) * CellSize;
@@ -677,14 +685,15 @@ FTransform AFSInventoryRig::GetSlotItemTransform(const FFSInventoryItem& Item, c
 	const FBoxSphereBounds Bounds = Mesh->GetBounds();
 	const FQuat Upright = Item.Definition->InventoryMeshRotation.Quaternion();
 
-	// The size of the mesh once it's upright, where Y is its width on screen and Z its height
-	const FVector UprightSize = FBox(-Bounds.BoxExtent, Bounds.BoxExtent).TransformBy(FTransform(Upright)).GetSize();
-	const double Scale = ItemFillFraction * SlotSize / FMath::Max3(UprightSize.Y, UprightSize.Z, static_cast<double>(UE_KINDA_SMALL_NUMBER));
+	// Fitted without the global scale, so that it can make the item bigger or smaller in its slot
+	const FVector FittedSize = GetUprightSize(Bounds, FVector::OneVector, Upright);
+	const double Fit = ItemFillFraction * SlotSize / FMath::Max3(FittedSize.Y, FittedSize.Z, static_cast<double>(UE_KINDA_SMALL_NUMBER));
+	const FVector Scale = Item.Definition->GlobalScale * Fit;
 
 	// The back of the mesh rests just in front of the cell, as it does on the grid
-	const FVector Centre(-(UprightSize.X * Scale * 0.5 + 0.1), SlotCentre.X, SlotCentre.Y);
+	const FVector Centre(-(GetUprightSize(Bounds, Scale, Upright).X * 0.5 + 0.1), SlotCentre.X, SlotCentre.Y);
 
-	return FTransform(Upright, Centre - Upright.RotateVector(Bounds.Origin * Scale), FVector(Scale));
+	return FTransform(Upright, Centre - Upright.RotateVector(Bounds.Origin * Scale), Scale);
 }
 
 FTransform AFSInventoryRig::GetItemTransform(const FFSInventoryItem& Item) const
@@ -716,10 +725,10 @@ FTransform AFSInventoryRig::GetItemTransformAt(const FFSInventoryItem& Item, con
 	const FBoxSphereBounds Bounds = Mesh->GetBounds();
 	const FQuat Upright = Item.Definition->InventoryMeshRotation.Quaternion();
 
-	// The size of the mesh once it's upright, where Y is its width on screen and Z its height
-	const FVector UprightSize = FBox(-Bounds.BoxExtent, Bounds.BoxExtent).TransformBy(FTransform(Upright)).GetSize();
-	const FIntPoint& ItemSize = Item.Definition->Size;
-	const double Scale = ItemFillFraction * CellSize * FMath::Min(
+	const FVector& GlobalScale = Item.Definition->GlobalScale;
+	const FVector UprightSize = GetUprightSize(Bounds, GlobalScale, Upright);
+	const FIntPoint& ItemSize = Item.Definition->InventoryDimensions;
+	const double Fit = ItemFillFraction * CellSize * FMath::Min(
 		ItemSize.X / FMath::Max(UprightSize.Y, UE_KINDA_SMALL_NUMBER),
 		ItemSize.Y / FMath::Max(UprightSize.Z, UE_KINDA_SMALL_NUMBER));
 
@@ -730,11 +739,12 @@ FTransform AFSInventoryRig::GetItemTransformAt(const FFSInventoryItem& Item, con
 	const FIntPoint Footprint = FFSInventoryGrid::GetFootprint(ItemSize, Item.Rotation);
 	const FVector FootprintCentre(
 		// The back of the mesh rests just in front of the grid lines
-		-(UprightSize.X * Scale * 0.5 + 0.1),
+		-(UprightSize.X * Fit * 0.5 + 0.1),
 		TopLeft.X + Footprint.X * 0.5 * CellSize,
 		TopLeft.Y - Footprint.Y * 0.5 * CellSize);
 
-	return FTransform(Rotation, FootprintCentre - Rotation.RotateVector(Bounds.Origin * Scale), FVector(Scale));
+	const FVector Scale = GlobalScale * Fit;
+	return FTransform(Rotation, FootprintCentre - Rotation.RotateVector(Bounds.Origin * Scale), Scale);
 }
 
 void AFSInventoryRig::AttachToCharacter(ACharacter* Character)
@@ -1139,7 +1149,7 @@ void AFSInventoryRig::SetHoveredCell(const FIntPoint& Cell)
 	if (Inventory && Inventory->IsCarryingItem())
 	{
 		const FFSInventoryItem& Carried = Inventory->GetCarriedItem();
-		const FIntPoint Footprint = FFSInventoryGrid::GetFootprint(Carried.Definition->Size, Carried.Rotation);
+		const FIntPoint Footprint = FFSInventoryGrid::GetFootprint(Carried.Definition->InventoryDimensions, Carried.Rotation);
 
 		// An item hanging off the grid only previews the part that's on it
 		for (int32 Row = NewCell.Y; Row < NewCell.Y + Footprint.Y; ++Row)

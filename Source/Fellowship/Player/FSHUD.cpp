@@ -112,36 +112,29 @@ void AFSHUD::DrawEquipmentSlots()
 	const UFSInventoryComponent* Inventory = PlayerController->GetInventory();
 	const FVector2D ViewportSize(Canvas->SizeX, Canvas->SizeY);
 
-	const auto GetItemName = [](const FFSInventoryItem& InventoryItem)
-	{
-		const UFSItemDefinition* Item = InventoryItem.Definition;
-		return Item ? Item->DisplayName : FText::GetEmpty();
-	};
-
 	// The quick slots belong to the backpack
 	if (Inventory->HasBackpack())
 	{
-		DrawEquipmentSlot(AFSEquipmentDisplay::GetSlotCentre(ViewportSize, EFSEquipmentSlot::LeftQuickSlot), GetItemName(Inventory->GetQuickSlotItem(EFSQuickSlot::Left)), UFSInventoryComponent::GetQuickSlotName(EFSQuickSlot::Left));
-		DrawEquipmentSlot(AFSEquipmentDisplay::GetSlotCentre(ViewportSize, EFSEquipmentSlot::RightQuickSlot), GetItemName(Inventory->GetQuickSlotItem(EFSQuickSlot::Right)), UFSInventoryComponent::GetQuickSlotName(EFSQuickSlot::Right));
+		DrawEquipmentSlot(AFSEquipmentDisplay::GetSlotCentre(ViewportSize, EFSEquipmentSlot::LeftQuickSlot), Inventory->GetQuickSlotItem(EFSQuickSlot::Left).Definition, UFSInventoryComponent::GetQuickSlotName(EFSQuickSlot::Left));
+		DrawEquipmentSlot(AFSEquipmentDisplay::GetSlotCentre(ViewportSize, EFSEquipmentSlot::RightQuickSlot), Inventory->GetQuickSlotItem(EFSQuickSlot::Right).Definition, UFSInventoryComponent::GetQuickSlotName(EFSQuickSlot::Right));
 	}
 
-	DrawEquipmentSlot(AFSEquipmentDisplay::GetSlotCentre(ViewportSize, EFSEquipmentSlot::LeftHand), GetItemName(Inventory->GetHandItem(EFSHand::Left)), UFSInventoryComponent::GetHandSlotName(EFSHand::Left));
+	DrawEquipmentSlot(AFSEquipmentDisplay::GetSlotCentre(ViewportSize, EFSEquipmentSlot::LeftHand), Inventory->GetHandItem(EFSHand::Left).Definition, UFSInventoryComponent::GetHandSlotName(EFSHand::Left));
 
-	const UFSItemDefinition* Backpack = Inventory->GetBackpack();
-	DrawEquipmentSlot(AFSEquipmentDisplay::GetSlotCentre(ViewportSize, EFSEquipmentSlot::Backpack), Backpack ? Backpack->DisplayName : FText::GetEmpty(), LOCTEXT("BackpackSlot", "Backpack"));
+	DrawEquipmentSlot(AFSEquipmentDisplay::GetSlotCentre(ViewportSize, EFSEquipmentSlot::Backpack), Inventory->GetBackpack(), LOCTEXT("BackpackSlot", "Backpack"));
 
-	DrawEquipmentSlot(AFSEquipmentDisplay::GetSlotCentre(ViewportSize, EFSEquipmentSlot::RightHand), GetItemName(Inventory->GetHandItem(EFSHand::Right)), UFSInventoryComponent::GetHandSlotName(EFSHand::Right));
+	DrawEquipmentSlot(AFSEquipmentDisplay::GetSlotCentre(ViewportSize, EFSEquipmentSlot::RightHand), Inventory->GetHandItem(EFSHand::Right).Definition, UFSInventoryComponent::GetHandSlotName(EFSHand::Right));
 }
 
-void AFSHUD::DrawEquipmentSlot(const FVector2D& Centre, const FText& Name, const FText& SlotName)
+void AFSHUD::DrawEquipmentSlot(const FVector2D& Centre, const UFSItemDefinition* Item, const FText& SlotName)
 {
 	DrawShadedRing(Centre, AFSEquipmentDisplay::SlotRadius);
 
 	const double NameDistance = AFSEquipmentDisplay::SlotRadius + BorderThickness + EquipmentSlotNameOffset;
 
-	if (!Name.IsEmpty())
+	if (Item && !Item->DisplayName.IsEmpty())
 	{
-		DrawCentredText(Name.ToString(), Centre + FVector2D(0.0, NameDistance));
+		DrawCentredText(FFSItemText::FromItem(*Item), Centre + FVector2D(0.0, NameDistance));
 	}
 
 	DrawCentredText(SlotName.ToString(), Centre - FVector2D(0.0, NameDistance));
@@ -259,7 +252,7 @@ void AFSHUD::DrawPickupPrompt()
 		return;
 	}
 
-	DrawCentredText(Pickup->GetPromptText(PlayerController->GetInventory()).ToString(), FVector2D(ScreenLocation.X, ScreenLocation.Y));
+	DrawCentredText(Pickup->GetPromptText(PlayerController->GetInventory()), FVector2D(ScreenLocation.X, ScreenLocation.Y));
 }
 
 void AFSHUD::DrawHoveredItemName()
@@ -277,7 +270,7 @@ void AFSHUD::DrawHoveredItemName()
 	FVector2D Mouse;
 	if (PlayerController->GetMousePosition(Mouse.X, Mouse.Y))
 	{
-		DrawCentredText(Item->Definition->DisplayName.ToString(), Mouse - FVector2D(0.0, HoveredItemNameHeight), true);
+		DrawCentredText(FFSItemText::FromItem(*Item->Definition), Mouse - FVector2D(0.0, HoveredItemNameHeight), true);
 	}
 }
 
@@ -333,7 +326,7 @@ void AFSHUD::DrawEventLog()
 	}
 
 	UFont* Font = GEngine->GetMediumFont();
-	const TArray<FText>& Events = EventLog->GetEvents();
+	const TArray<FFSItemText>& Events = EventLog->GetEvents();
 	const int32 OldestVisible = FMath::Max(0, Events.Num() - EventLogVisibleLines);
 	const float LineHeight = Font->GetMaxCharHeight();
 
@@ -349,17 +342,24 @@ void AFSHUD::DrawEventLog()
 	for (int32 Index = Events.Num() - 1; Index >= OldestVisible; --Index)
 	{
 		LineY -= LineHeight;
-		DrawShadowedText(Events[Index].ToString(), Left + EventLogPadding, LineY, Font);
+		DrawShadowedText(Events[Index], Left + EventLogPadding, LineY, Font);
 	}
 }
 
 void AFSHUD::DrawCentredText(const FString& Text, const FVector2D& Centre, bool bBackdrop)
 {
+	FFSItemText PlainText;
+	PlainText.Before = Text;
+	DrawCentredText(PlainText, Centre, bBackdrop);
+}
+
+void AFSHUD::DrawCentredText(const FFSItemText& Text, const FVector2D& Centre, bool bBackdrop)
+{
 	UFont* Font = GEngine->GetMediumFont();
 
 	float TextWidth = 0.0f;
 	float TextHeight = 0.0f;
-	GetTextSize(Text, TextWidth, TextHeight, Font);
+	GetTextSize(Text.ToString(), TextWidth, TextHeight, Font);
 
 	const float TextX = Centre.X - TextWidth * 0.5f;
 	const float TextY = Centre.Y - TextHeight * 0.5f;
@@ -372,10 +372,32 @@ void AFSHUD::DrawCentredText(const FString& Text, const FVector2D& Centre, bool 
 	DrawShadowedText(Text, TextX, TextY, Font);
 }
 
-void AFSHUD::DrawShadowedText(const FString& Text, float X, float Y, UFont* Font)
+void AFSHUD::DrawShadowedText(const FString& Text, float X, float Y, UFont* Font, const FLinearColor& Color)
 {
 	DrawText(Text, FLinearColor::Black, X + 1.0f, Y + 1.0f, Font);
-	DrawText(Text, FLinearColor::White, X, Y, Font);
+	DrawText(Text, Color, X, Y, Font);
+}
+
+void AFSHUD::DrawShadowedText(const FFSItemText& Text, float X, float Y, UFont* Font)
+{
+	const auto DrawPart = [this, &X, Y, Font](const FString& Part, const FLinearColor& Color)
+	{
+		if (Part.IsEmpty())
+		{
+			return;
+		}
+
+		DrawShadowedText(Part, X, Y, Font, Color);
+
+		float PartWidth = 0.0f;
+		float PartHeight = 0.0f;
+		GetTextSize(Part, PartWidth, PartHeight, Font);
+		X += PartWidth;
+	};
+
+	DrawPart(Text.Before, FLinearColor::White);
+	DrawPart(Text.ItemName, UFSItemDefinition::GetRarityColor(Text.Rarity));
+	DrawPart(Text.After, FLinearColor::White);
 }
 
 #undef LOCTEXT_NAMESPACE

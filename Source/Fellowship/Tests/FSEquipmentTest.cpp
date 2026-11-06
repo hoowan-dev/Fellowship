@@ -32,7 +32,7 @@ namespace
 	UFSItemDefinition* MakeWeapon(EFSWeaponType Type)
 	{
 		UFSItemDefinition* Item = NewObject<UFSItemDefinition>();
-		Item->Size = FIntPoint(2, 6);
+		Item->InventoryDimensions = FIntPoint(2, 6);
 		Item->WeaponType = Type;
 		Item->Mesh = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
 		return Item;
@@ -67,7 +67,7 @@ namespace
 
 			UFSItemDefinition* Backpack = NewObject<UFSItemDefinition>();
 			Backpack->ItemType = EFSItemType::Backpack;
-			Backpack->Size = FIntPoint(12, 8);
+			Backpack->InventoryDimensions = FIntPoint(12, 8);
 			Inventory->EquipBackpack(Backpack);
 
 			Controller = World->SpawnActor<AFSPlayerController>();
@@ -271,8 +271,8 @@ bool FFSEquipmentAttachTest::RunTest(const FString& Parameters)
 {
 	FEquipmentTestWorld Test;
 	UFSItemDefinition* Sword = MakeWeapon(EFSWeaponType::Sword);
-	Sword->HeldTransform.SetLocation(FVector(1.0, 2.0, 3.0));
-	Sword->SheathedTransform.SetLocation(FVector(4.0, 5.0, 6.0));
+	Sword->HandEquippedOffsetTransform.SetLocation(FVector(1.0, 2.0, 3.0));
+	Sword->HandStoredOffsetTransform.SetLocation(FVector(4.0, 5.0, 6.0));
 	Test.Equipment->RightSheathOffset = FTransform(FVector(10.0, 0.0, 0.0));
 	Test.Equipment->RightHeldOffset = FTransform(FVector(0.0, 10.0, 0.0));
 
@@ -419,7 +419,7 @@ bool FFSHungItemsTest::RunTest(const FString& Parameters)
 
 	UFSItemDefinition* Backpack = NewObject<UFSItemDefinition>();
 	Backpack->ItemType = EFSItemType::Backpack;
-	Backpack->Size = FIntPoint(8, 8);
+	Backpack->InventoryDimensions = FIntPoint(8, 8);
 	Backpack->Mesh = Cube;
 	Test.Inventory->EquipBackpack(Backpack);
 
@@ -427,7 +427,7 @@ bool FFSHungItemsTest::RunTest(const FString& Parameters)
 	UFSItemDefinition* Small = MakeWeapon(EFSWeaponType::Sword);
 	Small->ItemType = EFSItemType::Consumable;
 	Small->Mesh = Cube;
-	Small->HungTransform = FTransform(FQuat::Identity, FVector::ZeroVector, FVector(0.1));
+	Small->QuickStoredOffsetTransform = FTransform(FQuat::Identity, FVector::ZeroVector, FVector(0.1));
 
 	// As tall as the backpack is
 	UFSItemDefinition* Long = MakeWeapon(EFSWeaponType::Sword);
@@ -510,7 +510,7 @@ bool FFSSwingTest::RunTest(const FString& Parameters)
 
 	UFSItemDefinition* Backpack = NewObject<UFSItemDefinition>();
 	Backpack->ItemType = EFSItemType::Backpack;
-	Backpack->Size = FIntPoint(8, 8);
+	Backpack->InventoryDimensions = FIntPoint(8, 8);
 	Backpack->Mesh = Cube;
 	Test.Inventory->EquipBackpack(Backpack);
 
@@ -518,7 +518,7 @@ bool FFSSwingTest::RunTest(const FString& Parameters)
 	UFSItemDefinition* Potion = MakeWeapon(EFSWeaponType::Sword);
 	Potion->ItemType = EFSItemType::Consumable;
 	Potion->Mesh = Cube;
-	Potion->HungTransform = FTransform(FQuat::Identity, FVector::ZeroVector, FVector(0.1));
+	Potion->QuickStoredOffsetTransform = FTransform(FQuat::Identity, FVector::ZeroVector, FVector(0.1));
 
 	UFSItemDefinition* Sword = MakeWeapon(EFSWeaponType::Sword);
 	Sword->Mesh = Cube;
@@ -639,7 +639,7 @@ bool FFSWornBackpackTest::RunTest(const FString& Parameters)
 
 	UFSItemDefinition* Backpack = NewObject<UFSItemDefinition>();
 	Backpack->ItemType = EFSItemType::Backpack;
-	Backpack->Size = FIntPoint(8, 8);
+	Backpack->InventoryDimensions = FIntPoint(8, 8);
 	Backpack->Mesh = Cube;
 	Test.Inventory->EquipBackpack(Backpack);
 
@@ -699,7 +699,7 @@ bool FFSEquipmentShowFlagsTest::RunTest(const FString& Parameters)
 {
 	FEquipmentTestWorld Test;
 	UFSItemDefinition* Item = MakeWeapon(EFSWeaponType::Sword);
-	Item->bShowSheathed = false;
+	Item->bShowHandStored = false;
 
 	Test.Hold(Item, EFSHand::Right);
 	TestNull(TEXT("Nothing appears sheathed"), Test.Equipment->GetHandMesh(EFSHand::Right));
@@ -716,8 +716,8 @@ bool FFSEquipmentShowFlagsTest::RunTest(const FString& Parameters)
 	Test.Equipment->Sheathe();
 	TestFalse(TEXT("Sheathing hides it"), Mesh->IsVisible());
 
-	Item->bShowSheathed = true;
-	Item->bShowHeld = false;
+	Item->bShowHandStored = true;
+	Item->bShowHandEquipped = false;
 	Test.Equipment->Draw();
 	TestFalse(TEXT("The held flag hides it in the hand"), Mesh->IsVisible());
 
@@ -824,6 +824,118 @@ bool FFSEquipmentAssetsTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("A sword in just the left hand can be drawn"), Equipment->Draw());
 	Mesh->TickAnimation(0.01f, false);
 	TestTrue(TEXT("And uses the dual sword database"), AnimInstance->GetMotionMatchingDatabase() == DoubleSword);
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSGlobalScaleInHandsTest, "Fellowship.Equipment.Display.GlobalScaleAppliesOnTheBackAndInTheHand", EquipmentTestFlags)
+
+bool FFSGlobalScaleInHandsTest::RunTest(const FString& Parameters)
+{
+	FEquipmentTestWorld Test;
+	UFSItemDefinition* Sword = MakeWeapon(EFSWeaponType::Sword);
+	Sword->GlobalScale = FVector(1.0, 2.0, 3.0);
+	Sword->HandStoredOffsetTransform.SetScale3D(FVector(2.0));
+
+	Test.Hold(Sword, EFSHand::Right);
+	UStaticMeshComponent* Mesh = Test.Equipment->GetHandMesh(EFSHand::Right);
+	if (!TestNotNull(TEXT("Holding an item shows it"), Mesh))
+	{
+		return false;
+	}
+
+	TestEqual(TEXT("On the back, it's scaled by both"), Mesh->GetRelativeScale3D(), FVector(2.0, 4.0, 6.0));
+
+	Test.Equipment->Draw();
+	TestEqual(TEXT("In the hand, it has only the global scale"), Mesh->GetRelativeScale3D(), FVector(1.0, 2.0, 3.0));
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSQuickStoredTest, "Fellowship.Equipment.Display.QuickSlotItemsOnlyHangWhereTheItemAllows", EquipmentTestFlags)
+
+bool FFSQuickStoredTest::RunTest(const FString& Parameters)
+{
+	UStaticMesh* Cube = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
+	if (!TestNotNull(TEXT("The test mesh loads"), Cube))
+	{
+		return false;
+	}
+
+	FEquipmentTestWorld Test;
+
+	FFSBackpackContents Contents;
+	Test.Inventory->RemoveBackpack(Contents);
+
+	UFSItemDefinition* Backpack = NewObject<UFSItemDefinition>();
+	Backpack->ItemType = EFSItemType::Backpack;
+	Backpack->InventoryDimensions = FIntPoint(8, 8);
+	Backpack->Mesh = Cube;
+	Test.Inventory->EquipBackpack(Backpack);
+
+	UFSItemDefinition* Hidden = MakeWeapon(EFSWeaponType::Sword);
+	Hidden->Mesh = Cube;
+	Hidden->bShowQuickStored = false;
+
+	Test.Inventory->CarryNewItem(Hidden);
+	Test.Inventory->SwapCarriedItemWithQuickSlot(EFSQuickSlot::Left);
+
+	TestTrue(TEXT("It's still in the slot"), Test.Inventory->GetQuickSlotItem(EFSQuickSlot::Left).Definition == Hidden);
+	TestNull(TEXT("But nothing hangs there"), Test.Equipment->GetHungItemMesh(EFSQuickSlot::Left));
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSScaledBackpackTest, "Fellowship.Equipment.Display.ScalingABackpackLeavesItsHungItemsTheirOwnSize", EquipmentTestFlags)
+
+bool FFSScaledBackpackTest::RunTest(const FString& Parameters)
+{
+	UStaticMesh* Cube = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
+	if (!TestNotNull(TEXT("The test mesh loads"), Cube))
+	{
+		return false;
+	}
+
+	FEquipmentTestWorld Test;
+
+	FFSBackpackContents Contents;
+	Test.Inventory->RemoveBackpack(Contents);
+
+	// Scaled, the backpack is 200cm wide, 300cm deep and 400cm tall
+	const FVector PackScale(2.0, 3.0, 4.0);
+	UFSItemDefinition* Backpack = NewObject<UFSItemDefinition>();
+	Backpack->ItemType = EFSItemType::Backpack;
+	Backpack->InventoryDimensions = FIntPoint(8, 8);
+	Backpack->Mesh = Cube;
+	Backpack->GlobalScale = PackScale;
+	Test.Inventory->EquipBackpack(Backpack);
+
+	TestEqual(TEXT("The backpack is scaled"), Test.Equipment->GetBackpackMesh()->GetRelativeScale3D(), PackScale);
+
+	// A 10cm cube
+	UFSItemDefinition* Small = MakeWeapon(EFSWeaponType::Sword);
+	Small->ItemType = EFSItemType::Consumable;
+	Small->Mesh = Cube;
+	Small->GlobalScale = FVector(0.1);
+
+	Test.Inventory->CarryNewItem(Small);
+	Test.Inventory->SwapCarriedItemWithQuickSlot(EFSQuickSlot::Left);
+
+	UStaticMeshComponent* Left = Test.Equipment->GetHungItemMesh(EFSQuickSlot::Left);
+	if (!TestNotNull(TEXT("It hangs"), Left))
+	{
+		return false;
+	}
+
+	const FBoxSphereBounds Bounds = Cube->GetBounds();
+	const FBox InPack = FBox(Bounds.Origin - Bounds.BoxExtent, Bounds.Origin + Bounds.BoxExtent).TransformBy(Left->GetRelativeTransform());
+	const FVector Size = InPack.GetSize() * PackScale;
+
+	TestEqual(TEXT("It's as wide as it's set to be"), Size.X, 10.0, 0.01);
+	TestEqual(TEXT("And as deep"), Size.Y, 10.0, 0.01);
+	TestEqual(TEXT("And as tall"), Size.Z, 10.0, 0.01);
+	TestEqual(TEXT("It touches the scaled backpack's side"), InPack.Min.X * PackScale.X, 100.0 - Backpack->HungItemInset, 0.01);
+	TestEqual(TEXT("It hangs from the scaled backpack's hanging height"), InPack.Max.Z * PackScale.Z, -200.0 + 400.0 * Backpack->HungItemHeight, 0.01);
 
 	return true;
 }

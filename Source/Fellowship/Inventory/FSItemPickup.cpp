@@ -18,6 +18,12 @@ namespace
 {
 	// How far below a character to look for a floor. With none in reach, the item is left at the character's feet.
 	constexpr double MaxFloorDistance = 10000.0;
+
+	// Mesh pivots are wherever suited the character holding them, so the mesh is centred on the actor by its bounds, and turned about its middle
+	FTransform GetDiscardedMeshTransform(const UFSItemDefinition& Item, const UStaticMesh& Mesh)
+	{
+		return FTransform(FQuat::Identity, -Mesh.GetBounds().Origin * Item.GlobalScale, Item.GlobalScale) * Item.DiscardedTransformOffset;
+	}
 }
 
 AFSItemPickup::AFSItemPickup()
@@ -56,9 +62,19 @@ AFSItemPickup* AFSItemPickup::DropAtFeet(TSubclassOf<AFSItemPickup> PickupClass,
 		Feet = Floor.ImpactPoint;
 	}
 
-	// The mesh is centred on the actor, so the actor sits half the mesh's height off the floor
+	// The actor sits as far off the floor as the mesh reaches below it. The offset's own location moves it from there, so it's left out.
+	double FloorClearance = 0.0;
 	const UStaticMesh* DroppedMesh = DroppedItem ? DroppedItem->Mesh : nullptr;
-	const FVector Location = Feet + FVector(0.0, 0.0, DroppedMesh ? DroppedMesh->GetBounds().BoxExtent.Z : 0.0);
+	if (DroppedMesh)
+	{
+		FTransform Resting = GetDiscardedMeshTransform(*DroppedItem, *DroppedMesh);
+		Resting.AddToTranslation(-DroppedItem->DiscardedTransformOffset.GetTranslation());
+
+		const FBoxSphereBounds Bounds = DroppedMesh->GetBounds();
+		FloorClearance = -FBox(Bounds.Origin - Bounds.BoxExtent, Bounds.Origin + Bounds.BoxExtent).TransformBy(Resting).Min.Z;
+	}
+
+	const FVector Location = Feet + FVector(0.0, 0.0, FloorClearance);
 
 	FActorSpawnParameters SpawnParameters;
 	SpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
@@ -70,7 +86,7 @@ AFSItemPickup* AFSItemPickup::DropAtFeet(TSubclassOf<AFSItemPickup> PickupClass,
 
 		if (DroppedItem)
 		{
-			UFSEventLog::Add(World, FText::Format(LOCTEXT("DroppedEvent", "Dropped {0}"), DroppedItem->DisplayName));
+			UFSEventLog::Add(World, FFSItemText::Format(LOCTEXT("DroppedEvent", "Dropped {0}"), DroppedItem));
 		}
 	}
 
@@ -91,8 +107,7 @@ void AFSItemPickup::SetItem(UFSItemDefinition* NewItem)
 	UStaticMesh* ItemMesh = Item ? Item->Mesh : nullptr;
 	Mesh->SetStaticMesh(ItemMesh);
 
-	// Mesh pivots are wherever suited the character holding them, so the mesh is centred on the actor by its bounds
-	Mesh->SetRelativeLocation(ItemMesh ? -ItemMesh->GetBounds().Origin : FVector::ZeroVector);
+	Mesh->SetRelativeTransform(ItemMesh ? GetDiscardedMeshTransform(*Item, *ItemMesh) : FTransform::Identity);
 }
 
 bool AFSItemPickup::IsBackpack() const
@@ -134,26 +149,24 @@ bool AFSItemPickup::TryCarry(UFSInventoryComponent* Inventory)
 
 void AFSItemPickup::LogPickedUp() const
 {
-	UFSEventLog::Add(this, FText::Format(LOCTEXT("PickedUpEvent", "Picked up {0}"), Item->DisplayName));
+	UFSEventLog::Add(this, FFSItemText::Format(LOCTEXT("PickedUpEvent", "Picked up {0}"), Item));
 }
 
-FText AFSItemPickup::GetPromptText(const UFSInventoryComponent* Inventory) const
+FFSItemText AFSItemPickup::GetPromptText(const UFSInventoryComponent* Inventory) const
 {
-	const FText ItemName = Item ? Item->DisplayName : FText::GetEmpty();
-
 	if (IsBackpack())
 	{
 		return Inventory && Inventory->HasBackpack()
-			? FText::Format(LOCTEXT("SwapBackpackPrompt", "[E / X] Swap backpack for {0}"), ItemName)
-			: FText::Format(LOCTEXT("PickUpBackpackPrompt", "[E / X] Pick up {0}"), ItemName);
+			? FFSItemText::Format(LOCTEXT("SwapBackpackPrompt", "[E / X] Swap backpack for {0}"), Item)
+			: FFSItemText::Format(LOCTEXT("PickUpBackpackPrompt", "[E / X] Pick up {0}"), Item);
 	}
 
 	if (Inventory && Inventory->CanAddItem(Item))
 	{
-		return FText::Format(LOCTEXT("PickUpPrompt", "[E / X] Pick up {0}"), ItemName);
+		return FFSItemText::Format(LOCTEXT("PickUpPrompt", "[E / X] Pick up {0}"), Item);
 	}
 
-	return FText::Format(LOCTEXT("MakeRoomPrompt", "[E / X] Make room for {0}"), ItemName);
+	return FFSItemText::Format(LOCTEXT("MakeRoomPrompt", "[E / X] Make room for {0}"), Item);
 }
 
 FVector AFSItemPickup::GetPromptLocation() const

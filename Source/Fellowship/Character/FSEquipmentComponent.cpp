@@ -244,7 +244,7 @@ void UFSEquipmentComponent::RefreshBackpackMesh()
 
 	BackpackMesh->SetStaticMesh(Mesh);
 	BackpackMesh->AttachToComponent(CharacterMesh, FAttachmentTransformRules::SnapToTargetNotIncludingScale, BackpackBone);
-	BackpackMesh->SetRelativeTransform(FTransform::Identity);
+	BackpackMesh->SetRelativeTransform(FTransform(FQuat::Identity, FVector::ZeroVector, Backpack->GlobalScale));
 	BackpackMesh->SetVisibility(!bMeshesHidden);
 
 	HungItemMeshes.Show(*BackpackMesh, Backpack, Inventory->GetQuickSlotItem(EFSQuickSlot::Left).Definition, Inventory->GetQuickSlotItem(EFSQuickSlot::Right).Definition, HungItemMaxDrop);
@@ -271,7 +271,7 @@ UStaticMeshComponent* UFSEquipmentComponent::CreateAttachedMesh(USkeletalMeshCom
 void UFSEquipmentComponent::RefreshMesh(EFSHand Hand)
 {
 	const UFSItemDefinition* Item = Inventory ? Inventory->GetHandItem(Hand).Definition.Get() : nullptr;
-	const bool bShown = Item && (bDrawn ? Item->bShowHeld : Item->bShowSheathed);
+	const bool bShown = Item && (bDrawn ? Item->bShowHandEquipped : Item->bShowHandStored);
 	UStaticMesh* Mesh = bShown ? Item->Mesh.Get() : nullptr;
 	TObjectPtr<UStaticMeshComponent>& HandMesh = HandMeshes[static_cast<int32>(Hand)];
 
@@ -304,9 +304,9 @@ void UFSEquipmentComponent::RefreshMesh(EFSHand Hand)
 
 	HandMesh->SetStaticMesh(Mesh);
 	HandMesh->AttachToComponent(CharacterMesh, FAttachmentTransformRules::SnapToTargetNotIncludingScale, Socket);
-	const FTransform& ItemTransform = bDrawn ? Item->HeldTransform : Item->SheathedTransform;
+	const FTransform& ItemTransform = bDrawn ? Item->HandEquippedOffsetTransform : Item->HandStoredOffsetTransform;
 	const FTransform& HandTransform = bDrawn ? (bRight ? RightHeldOffset : LeftHeldOffset) : (bRight ? RightSheathOffset : LeftSheathOffset);
-	HandMesh->SetRelativeTransform(ItemTransform * HandTransform);
+	HandMesh->SetRelativeTransform(FTransform(FQuat::Identity, FVector::ZeroVector, Item->GlobalScale) * ItemTransform * HandTransform);
 	HandMesh->SetVisibility(!bMeshesHidden);
 
 	// It swings about its grip, which is the mesh's pivot. A different socket is a different place to measure from.

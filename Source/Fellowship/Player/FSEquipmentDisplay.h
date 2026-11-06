@@ -8,6 +8,7 @@
 
 class AFSPlayerController;
 class UStaticMesh;
+class UFSItemDefinition;
 class UStaticMeshComponent;
 
 // What the display shows: the circles at the top of the HUD from left to right, then the compass at the bottom right, which has no circle
@@ -76,8 +77,9 @@ public:
 	// The centre of a slot's circle, or of the compass's case, on the screen, in pixels
 	static FVector2D GetSlotCentre(const FVector2D& ViewportSize, EFSEquipmentSlot Slot);
 
-	// Places a mesh turned by MeshRotation relative to the camera, so that it's centred on a point and fits inside a circle facing the camera there
-	static FTransform GetMeshTransform(const UStaticMesh& Mesh, const FRotator& MeshRotation, const FQuat& CameraRotation, const FVector& Centre, double Radius);
+	// Places a mesh turned by MeshRotation relative to the camera, so that it's centred on a point and fits inside a circle facing the camera there.
+	// The mesh is fitted with FittedScale applied to it, and SlotScale then scales the result.
+	static FTransform GetMeshTransform(const UStaticMesh& Mesh, const FRotator& MeshRotation, const FQuat& CameraRotation, const FVector& Centre, double Radius, const FVector& FittedScale = FVector::OneVector, const FVector& SlotScale = FVector::OneVector);
 
 	// How the north half of the needle turns relative to the camera, for a camera with this yaw. Its +Z points up the screen when the camera faces north, which is +X in the world.
 	static FQuat GetCompassNeedleRotation(double CameraYaw);
@@ -95,7 +97,7 @@ private:
 	// Finds where a slot's mesh goes for what the camera sees right now, including the shaking. ScreenRadius is in pixels and OutRadius is what it comes to on the plane the meshes float on. Returns false if it can't be worked out.
 	bool GetSlotPlacement(const AFSPlayerController& PlayerController, EFSEquipmentSlot Slot, float ScreenRadius, FVector& OutCentre, double& OutRadius, FQuat& OutRotation) const;
 
-	void UpdateSlot(const AFSPlayerController& PlayerController, EFSEquipmentSlot Slot, UStaticMesh* Mesh, const FRotator& MeshRotation);
+	void UpdateSlot(const AFSPlayerController& PlayerController, EFSEquipmentSlot Slot, const UFSItemDefinition* Item);
 	void UpdateCompass(const AFSPlayerController& PlayerController);
 
 	UPROPERTY(VisibleAnywhere, Category = "Equipment")

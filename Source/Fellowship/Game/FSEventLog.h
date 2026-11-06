@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Inventory/FSItemDefinition.h"
 #include "Subsystems/WorldSubsystem.h"
 #include "FSEventLog.generated.h"
 
@@ -22,9 +23,12 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Event Log", meta = (WorldContext = "WorldContextObject"))
 	static void Add(const UObject* WorldContextObject, const FText& Message);
 
+	// The same for a message that names an item
+	static void Add(const UObject* WorldContextObject, const FFSItemText& Message);
+
 	// Oldest first
-	const TArray<FText>& GetEvents() const { return Events; }
+	const TArray<FFSItemText>& GetEvents() const { return Events; }
 
 private:
-	TArray<FText> Events;
+	TArray<FFSItemText> Events;
 };

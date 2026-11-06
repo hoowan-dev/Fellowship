@@ -50,7 +50,7 @@ namespace
 	{
 		UFSItemDefinition* Item = NewObject<UFSItemDefinition>();
 		Item->DisplayName = FText::FromString(TEXT("Test Item"));
-		Item->Size = Size;
+		Item->InventoryDimensions = Size;
 		Item->Mesh = Mesh;
 		return Item;
 	}
@@ -979,7 +979,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSItemEventLogTest, "Fellowship.Inventory.Pick
 bool FFSItemEventLogTest::RunTest(const FString& Parameters)
 {
 	FInventoryPlayerTestWorld Test;
-	const TArray<FText>& Events = Test.World->GetSubsystem<UFSEventLog>()->GetEvents();
+	const TArray<FFSItemText>& Events = Test.World->GetSubsystem<UFSEventLog>()->GetEvents();
 	UFSItemDefinition* Sword = MakeItem(SwordSize);
 	UFSItemDefinition* TooLarge = MakeItem(FIntPoint(20, 20));
 
@@ -1015,7 +1015,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSEquipEventLogTest, "Fellowship.Inventory.Com
 bool FFSEquipEventLogTest::RunTest(const FString& Parameters)
 {
 	FInventoryTestWorld Test;
-	const TArray<FText>& Events = Test.World->GetSubsystem<UFSEventLog>()->GetEvents();
+	const TArray<FFSItemText>& Events = Test.World->GetSubsystem<UFSEventLog>()->GetEvents();
 	UFSInventoryComponent* Inventory = Test.Inventory;
 
 	const auto LastEvent = [&Events]()
@@ -2027,6 +2027,148 @@ bool FFSInventoryRigBackgroundDarkenerTest::RunTest(const FString& Parameters)
 	Rig->SetPackVisible(false);
 	Rig->Tick(0.01f);
 	TestFalse(TEXT("And stops once it's hidden"), Rig->IsActorTickEnabled());
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSDiscardedOffsetTest, "Fellowship.Inventory.Display.DroppedItemsRestOnTheFloorWithTheirOffset", TestFlags)
+
+bool FFSDiscardedOffsetTest::RunTest(const FString& Parameters)
+{
+	FInventoryTestWorld Test;
+
+	UStaticMesh* Cube = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
+	if (!TestNotNull(TEXT("The test mesh loads"), Cube))
+	{
+		return false;
+	}
+
+	// Twice as long along its Z axis, and then laid on its side so that it's as tall as it was
+	UFSItemDefinition* Item = MakeItem(SwordSize, Cube);
+	Item->GlobalScale = FVector(1.0, 1.0, 2.0);
+	Item->DiscardedTransformOffset = FTransform(FRotator(90.0f, 0.0f, 0.0f), FVector(0.0, 0.0, 5.0));
+
+	AFSCharacter* Character = Test.SpawnCharacter(FVector(500.0, 200.0, 88.0));
+	Character->SetActorLocation(FVector(500.0, 200.0, Character->GetCapsuleComponent()->GetScaledCapsuleHalfHeight()));
+
+	AFSItemPickup* Pickup = AFSItemPickup::DropAtFeet(AFSItemPickup::StaticClass(), Item, *Character);
+	if (!TestNotNull(TEXT("It spawns"), Pickup))
+	{
+		return false;
+	}
+
+	const FBoxSphereBounds Bounds = Cube->GetBounds();
+	const FBox MeshBox = FBox(Bounds.Origin - Bounds.BoxExtent, Bounds.Origin + Bounds.BoxExtent).TransformBy(Pickup->FindComponentByClass<UStaticMeshComponent>()->GetComponentTransform());
+
+	TestEqual(TEXT("The offset's location lifts it off the floor"), MeshBox.Min.Z, 5.0, 0.01);
+	TestEqual(TEXT("It's laid on its side"), MeshBox.GetSize().X, 200.0, 0.01);
+	TestEqual(TEXT("Which leaves it as tall as it was wide"), MeshBox.GetSize().Z, 100.0, 0.01);
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSInventoryScalesTest, "Fellowship.Inventory.Display.ScreensApplyAnItemsScales", TestFlags)
+
+bool FFSInventoryScalesTest::RunTest(const FString& Parameters)
+{
+	FInventoryTestWorld Test;
+	const AFSInventoryRig* Rig = Test.World->SpawnActor<AFSInventoryRig>();
+
+	UStaticMesh* Cube = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
+	if (!TestNotNull(TEXT("The test mesh loads"), Cube))
+	{
+		return false;
+	}
+
+	UFSItemDefinition* Definition = MakeItem(SwordSize, Cube);
+	FFSInventoryItem Item;
+	Item.Definition = Definition;
+
+	const FTransform Grid = Rig->GetItemTransform(Item);
+	const FTransform Slot = Rig->GetHandItemTransform(Item, AFSInventoryRig::LeftHandSlot);
+	const FTransform Quick = Rig->GetQuickSlotItemTransform(Item, AFSInventoryRig::LeftQuickSlot);
+	const FTransform Hud = AFSEquipmentDisplay::GetMeshTransform(*Cube, FRotator::ZeroRotator, FQuat::Identity, FVector::ZeroVector, 1.0);
+
+	Definition->GlobalScale = FVector(0.5);
+	TestTrue(TEXT("Global scale scales a hand slot's item"), Rig->GetHandItemTransform(Item, AFSInventoryRig::LeftHandSlot).GetScale3D().Equals(Slot.GetScale3D() * 0.5));
+	TestTrue(TEXT("And a quick slot's"), Rig->GetQuickSlotItemTransform(Item, AFSInventoryRig::LeftQuickSlot).GetScale3D().Equals(Quick.GetScale3D() * 0.5));
+	TestTrue(TEXT("And what the HUD shows"), AFSEquipmentDisplay::GetMeshTransform(*Cube, FRotator::ZeroRotator, FQuat::Identity, FVector::ZeroVector, 1.0, FVector::OneVector, FVector(0.5)).GetScale3D().Equals(Hud.GetScale3D() * 0.5));
+	TestTrue(TEXT("But doesn't change the size of an item on the grid"), Rig->GetItemTransform(Item).TransformPosition(FVector(50.0)).Equals(Grid.TransformPosition(FVector(50.0)), 0.001));
+
+	Definition->GlobalScale = FVector(1.0, 1.0, 2.0);
+	const FVector OnGrid = Rig->GetItemTransform(Item).GetScale3D();
+	const FVector InSlot = Rig->GetHandItemTransform(Item, AFSInventoryRig::LeftHandSlot).GetScale3D();
+	TestEqual(TEXT("An uneven one changes the proportions on the grid"), OnGrid.Z / OnGrid.X, 2.0, 0.001);
+	TestEqual(TEXT("And in a slot"), InSlot.Z / InSlot.X, 2.0, 0.001);
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSItemTextTest, "Fellowship.Inventory.Rarity.OnlyTheItemsNameTakesItsColor", TestFlags)
+
+bool FFSItemTextTest::RunTest(const FString& Parameters)
+{
+	// Its name is also a word in the message, which shouldn't be mistaken for it
+	UFSItemDefinition* Item = MakeItem(FIntPoint(1, 1));
+	Item->DisplayName = FText::FromString(TEXT("Hand"));
+	Item->Rarity = EFSItemRarity::Epic;
+
+	const FTextFormat Pattern = FText::FromString(TEXT("Hand over {0} to {1}"));
+	const FFSItemText Text = FFSItemText::Format(Pattern, Item, FText::FromString(TEXT("Left Hand")));
+	TestEqual(TEXT("The words before the name"), Text.Before, FString(TEXT("Hand over ")));
+	TestEqual(TEXT("The name"), Text.ItemName, FString(TEXT("Hand")));
+	TestEqual(TEXT("The words after the name"), Text.After, FString(TEXT(" to Left Hand")));
+	TestTrue(TEXT("It has the item's rarity"), Text.Rarity == EFSItemRarity::Epic);
+	TestEqual(TEXT("It reads as a whole"), Text.ToString(), FString(TEXT("Hand over Hand to Left Hand")));
+
+	const FFSItemText NoItem = FFSItemText::Format(Pattern, nullptr);
+	TestTrue(TEXT("No item leaves no name"), NoItem.ItemName.IsEmpty());
+	TestTrue(TEXT("And the lowest rarity"), NoItem.Rarity == EFSItemRarity::Common);
+
+	const FFSItemText NameOnly = FFSItemText::FromItem(*Item);
+	TestEqual(TEXT("A name by itself is all name"), NameOnly.ItemName, FString(TEXT("Hand")));
+	TestTrue(TEXT("With nothing around it"), NameOnly.Before.IsEmpty() && NameOnly.After.IsEmpty());
+	TestTrue(TEXT("In the item's rarity"), NameOnly.Rarity == EFSItemRarity::Epic);
+
+	const FFSItemText Plain = FFSItemText::FromText(FText::FromString(TEXT("Nothing to see")));
+	TestEqual(TEXT("Plain text keeps its words"), Plain.ToString(), FString(TEXT("Nothing to see")));
+	TestTrue(TEXT("And has no name to colour"), Plain.ItemName.IsEmpty());
+
+	TestEqual(TEXT("Common names are white"), UFSItemDefinition::GetRarityColor(EFSItemRarity::Common), FLinearColor::White);
+
+	TSet<FLinearColor> Colors;
+	for (const EFSItemRarity Rarity : { EFSItemRarity::Common, EFSItemRarity::Uncommon, EFSItemRarity::Rare, EFSItemRarity::Epic, EFSItemRarity::Legendary })
+	{
+		Colors.Add(UFSItemDefinition::GetRarityColor(Rarity));
+	}
+	TestEqual(TEXT("Each rarity has its own colour"), Colors.Num(), 5);
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSItemRarityLoggedTest, "Fellowship.Inventory.Rarity.TheLogAndPromptKnowTheItemsRarity", TestFlags)
+
+bool FFSItemRarityLoggedTest::RunTest(const FString& Parameters)
+{
+	FInventoryTestWorld Test;
+
+	UFSItemDefinition* Item = MakeItem(FIntPoint(1, 1));
+	Item->Rarity = EFSItemRarity::Legendary;
+
+	AFSItemPickup* Pickup = Test.World->SpawnActor<AFSItemPickup>();
+	Pickup->SetItem(Item);
+	TestTrue(TEXT("The prompt has the item's rarity"), Pickup->GetPromptText(Test.Inventory).Rarity == EFSItemRarity::Legendary);
+	TestEqual(TEXT("And its name"), Pickup->GetPromptText(Test.Inventory).ItemName, FString(TEXT("Test Item")));
+
+	const TArray<FFSItemText>& Events = Test.World->GetSubsystem<UFSEventLog>()->GetEvents();
+	const int32 EventsBefore = Events.Num();
+	Pickup->TryCarry(Test.Inventory);
+	if (TestEqual(TEXT("Picking it up is logged"), Events.Num(), EventsBefore + 1))
+	{
+		TestTrue(TEXT("With the item's rarity"), Events.Last().Rarity == EFSItemRarity::Legendary);
+		TestEqual(TEXT("And only its name set apart"), Events.Last().ItemName, FString(TEXT("Test Item")));
+		TestEqual(TEXT("From the rest of the message"), Events.Last().Before, FString(TEXT("Picked up ")));
+	}
 
 	return true;
 }

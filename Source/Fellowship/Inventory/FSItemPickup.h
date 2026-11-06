@@ -7,6 +7,7 @@
 #include "Inventory/FSInventoryComponent.h"
 #include "FSItemPickup.generated.h"
 
+struct FFSItemText;
 class ACharacter;
 class UFSInventoryComponent;
 class UFSItemDefinition;
@@ -54,7 +55,7 @@ public:
 	FORCEINLINE UStaticMeshComponent* GetHungItemMesh(EFSQuickSlot QuickSlot) const { return HungItemMeshes.Get(QuickSlot); }
 
 	// What to tell a player standing near this pickup
-	FText GetPromptText(const UFSInventoryComponent* Inventory) const;
+	FFSItemText GetPromptText(const UFSInventoryComponent* Inventory) const;
 
 	// Where the prompt goes: just above the mesh
 	FVector GetPromptLocation() const;

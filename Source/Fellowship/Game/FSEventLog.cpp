@@ -5,6 +5,11 @@
 
 void UFSEventLog::Add(const UObject* WorldContextObject, const FText& Message)
 {
+	Add(WorldContextObject, FFSItemText::FromText(Message));
+}
+
+void UFSEventLog::Add(const UObject* WorldContextObject, const FFSItemText& Message)
+{
 	const UWorld* World = WorldContextObject ? WorldContextObject->GetWorld() : nullptr;
 	UFSEventLog* Log = World ? World->GetSubsystem<UFSEventLog>() : nullptr;
 	if (!Log)

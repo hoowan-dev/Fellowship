@@ -38,7 +38,7 @@ public:
 	FName LeftHandSocket = TEXT("weapon_l");
 
 	// Where a mesh sits relative to the right hand's socket. Meshes point along +Z from their grip, which would run through the palm, so the default rolls the blade around to point out of the fist.
-	// An item's Held Transform is applied on top of this.
+	// An item's Hand Equipped Offset Transform is applied on top of this.
 	UPROPERTY(EditDefaultsOnly, Category = "Equipment|Sockets")
 	FTransform RightHeldOffset = FTransform(FRotator(0.0, 0.0, -90.0));
 
@@ -55,7 +55,7 @@ public:
 	FName LeftSheathSocket = TEXT("BackPack");
 
 	// Where a mesh's grip sits relative to the right sheath socket, whose axes match the mesh's: +X is the character's left, +Y its front and +Z up. Meshes point along +Z from their grip.
-	// The default rests the grip behind the right shoulder with the blade running down across the back. An item's Sheathed Transform is applied on top of this.
+	// The default rests the grip behind the right shoulder with the blade running down across the back. An item's Hand Stored Offset Transform is applied on top of this.
 	UPROPERTY(EditDefaultsOnly, Category = "Equipment|Sockets")
 	FTransform RightSheathOffset = FTransform(FRotator(-130.0, 0.0, 0.0), FVector(-16.0, -14.0, 18.0));
 

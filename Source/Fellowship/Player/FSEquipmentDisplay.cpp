@@ -197,18 +197,19 @@ FVector2D AFSEquipmentDisplay::GetSlotCentre(const FVector2D& ViewportSize, EFSE
 	return FVector2D(ViewportSize.X * 0.5 + FromMiddle * SlotSpacing, SlotHeight);
 }
 
-FTransform AFSEquipmentDisplay::GetMeshTransform(const UStaticMesh& Mesh, const FRotator& MeshRotation, const FQuat& CameraRotation, const FVector& Centre, double Radius)
+FTransform AFSEquipmentDisplay::GetMeshTransform(const UStaticMesh& Mesh, const FRotator& MeshRotation, const FQuat& CameraRotation, const FVector& Centre, double Radius, const FVector& FittedScale, const FVector& SlotScale)
 {
 	const FBoxSphereBounds Bounds = Mesh.GetBounds();
+	const FVector Extent = Bounds.BoxExtent * FittedScale.GetAbs();
 
 	// A box fits inside a circle if its diagonal does
-	const FVector Size = FBox(-Bounds.BoxExtent, Bounds.BoxExtent).TransformBy(FTransform(MeshRotation)).GetSize();
+	const FVector Size = FBox(-Extent, Extent).TransformBy(FTransform(MeshRotation)).GetSize();
 	const double Diagonal = FVector2D(Size.Y, Size.Z).Size();
-	const double Scale = MeshFillFraction * Radius * 2.0 / FMath::Max(Diagonal, UE_KINDA_SMALL_NUMBER);
+	const FVector Scale = FittedScale * (MeshFillFraction * Radius * 2.0 / FMath::Max(Diagonal, UE_KINDA_SMALL_NUMBER)) * SlotScale;
 
 	// Mesh pivots are wherever suited the character holding them, so the mesh is centred by its bounds
 	const FQuat Rotation = CameraRotation * MeshRotation.Quaternion();
-	return FTransform(Rotation, Centre - Rotation.RotateVector(Bounds.Origin * Scale), FVector(Scale));
+	return FTransform(Rotation, Centre - Rotation.RotateVector(Bounds.Origin * Scale), Scale);
 }
 
 FQuat AFSEquipmentDisplay::GetCompassNeedleRotation(double CameraYaw)
@@ -271,7 +272,7 @@ void AFSEquipmentDisplay::Tick(float DeltaTime)
 	const auto UpdateItem = [this, PlayerController](EFSEquipmentSlot Slot, const FFSInventoryItem& InventoryItem)
 	{
 		const UFSItemDefinition* Item = InventoryItem.Definition;
-		UpdateSlot(*PlayerController, Slot, Item ? Item->Mesh.Get() : nullptr, Item ? Item->InventoryMeshRotation : FRotator::ZeroRotator);
+		UpdateSlot(*PlayerController, Slot, Item);
 	};
 
 	UpdateItem(EFSEquipmentSlot::LeftQuickSlot, Inventory->GetQuickSlotItem(EFSQuickSlot::Left));
@@ -279,8 +280,7 @@ void AFSEquipmentDisplay::Tick(float DeltaTime)
 	UpdateItem(EFSEquipmentSlot::RightHand, Inventory->GetHandItem(EFSHand::Right));
 	UpdateItem(EFSEquipmentSlot::RightQuickSlot, Inventory->GetQuickSlotItem(EFSQuickSlot::Right));
 
-	const UFSItemDefinition* Backpack = Inventory->GetBackpack();
-	UpdateSlot(*PlayerController, EFSEquipmentSlot::Backpack, Backpack ? Backpack->Mesh.Get() : nullptr, Backpack ? Backpack->InventoryMeshRotation : FRotator::ZeroRotator);
+	UpdateSlot(*PlayerController, EFSEquipmentSlot::Backpack, Inventory->GetBackpack());
 
 	UpdateCompass(*PlayerController);
 }
@@ -326,8 +326,9 @@ bool AFSEquipmentDisplay::GetSlotPlacement(const AFSPlayerController& PlayerCont
 	return true;
 }
 
-void AFSEquipmentDisplay::UpdateSlot(const AFSPlayerController& PlayerController, EFSEquipmentSlot Slot, UStaticMesh* Mesh, const FRotator& MeshRotation)
+void AFSEquipmentDisplay::UpdateSlot(const AFSPlayerController& PlayerController, EFSEquipmentSlot Slot, const UFSItemDefinition* Item)
 {
+	UStaticMesh* Mesh = Item ? Item->Mesh.Get() : nullptr;
 	UStaticMeshComponent* Component = SlotMeshes[static_cast<int32>(Slot)];
 
 	FVector Centre;
@@ -342,7 +343,12 @@ void AFSEquipmentDisplay::UpdateSlot(const AFSPlayerController& PlayerController
 	}
 
 	Component->SetStaticMesh(Mesh);
-	Component->SetWorldTransform(GetMeshTransform(*Mesh, MeshRotation, Rotation, Centre, Radius));
+
+	// A hand or quick slot's item can be made bigger or smaller by its global scale. A backpack always fills its slot.
+	const bool bFillsSlot = Slot == EFSEquipmentSlot::Backpack;
+	Component->SetWorldTransform(GetMeshTransform(*Mesh, Item->InventoryMeshRotation, Rotation, Centre, Radius,
+		bFillsSlot ? Item->GlobalScale : FVector::OneVector,
+		bFillsSlot ? FVector::OneVector : Item->GlobalScale));
 }
 
 void AFSEquipmentDisplay::UpdateCompass(const AFSPlayerController& PlayerController)
