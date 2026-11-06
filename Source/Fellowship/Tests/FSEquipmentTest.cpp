@@ -318,6 +318,13 @@ bool FFSEquipmentGripTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("The right blade runs along the bone's -Y"), RightBlade.Equals(FVector(0.0, -1.0, 0.0), 0.001));
 	TestTrue(TEXT("The left blade runs along the bone's +Y"), LeftBlade.Equals(FVector(0.0, 1.0, 0.0), 0.001));
 
+	// Only the left is turned about the blade's length, which keeps a curved blade's edge facing the same way in each hand
+	const FVector RightFront = Test.Equipment->GetHandMesh(EFSHand::Right)->GetRelativeRotation().RotateVector(FVector::ForwardVector);
+	const FVector LeftFront = Test.Equipment->GetHandMesh(EFSHand::Left)->GetRelativeRotation().RotateVector(FVector::ForwardVector);
+
+	TestTrue(TEXT("The right mesh's +X runs along the bone's +X"), RightFront.Equals(FVector(1.0, 0.0, 0.0), 0.001));
+	TestTrue(TEXT("The left mesh's +X runs along the bone's -X"), LeftFront.Equals(FVector(-1.0, 0.0, 0.0), 0.001));
+
 	return true;
 }
 
@@ -771,7 +778,7 @@ bool FFSEquipmentAssetsTest::RunTest(const FString& Parameters)
 	FEquipmentTestWorld Test;
 
 	UClass* CharacterClass = LoadClass<AFSCharacter>(nullptr, TEXT("/Game/Blueprints/Character/BP_FSCharacter.BP_FSCharacter_C"));
-	UFSItemDefinition* Stick = LoadObject<UFSItemDefinition>(nullptr, TEXT("/Game/Blueprints/Inventory/Items/DA_OHS_1_Stick.DA_OHS_1_Stick"));
+	UFSItemDefinition* Stick = LoadObject<UFSItemDefinition>(nullptr, TEXT("/Game/Data/Items/Weapon/OHS/DA_Item_Weapon_OHS_1_Stick.DA_Item_Weapon_OHS_1_Stick"));
 	const UPoseSearchDatabase* Unarmed = LoadObject<UPoseSearchDatabase>(nullptr, TEXT("/Game/Blueprints/Character/Animation/PSD_Character.PSD_Character"));
 	const UPoseSearchDatabase* SingleSword = LoadObject<UPoseSearchDatabase>(nullptr, TEXT("/Game/Blueprints/Character/Animation/PSD_SingleSword.PSD_SingleSword"));
 	const UPoseSearchDatabase* DoubleSword = LoadObject<UPoseSearchDatabase>(nullptr, TEXT("/Game/Blueprints/Character/Animation/PSD_DoubleSword.PSD_DoubleSword"));
@@ -936,6 +943,49 @@ bool FFSScaledBackpackTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("And as tall"), Size.Z, 10.0, 0.01);
 	TestEqual(TEXT("It touches the scaled backpack's side"), InPack.Min.X * PackScale.X, 100.0 - Backpack->HungItemInset, 0.01);
 	TestEqual(TEXT("It hangs from the scaled backpack's hanging height"), InPack.Max.Z * PackScale.Z, -200.0 + 400.0 * Backpack->HungItemHeight, 0.01);
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSQuickStoredMirrorTest, "Fellowship.Equipment.Display.QuickSlotItemsAreMirroredAcrossTheBackpack", EquipmentTestFlags)
+
+bool FFSQuickStoredMirrorTest::RunTest(const FString& Parameters)
+{
+	UStaticMesh* Cube = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
+	if (!TestNotNull(TEXT("The test mesh loads"), Cube))
+	{
+		return false;
+	}
+
+	UFSItemDefinition* Backpack = NewObject<UFSItemDefinition>();
+	Backpack->ItemType = EFSItemType::Backpack;
+	Backpack->Mesh = Cube;
+
+	// Turned on every axis, so that nothing about it is the same from both sides by accident
+	const FTransform Offset(FRotator(25.0f, 40.0f, 65.0f), FVector(3.0, 4.0, 5.0), FVector(0.1, 0.2, 0.3));
+	const FVector Points[] = { FVector(50.0, 0.0, 0.0), FVector(0.0, 50.0, 0.0), FVector(0.0, 0.0, 50.0), FVector(-50.0, 20.0, 10.0) };
+
+	for (const EFSItemType ItemType : { EFSItemType::Consumable, EFSItemType::Weapon })
+	{
+		UFSItemDefinition* Item = NewObject<UFSItemDefinition>();
+		Item->ItemType = ItemType;
+		Item->Mesh = Cube;
+		Item->QuickStoredOffsetTransform = Offset;
+
+		FVector LeftPivot, RightPivot;
+		const FTransform Left = FFSHungItemMeshes::GetTransform(*Backpack, *Item, EFSQuickSlot::Left, 0.0, &LeftPivot);
+		const FTransform Right = FFSHungItemMeshes::GetTransform(*Backpack, *Item, EFSQuickSlot::Right, 0.0, &RightPivot);
+
+		for (const FVector& Point : Points)
+		{
+			const FVector OnLeft = Left.TransformPosition(Point);
+			const FVector OnRight = Right.TransformPosition(Point);
+			TestTrue(TEXT("Each point of the left mesh mirrors the right's"), OnLeft.Equals(OnRight * FVector(-1.0, 1.0, 1.0), 0.01));
+		}
+
+		TestTrue(TEXT("So do the points they swing from"), LeftPivot.Equals(RightPivot * FVector(-1.0, 1.0, 1.0), 0.01));
+		TestTrue(TEXT("The right side keeps its scale"), Right.GetScale3D().X > 0.0);
+	}
 
 	return true;
 }

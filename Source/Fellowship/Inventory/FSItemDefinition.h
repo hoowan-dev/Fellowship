@@ -116,7 +116,7 @@ public:
 	bool bShowQuickStored = true;
 
 	// Adjusts how the mesh hangs off the side of a backpack while in a quick slot. Weapons already hang point down with their flat against the backpack.
-	// Rotation and scale apply to the mesh as it hangs, and the location is added afterwards, where +X is away from the backpack on either side, +Y the character's front and +Z up.
+	// Rotation and scale apply to the mesh as it hangs on the backpack's right side, and the left side is a mirror image of that. The location is added afterwards, where +X is away from the backpack on either side, +Y the character's front and +Z up.
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Display", meta = (EditCondition = "bShowQuickStored", EditConditionHides))
 	FTransform QuickStoredOffsetTransform = FTransform::Identity;
 

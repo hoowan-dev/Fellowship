@@ -42,9 +42,10 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category = "Equipment|Sockets")
 	FTransform RightHeldOffset = FTransform(FRotator(0.0, 0.0, -90.0));
 
-	// The same for the left hand's socket. The roll is the opposite way because the skeleton's left weapon bone has its axes flipped from the right's.
+	// The same for the left hand's socket, whose weapon bone has its axes flipped from the right's. The roll alone would point the blade out of the fist with its edge backwards,
+	// so the mesh is also turned 180 degrees about the blade's length. As a rotator, that's a yaw of 180 and a roll of the opposite sign.
 	UPROPERTY(EditDefaultsOnly, Category = "Equipment|Sockets")
-	FTransform LeftHeldOffset = FTransform(FRotator(0.0, 0.0, 90.0));
+	FTransform LeftHeldOffset = FTransform(FRotator(0.0, 180.0, -90.0));
 
 	// On the back, for what the right hand holds
 	UPROPERTY(EditDefaultsOnly, Category = "Equipment|Sockets")

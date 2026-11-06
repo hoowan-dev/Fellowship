@@ -23,13 +23,22 @@ FTransform FFSHungItemMeshes::GetTransform(const UFSItemDefinition& Backpack, co
 	FTransform Transform = FTransform(FQuat::Identity, FVector::ZeroVector, Item.GlobalScale) * FTransform(Item.ItemType == EFSItemType::Weapon ? WeaponHang : FQuat::Identity) * Item.QuickStoredOffsetTransform;
 	Transform.SetTranslation(FVector::ZeroVector);
 
+	const bool bLeft = QuickSlot == EFSQuickSlot::Left;
+
+	// The left side, at +X, is a mirror image of the right. No rotation can make one, so the mesh is flipped by its scale, and this rotation is what reflecting the transform across X leaves.
+	if (bLeft)
+	{
+		const FQuat Rotation = Transform.GetRotation();
+		Transform.SetRotation(FQuat(Rotation.X, -Rotation.Y, -Rotation.Z, Rotation.W));
+		Transform.SetScale3D(Transform.GetScale3D() * FVector(-1.0, 1.0, 1.0));
+	}
+
 	const FBoxSphereBounds ItemBounds = ItemMesh->GetBounds();
 	const FBox ItemBox = FBox(ItemBounds.Origin - ItemBounds.BoxExtent, ItemBounds.Origin + ItemBounds.BoxExtent).TransformBy(Transform);
 
 	const FBoxSphereBounds PackBounds = PackMesh->GetBounds();
 	const FBox PackBox = FBox(PackBounds.Origin - PackBounds.BoxExtent, PackBounds.Origin + PackBounds.BoxExtent).TransformBy(FTransform(FQuat::Identity, FVector::ZeroVector, Backpack.GlobalScale));
 
-	const bool bLeft = QuickSlot == EFSQuickSlot::Left;
 	const double Top = PackBox.Min.Z + PackBox.GetSize().Z * Backpack.HungItemHeight;
 	const double Bottom = FMath::Max(Top - ItemBox.GetSize().Z, PackBox.Min.Z - MaxDrop);
 
