@@ -104,8 +104,19 @@ public:
 	// Picks up the nearest item, if there's one in range and the inventory is closed. An item with no room
 	// goes on the cursor instead, and the inventory opens so the player can make room for it.
 	// A backpack replaces the one being worn, which is left on the ground.
+	// With no item in range, interacts with the interaction volume the character is standing in, if any.
 	UFUNCTION(BlueprintCallable, Category = "Inventory")
 	void Interact();
+
+	// Opens the character editor wherever the character is. For now it only says so in the event log.
+	// Also a console command, EnterCharacterEditor.
+	UFUNCTION(Exec, BlueprintCallable, Category = "Character")
+	void EnterCharacterEditor();
+
+	// Opens the stats editor wherever the character is. For now it only says so in the event log.
+	// Also a console command, EnterStatsEditor.
+	UFUNCTION(Exec, BlueprintCallable, Category = "Character")
+	void EnterStatsEditor();
 
 	// Leaves the backpack on the floor with the grid and quick slots still inside it. The hands and the cursor keep what they hold.
 	void DropBackpack();

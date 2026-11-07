@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "Game/FSInteractable.h"
 #include "Inventory/FSInventoryComponent.h"
 #include "FSItemPickup.generated.h"
 
@@ -20,7 +21,7 @@ struct FHitResult;
  * An item lying in the world. Works for any item: place one in a level and set its Item.
  */
 UCLASS()
-class FELLOWSHIP_API AFSItemPickup : public AActor
+class FELLOWSHIP_API AFSItemPickup : public AActor, public IFSInteractable
 {
 	GENERATED_BODY()
 
@@ -54,13 +55,19 @@ public:
 	// Null until something has hung on that side of this backpack
 	FORCEINLINE UStaticMeshComponent* GetHungItemMesh(EFSQuickSlot QuickSlot) const { return HungItemMeshes.Get(QuickSlot); }
 
-	// What to tell a player standing near this pickup
-	FFSItemText GetPromptText(const UFSInventoryComponent* Inventory) const;
+	// The item's name, in the colour of its rarity
+	virtual FFSItemText GetInteractionLabel() const override;
 
-	// Where the prompt goes: just above the mesh
-	FVector GetPromptLocation() const;
+	// Just above the mesh
+	virtual FVector GetInteractionLabelLocation() const override;
+
+	// Picking it up, making room for it when it doesn't fit, or swapping it for the backpack being worn
+	virtual FText GetInteractionVerb(const UFSInventoryComponent* Inventory) const override;
 
 protected:
+	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+
 	virtual void NotifyActorBeginOverlap(AActor* OtherActor) override;
 	virtual void NotifyActorEndOverlap(AActor* OtherActor) override;
 
@@ -71,6 +78,7 @@ protected:
 	UPROPERTY(VisibleAnywhere, Category = "Pickup")
 	TObjectPtr<UStaticMeshComponent> Mesh;
 
+	// How far above the mesh the label floats
 	UPROPERTY(EditAnywhere, Category = "Pickup", meta = (Units = cm))
 	float PromptHeight = 30.0f;
 

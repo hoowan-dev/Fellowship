@@ -25,7 +25,7 @@
 #include "Camera/CameraComponent.h"
 #include "Inventory/FSItemDefinition.h"
 #include "Inventory/FSItemPickup.h"
-#include "Player/FSEquipmentDisplay.h"
+#include "HUD/FSEquipmentDisplay.h"
 #include "Player/FSPlayerController.h"
 #include "Player/FSPlayerState.h"
 #include "TimerManager.h"
@@ -248,13 +248,13 @@ bool FFSItemPickupTest::RunTest(const FString& Parameters)
 	UFSItemDefinition* Sword = MakeItem(SwordSize);
 
 	AFSItemPickup* Pickup = Test.SpawnPickup(Sword);
-	TestTrue(TEXT("Prompt offers to pick it up"), Pickup->GetPromptText(Test.Inventory).ToString().Contains(TEXT("Pick up Test Item")));
+	TestTrue(TEXT("Prompt offers to pick it up"), Pickup->GetInteractionVerb(Test.Inventory).ToString() == TEXT("Pick up"));
 	TestTrue(TEXT("It's picked up"), Pickup->TryPickUp(Test.Inventory));
 	TestTrue(TEXT("The actor is removed"), Pickup->IsActorBeingDestroyed());
 	TestEqual(TEXT("It's in the grid"), Test.Inventory->GetItems().Num(), 1);
 
 	AFSItemPickup* TooLarge = Test.SpawnPickup(MakeItem(FIntPoint(20, 20)));
-	TestTrue(TEXT("Prompt says room has to be made"), TooLarge->GetPromptText(Test.Inventory).ToString().Contains(TEXT("Make room for Test Item")));
+	TestTrue(TEXT("Prompt says room has to be made"), TooLarge->GetInteractionVerb(Test.Inventory).ToString() == TEXT("Make room"));
 	TestFalse(TEXT("It's refused"), TooLarge->TryPickUp(Test.Inventory));
 	TestFalse(TEXT("The actor stays in the world"), TooLarge->IsActorBeingDestroyed());
 	TestEqual(TEXT("The inventory is unchanged"), Test.Inventory->GetItems().Num(), 1);
@@ -1361,7 +1361,7 @@ bool FFSNoBackpackTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("Nor reports having room"), Inventory->CanAddItem(Sword));
 
 	AFSItemPickup* Pickup = Test.SpawnPickup(Sword);
-	TestTrue(TEXT("Picking up has to go through the cursor"), Pickup->GetPromptText(Inventory).ToString().Contains(TEXT("Make room for Test Item")));
+	TestTrue(TEXT("Picking up has to go through the cursor"), Pickup->GetInteractionVerb(Inventory).ToString() == TEXT("Make room"));
 	TestFalse(TEXT("So it isn't picked up directly"), Pickup->TryPickUp(Inventory));
 	TestNull(TEXT("It doesn't go in a hand"), Inventory->GetHandItem(EFSHand::Right).Definition.Get());
 
@@ -1405,7 +1405,7 @@ bool FFSPickupSkipsSlotsTest::RunTest(const FString& Parameters)
 	// Empty slots don't count as room for an item the grid can't take
 	AFSItemPickup* TooLarge = Test.SpawnPickup(MakeItem(FIntPoint(20, 20)));
 	TestFalse(TEXT("With no room in the grid it's refused"), TooLarge->TryPickUp(Inventory));
-	TestTrue(TEXT("And the prompt says so"), TooLarge->GetPromptText(Inventory).ToString().Contains(TEXT("Make room for Test Item")));
+	TestTrue(TEXT("And the prompt says so"), TooLarge->GetInteractionVerb(Inventory).ToString() == TEXT("Make room"));
 	TestSlotsEmpty(TEXT("The hands and quick slots still stay empty"));
 
 	TestEqual(TEXT("The hands were never told of a change"), HandChanges, 0);
@@ -1540,7 +1540,7 @@ bool FFSBackpackPickupTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("With none on, there's nothing to drop"), Test.CountPickups(), 0);
 
 	AFSItemPickup* FirstPickup = Test.SpawnPickup(First);
-	TestTrue(TEXT("The prompt offers to pick it up"), FirstPickup->GetPromptText(Inventory).ToString().Contains(TEXT("Pick up Test Backpack")));
+	TestTrue(TEXT("The prompt offers to pick it up"), FirstPickup->GetInteractionVerb(Inventory).ToString() == TEXT("Pick up"));
 
 	Controller->Interact();
 	TestTrue(TEXT("Picking it up puts it on"), Inventory->GetBackpack() == First);
@@ -1552,7 +1552,7 @@ bool FFSBackpackPickupTest::RunTest(const FString& Parameters)
 	Inventory->AddItem(Sword);
 
 	AFSItemPickup* SecondPickup = Test.SpawnPickup(Second);
-	TestTrue(TEXT("With one on, the prompt offers a swap"), SecondPickup->GetPromptText(Inventory).ToString().Contains(TEXT("Swap backpack for Test Backpack")));
+	TestTrue(TEXT("With one on, the prompt offers a swap"), SecondPickup->GetInteractionVerb(Inventory).ToString() == TEXT("Swap backpack"));
 	TestFalse(TEXT("A pickup alone can't put a second one on"), SecondPickup->TryPickUp(Inventory));
 	TestFalse(TEXT("So it stays in the world"), SecondPickup->IsActorBeingDestroyed());
 
@@ -2282,8 +2282,8 @@ bool FFSItemRarityLoggedTest::RunTest(const FString& Parameters)
 
 	AFSItemPickup* Pickup = Test.World->SpawnActor<AFSItemPickup>();
 	Pickup->SetItem(Item);
-	TestTrue(TEXT("The prompt has the item's rarity"), Pickup->GetPromptText(Test.Inventory).Rarity == EFSItemRarity::Legendary);
-	TestEqual(TEXT("And its name"), Pickup->GetPromptText(Test.Inventory).ItemName, FString(TEXT("Test Item")));
+	TestTrue(TEXT("The label has the item's rarity"), Pickup->GetInteractionLabel().Rarity == EFSItemRarity::Legendary);
+	TestEqual(TEXT("And its name"), Pickup->GetInteractionLabel().ItemName, FString(TEXT("Test Item")));
 
 	const TArray<FFSItemText>& Events = Test.World->GetSubsystem<UFSEventLog>()->GetEvents();
 	const int32 EventsBefore = Events.Num();

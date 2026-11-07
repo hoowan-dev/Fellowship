@@ -1,7 +1,7 @@
 // Copyright HoowanDev 2026 all rights reserved.
 
 
-#include "FSHUD.h"
+#include "HUD/FSHUD.h"
 #include "CanvasItem.h"
 #include "Character/FSCharacter.h"
 #include "Character/FSStatsComponent.h"
@@ -9,13 +9,15 @@
 #include "Engine/Engine.h"
 #include "Engine/Font.h"
 #include "Engine/World.h"
+#include "Game/FSInteractable.h"
+#include "Game/FSInteractableRegistry.h"
 #include "Game/FSEventLog.h"
 #include "GlobalRenderResources.h"
 #include "Inventory/FSInventoryComponent.h"
 #include "Inventory/FSInventoryRig.h"
 #include "Inventory/FSItemDefinition.h"
 #include "Inventory/FSItemPickup.h"
-#include "Player/FSEquipmentDisplay.h"
+#include "HUD/FSEquipmentDisplay.h"
 #include "Player/FSPlayerController.h"
 
 #define LOCTEXT_NAMESPACE "FSHUD"
@@ -27,6 +29,9 @@ namespace
 
 	// How far a backdrop extends past its text
 	constexpr float BackdropPadding = 4.0f;
+
+	// Between the boxes behind an interactable's label and the interact prompt under it
+	constexpr float InteractionPromptGap = 4.0f;
 	const FLinearColor BackdropColor(0.0f, 0.0f, 0.0f, 0.7f);
 
 	// How far the stat bars and event log sit from the edges of the screen
@@ -48,7 +53,7 @@ namespace
 	// How bright the shadowed side of a ring around an item is, as a fraction of the lit side
 	constexpr float ItemRingShadow = 0.4f;
 
-	// The size inside a stat bar's border. Narrow enough that the row stays clear of the event log on a screen 1280 wide.
+	// The size inside a stat bar's border
 	constexpr float StatBarWidth = 200.0f;
 	constexpr float StatBarHeight = 16.0f;
 
@@ -56,6 +61,12 @@ namespace
 	constexpr float StatBarGap = 8.0f;
 
 	const FLinearColor StatBarEmptyColor(0.0f, 0.0f, 0.0f, 0.6f);
+
+	// Fills the event log's border, so its text reads against bright scenery
+	const FLinearColor EventLogBackgroundColor(0.0f, 0.0f, 0.0f, 0.6f);
+
+	// The least space between the event log and the stat bars beside it
+	constexpr float EventLogStatBarSpacing = 12.0f;
 
 	struct FStatBar
 	{
@@ -75,6 +86,19 @@ namespace
 	float GetEventLogHeight(const UFont& Font)
 	{
 		return EventLogVisibleLines * Font.GetMaxCharHeight() + EventLogPadding * 2.0f;
+	}
+
+	// Where the row of stat bars starts and its top, both outside their borders. The row is centred along the bottom of the screen.
+	float GetStatBarsLeft(float ScreenWidth)
+	{
+		const int32 BarCount = UE_ARRAY_COUNT(StatBars);
+		const float TotalWidth = BarCount * (StatBarWidth + BorderThickness * 2.0f) + (BarCount - 1) * StatBarGap;
+		return (ScreenWidth - TotalWidth) * 0.5f;
+	}
+
+	float GetStatBarsTop(float ScreenHeight)
+	{
+		return ScreenHeight - CornerMargin - StatBarHeight - BorderThickness * 2.0f;
 	}
 
 	// From the edge of a circle to the middle of the name above or beneath it
@@ -126,7 +150,7 @@ void AFSHUD::DrawHUD()
 	UpdateUseGlow();
 	DrawEquipmentSlots();
 	DrawInventorySlotNames();
-	DrawPickupPrompt();
+	DrawInteractionLabels();
 	DrawHoveredItemName();
 	DrawStatBars();
 	DrawEventLog();
@@ -322,29 +346,66 @@ void AFSHUD::DrawShadedRing(const FVector2D& Centre, float Radius, const UFSItem
 	Canvas->DrawItem(Ring);
 }
 
-void AFSHUD::DrawPickupPrompt()
+void AFSHUD::DrawInteractionLabels()
 {
 	const AFSPlayerController* PlayerController = Cast<AFSPlayerController>(GetOwningPlayerController());
-	if (!PlayerController || PlayerController->GetInventoryViewState() != EFSInventoryViewState::Closed)
+	const AFSCharacter* Character = PlayerController ? PlayerController->GetFSCharacter() : nullptr;
+	const UFSInteractableRegistry* Registry = GetWorld()->GetSubsystem<UFSInteractableRegistry>();
+	if (!Character || !Registry || PlayerController->GetInventoryViewState() != EFSInventoryViewState::Closed)
 	{
 		return;
 	}
 
-	const AFSCharacter* Character = PlayerController->GetFSCharacter();
-	const AFSItemPickup* Pickup = Character ? Character->GetNearestPickup() : nullptr;
-	if (!Pickup)
-	{
-		return;
-	}
+	AActor* Target = Character->GetInteractionTarget();
 
-	// Z is not positive when the point is behind the camera
-	const FVector ScreenLocation = Project(Pickup->GetPromptLocation());
-	if (ScreenLocation.Z <= 0.0)
+	// Whether a point is in the camera's view: in front of it, and within the edges of the screen
+	const auto IsOnScreen = [this](const FVector& Location)
 	{
-		return;
-	}
+		const FVector ScreenLocation = Project(Location);
+		return ScreenLocation.Z > 0.0 && ScreenLocation.X >= 0.0 && ScreenLocation.X <= Canvas->SizeX && ScreenLocation.Y >= 0.0 && ScreenLocation.Y <= Canvas->SizeY;
+	};
 
-	DrawCentredText(Pickup->GetPromptText(PlayerController->GetInventory()), FVector2D(ScreenLocation.X, ScreenLocation.Y));
+	InteractionLabels.Update(Registry->GetInteractables(), Character->GetActorLocation(), InteractionLabelDistance, Target, IsOnScreen);
+
+	UFont* Font = GEngine->GetMediumFont();
+
+	for (int32 Slot = 0; Slot < FFSInteractionLabelPool::Size; ++Slot)
+	{
+		AActor* Actor = InteractionLabels.Get(Slot);
+		const IFSInteractable* Interactable = Cast<IFSInteractable>(Actor);
+		if (!Interactable)
+		{
+			continue;
+		}
+
+		// Z is not positive when the point is behind the camera
+		const FVector ScreenLocation = Project(Interactable->GetInteractionLabelLocation());
+		if (ScreenLocation.Z <= 0.0)
+		{
+			continue;
+		}
+
+		FVector2D Centre(ScreenLocation.X, ScreenLocation.Y);
+
+		const FFSItemText Label = Interactable->GetInteractionLabel();
+		if (!Label.ToString().IsEmpty())
+		{
+			DrawCentredText(Label, Centre, true);
+
+			float LabelWidth = 0.0f;
+			float LabelHeight = 0.0f;
+			GetTextSize(Label.ToString(), LabelWidth, LabelHeight, Font);
+
+			// The prompt's box sits just below the label's, and is about as tall
+			Centre.Y += LabelHeight + BackdropPadding * 2.0f + InteractionPromptGap;
+		}
+
+		if (Actor == Target)
+		{
+			const FText Prompt = FText::Format(LOCTEXT("InteractionPrompt", "[F / X] {0}"), Interactable->GetInteractionVerb(PlayerController->GetInventory()));
+			DrawCentredText(Prompt.ToString(), Centre, true);
+		}
+	}
 }
 
 void AFSHUD::DrawHoveredItemName()
@@ -376,14 +437,9 @@ void AFSHUD::DrawStatBars()
 		return;
 	}
 
-	const int32 BarCount = UE_ARRAY_COUNT(StatBars);
 	const float BarOuterWidth = StatBarWidth + BorderThickness * 2.0f;
-	const float TotalWidth = BarCount * BarOuterWidth + (BarCount - 1) * StatBarGap;
-
-	float Left = (Canvas->SizeX - TotalWidth) * 0.5f + BorderThickness;
-
-	// The bottom of the borders lines up with the event log's
-	const float Top = Canvas->SizeY - CornerMargin - BorderThickness - StatBarHeight;
+	float Left = GetStatBarsLeft(Canvas->SizeX) + BorderThickness;
+	const float Top = GetStatBarsTop(Canvas->SizeY) + BorderThickness;
 
 	for (const FStatBar& Bar : StatBars)
 	{
@@ -428,15 +484,59 @@ void AFSHUD::DrawEventLog()
 	const float Bottom = Canvas->SizeY - CornerMargin - BorderThickness;
 	const float Top = Bottom - Height;
 
-	DrawShadedBorder(Left, Top, EventLogWidth, Height);
+	// Always in the corner, with its bottom lined up with the stat bars'. On a screen too narrow for its full width beside them, it gives up width instead.
+	const float RoomBesideStatBars = GetStatBarsLeft(Canvas->SizeX) - EventLogStatBarSpacing - BorderThickness - Left;
+	const float Width = FMath::Max(0.0f, FMath::Min(EventLogWidth, RoomBesideStatBars));
+	const float TextWidth = FMath::Max(0.0f, Width - EventLogPadding * 2.0f);
+
+	DrawRect(EventLogBackgroundColor, Left, Top, Width, Height);
+	DrawShadedBorder(Left, Top, Width, Height);
 
 	float LineY = Bottom - EventLogPadding;
 
 	for (int32 Index = Events.Num() - 1; Index >= OldestVisible; --Index)
 	{
 		LineY -= LineHeight;
-		DrawShadowedText(Events[Index], Left + EventLogPadding, LineY, Font);
+		DrawShadowedText(FitTextToWidth(Events[Index], TextWidth, Font), Left + EventLogPadding, LineY, Font);
 	}
+}
+
+FFSItemText AFSHUD::FitTextToWidth(const FFSItemText& Text, float MaxWidth, UFont* Font)
+{
+	const auto Width = [this, Font](const FString& String)
+	{
+		float StringWidth = 0.0f;
+		float StringHeight = 0.0f;
+		GetTextSize(String, StringWidth, StringHeight, Font);
+		return StringWidth;
+	};
+
+	if (Width(Text.ToString()) <= MaxWidth)
+	{
+		return Text;
+	}
+
+	// Takes characters off the end, through the item's name and into the text before it if need be, until it fits with an ellipsis on the end
+	static const FString Ellipsis = TEXT("\u2026");
+	FFSItemText Fitted = Text;
+	FString* Parts[] = { &Fitted.After, &Fitted.ItemName, &Fitted.Before };
+
+	for (FString* Part : Parts)
+	{
+		while (!Part->IsEmpty())
+		{
+			Part->LeftChopInline(1);
+			if (Width(Fitted.ToString() + Ellipsis) <= MaxWidth)
+			{
+				// The ellipsis goes on the last part that still has text, so that it takes that part's colour
+				Part->TrimEndInline();
+				*Part += Ellipsis;
+				return Fitted;
+			}
+		}
+	}
+
+	return Fitted;
 }
 
 void AFSHUD::DrawCentredText(const FString& Text, const FVector2D& Centre, bool bBackdrop)

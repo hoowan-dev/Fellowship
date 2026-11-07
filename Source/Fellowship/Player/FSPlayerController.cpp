@@ -4,6 +4,8 @@
 #include "FSPlayerController.h"
 #include "Character/FSCharacter.h"
 #include "Character/FSItemUseComponent.h"
+#include "Game/FSInteractionVolume.h"
+#include "Game/FSEventLog.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "GameFramework/CharacterMovementComponent.h"
@@ -146,6 +148,16 @@ void AFSPlayerController::Interact()
 	AFSItemPickup* Pickup = FSCharacter->GetNearestPickup();
 	UFSInventoryComponent* Inventory = GetInventory();
 
+	if (!Pickup)
+	{
+		if (AFSInteractionVolume* Volume = FSCharacter->GetInteractionVolume())
+		{
+			Volume->Interact(this);
+		}
+
+		return;
+	}
+
 	if (Pickup && Pickup->IsBackpack() && Inventory && Inventory->HasBackpack())
 	{
 		DropBackpack();
@@ -161,6 +173,18 @@ void AFSPlayerController::Interact()
 	{
 		OpenInventory();
 	}
+}
+
+void AFSPlayerController::EnterCharacterEditor()
+{
+	UE_LOG(LogTemp, Log, TEXT("Entering character creator"));
+	UFSEventLog::Add(this, NSLOCTEXT("FSPlayerController", "EnteringCharacterEditor", "Entering character creator"));
+}
+
+void AFSPlayerController::EnterStatsEditor()
+{
+	UE_LOG(LogTemp, Log, TEXT("Entering stats editor"));
+	UFSEventLog::Add(this, NSLOCTEXT("FSPlayerController", "EnteringStatsEditor", "Entering stats editor"));
 }
 
 void AFSPlayerController::SelectAtInventoryCursor()

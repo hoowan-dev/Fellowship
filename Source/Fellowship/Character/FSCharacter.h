@@ -9,6 +9,7 @@
 class USpringArmComponent;
 class UCameraComponent;
 class AFSItemPickup;
+class AFSInteractionVolume;
 class AFSPlayerController;
 class UFSClimbIKComponent;
 class UFSEquipmentComponent;
@@ -155,7 +156,18 @@ public:
 	// The closest pickup in range, or null if there are none
 	AFSItemPickup* GetNearestPickup() const;
 
+	// Called by interaction volumes as this character walks in and out of them
+	void AddInteractionVolume(AFSInteractionVolume* Volume);
+	void RemoveInteractionVolume(AFSInteractionVolume* Volume);
+
+	// The interaction volume this character entered most recently and is still in, or null if it isn't in one
+	AFSInteractionVolume* GetInteractionVolume() const;
+
+	// What the interact button would act on: the nearest pickup in range, or else the interaction volume this character is in. Null if neither.
+	AActor* GetInteractionTarget() const;
+
 private:
 	TArray<TWeakObjectPtr<AFSItemPickup>> NearbyPickups;
+	TArray<TWeakObjectPtr<AFSInteractionVolume>> InteractionVolumes;
 
 };

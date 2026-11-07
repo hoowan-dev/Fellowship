@@ -1,6 +1,7 @@
 // Copyright HoowanDev 2026 all rights reserved.
 
 #include "FSItemPickup.h"
+#include "Game/FSInteractableRegistry.h"
 #include "Character/FSCharacter.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SphereComponent.h"
@@ -152,24 +153,36 @@ void AFSItemPickup::LogPickedUp() const
 	UFSEventLog::Add(this, FFSItemText::Format(LOCTEXT("PickedUpEvent", "Picked up {0}"), Item));
 }
 
-FFSItemText AFSItemPickup::GetPromptText(const UFSInventoryComponent* Inventory) const
+FFSItemText AFSItemPickup::GetInteractionLabel() const
+{
+	return Item ? FFSItemText::FromItem(*Item) : FFSItemText();
+}
+
+FText AFSItemPickup::GetInteractionVerb(const UFSInventoryComponent* Inventory) const
 {
 	if (IsBackpack())
 	{
-		return Inventory && Inventory->HasBackpack()
-			? FFSItemText::Format(LOCTEXT("SwapBackpackPrompt", "[F / X] Swap backpack for {0}"), Item)
-			: FFSItemText::Format(LOCTEXT("PickUpBackpackPrompt", "[F / X] Pick up {0}"), Item);
+		return Inventory && Inventory->HasBackpack() ? LOCTEXT("SwapBackpackVerb", "Swap backpack") : LOCTEXT("PickUpBackpackVerb", "Pick up");
 	}
 
-	if (Inventory && Inventory->CanAddItem(Item))
-	{
-		return FFSItemText::Format(LOCTEXT("PickUpPrompt", "[F / X] Pick up {0}"), Item);
-	}
-
-	return FFSItemText::Format(LOCTEXT("MakeRoomPrompt", "[F / X] Make room for {0}"), Item);
+	return Inventory && Inventory->CanAddItem(Item) ? LOCTEXT("PickUpVerb", "Pick up") : LOCTEXT("MakeRoomVerb", "Make room");
 }
 
-FVector AFSItemPickup::GetPromptLocation() const
+void AFSItemPickup::BeginPlay()
+{
+	Super::BeginPlay();
+
+	UFSInteractableRegistry::Register(this);
+}
+
+void AFSItemPickup::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	UFSInteractableRegistry::Unregister(this);
+
+	Super::EndPlay(EndPlayReason);
+}
+
+FVector AFSItemPickup::GetInteractionLabelLocation() const
 {
 	const FBoxSphereBounds& Bounds = Mesh->Bounds;
 	return Bounds.Origin + FVector(0.0, 0.0, Bounds.BoxExtent.Z + PromptHeight);

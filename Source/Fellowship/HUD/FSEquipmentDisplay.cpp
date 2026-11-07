@@ -1,6 +1,6 @@
 // Copyright HoowanDev 2026 all rights reserved.
 
-#include "FSEquipmentDisplay.h"
+#include "HUD/FSEquipmentDisplay.h"
 #include "Camera/PlayerCameraManager.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"

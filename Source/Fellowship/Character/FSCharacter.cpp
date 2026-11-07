@@ -8,6 +8,7 @@
 #include "Animation/FSClimbIKComponent.h"
 #include "Character/FSEquipmentComponent.h"
 #include "Character/FSItemUseComponent.h"
+#include "Game/FSInteractionVolume.h"
 #include "Character/FSStatsComponent.h"
 #include "Inventory/FSItemPickup.h"
 #include "Player/FSPlayerController.h"
@@ -123,6 +124,41 @@ AFSItemPickup* AFSCharacter::GetNearestPickup() const
 	}
 
 	return Nearest;
+}
+
+void AFSCharacter::AddInteractionVolume(AFSInteractionVolume* Volume)
+{
+	InteractionVolumes.Remove(Volume);
+	InteractionVolumes.Add(Volume);
+}
+
+void AFSCharacter::RemoveInteractionVolume(AFSInteractionVolume* Volume)
+{
+	InteractionVolumes.Remove(Volume);
+}
+
+AFSInteractionVolume* AFSCharacter::GetInteractionVolume() const
+{
+	// Overlapping volumes go to the one walked into last
+	for (int32 Index = InteractionVolumes.Num() - 1; Index >= 0; --Index)
+	{
+		if (InteractionVolumes[Index].IsValid())
+		{
+			return InteractionVolumes[Index].Get();
+		}
+	}
+
+	return nullptr;
+}
+
+AActor* AFSCharacter::GetInteractionTarget() const
+{
+	if (AFSItemPickup* Pickup = GetNearestPickup())
+	{
+		return Pickup;
+	}
+
+	return GetInteractionVolume();
 }
 
 void AFSCharacter::NotifyControllerChanged()

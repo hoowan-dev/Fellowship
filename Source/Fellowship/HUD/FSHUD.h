@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/HUD.h"
 #include "Character/FSItemUseComponent.h"
+#include "HUD/FSInteractionLabelPool.h"
 #include "FSHUD.generated.h"
 
 struct FFSItemText;
@@ -22,6 +23,10 @@ class FELLOWSHIP_API AFSHUD : public AHUD
 
 public:
 	virtual void DrawHUD() override;
+
+	// How far from the character an interactable's label can be and still show
+	UPROPERTY(EditDefaultsOnly, Category = "Interaction", meta = (ClampMin = "0.0", Units = cm))
+	float InteractionLabelDistance = 1000.0f;
 
 protected:
 	virtual void BeginPlay() override;
@@ -48,8 +53,8 @@ private:
 	// Glow from 0 to 1 brightens it and spreads a halo around the outside.
 	void DrawShadedRing(const FVector2D& Centre, float Radius, const UFSItemDefinition* Item, float Glow = 0.0f);
 
-	// Draws the prompt for the nearest pickup above it
-	void DrawPickupPrompt();
+	// Floats a label over each of the nearest interactables, the pooled ones, with the interact prompt under the label of what the button would act on
+	void DrawInteractionLabels();
 
 	// Draws the name of the item under the mouse above the cursor
 	void DrawHoveredItemName();
@@ -63,6 +68,9 @@ private:
 	// Draws a shaded border around a rectangle
 	void DrawShadedBorder(float Left, float Top, float Width, float Height);
 
+	// Shortens text that's wider than MaxWidth, ending it with an ellipsis
+	FFSItemText FitTextToWidth(const FFSItemText& Text, float MaxWidth, UFont* Font);
+
 	// Draws text centred on a point of the screen, optionally with a dark box behind it
 	void DrawCentredText(const FString& Text, const FVector2D& Centre, bool bBackdrop = false);
 	void DrawCentredText(const FFSItemText& Text, const FVector2D& Centre, bool bBackdrop = false);
@@ -75,6 +83,8 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<AFSEquipmentDisplay> EquipmentDisplay;
+
+	FFSInteractionLabelPool InteractionLabels;
 
 	// By EFSItemUseSlot. Full while a slot's button is held, then fading, so that even a quick tap shows.
 	float UseGlow[static_cast<int32>(EFSItemUseSlot::Count)] = {};

@@ -5,7 +5,7 @@
 #include "Character/FSCharacter.h"
 #include "Character/FSSpectatorPawn.h"
 #include "Game/FSGameState.h"
-#include "Player/FSHUD.h"
+#include "HUD/FSHUD.h"
 #include "Player/FSPlayerController.h"
 #include "Player/FSPlayerState.h"
 
