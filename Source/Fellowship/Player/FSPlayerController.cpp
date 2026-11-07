@@ -127,6 +127,11 @@ const FFSInventoryItem* AFSPlayerController::GetHoveredInventoryItem() const
 		return ArmorItem.Definition ? &ArmorItem : nullptr;
 	}
 
+	if (InventoryRig->GetHoveredOrganizeCell().X != INDEX_NONE)
+	{
+		return Inventory->FindItemAt(InventoryRig->GetHoveredOrganizeCell(), EFSItemGrid::Organize);
+	}
+
 	return Inventory->FindItemAt(InventoryRig->GetHoveredCell());
 }
 
@@ -163,10 +168,10 @@ void AFSPlayerController::SelectAtInventoryCursor()
 	{
 		UpdateHoveredInventoryCell();
 
-		// Outside the grid means tossing the carried item, so the button and the slots have to be checked first
-		if (InventoryRig->IsDropBackpackButtonHovered())
+		// Outside the grid means tossing the carried item, so the buttons and the slots have to be checked first
+		if (InventoryRig->GetHoveredButton() != INDEX_NONE)
 		{
-			DropBackpack();
+			SelectInventoryButton(InventoryRig->GetHoveredButton());
 		}
 		else if (InventoryRig->GetHoveredHandSlot() != INDEX_NONE)
 		{
@@ -179,6 +184,10 @@ void AFSPlayerController::SelectAtInventoryCursor()
 		else if (InventoryRig->GetHoveredArmorSlot() != INDEX_NONE)
 		{
 			SelectInventoryArmorSlot(AFSInventoryRig::GetArmorTypeOfSlot(InventoryRig->GetHoveredArmorSlot()));
+		}
+		else if (InventoryRig->GetHoveredOrganizeCell().X != INDEX_NONE)
+		{
+			SelectInventoryOrganizeCell(InventoryRig->GetHoveredOrganizeCell());
 		}
 		else
 		{
@@ -211,6 +220,26 @@ void AFSPlayerController::SelectInventoryCell(const FIntPoint& Cell)
 	RefreshInventoryView();
 }
 
+void AFSPlayerController::SelectInventoryOrganizeCell(const FIntPoint& Cell)
+{
+	UFSInventoryComponent* Inventory = GetInventory();
+	if (!Inventory || InventoryViewState != EFSInventoryViewState::Open)
+	{
+		return;
+	}
+
+	if (Inventory->IsCarryingItem())
+	{
+		Inventory->PlaceCarriedItem(Cell, EFSItemGrid::Organize);
+	}
+	else
+	{
+		Inventory->PickUpItemAt(Cell, EFSItemGrid::Organize);
+	}
+
+	RefreshInventoryView();
+}
+
 void AFSPlayerController::SelectInventoryHand(EFSHand Hand)
 {
 	UFSInventoryComponent* Inventory = GetInventory();
@@ -235,6 +264,55 @@ void AFSPlayerController::SelectInventoryArmorSlot(EFSArmorType ArmorType)
 	if (Inventory && InventoryViewState == EFSInventoryViewState::Open && Inventory->SwapCarriedItemWithArmorSlot(ArmorType))
 	{
 		RefreshInventoryView();
+	}
+}
+
+void AFSPlayerController::SelectInventoryButton(int32 Button)
+{
+	UFSInventoryComponent* Inventory = GetInventory();
+	if (!Inventory || InventoryViewState != EFSInventoryViewState::Open)
+	{
+		return;
+	}
+
+	if (Button == AFSInventoryRig::DropBackpackButton)
+	{
+		DropBackpack();
+	}
+	else if (Button == AFSInventoryRig::OrganizeBackpackButton)
+	{
+		if (Inventory->IsOrganizing())
+		{
+			StopOrganizing();
+		}
+		else
+		{
+			Inventory->StartOrganizing();
+		}
+
+		RefreshInventoryView();
+	}
+}
+
+void AFSPlayerController::StopOrganizing()
+{
+	UFSInventoryComponent* Inventory = GetInventory();
+	TArray<FFSInventoryItem> Items;
+
+	if (!Inventory || !FSCharacter || !Inventory->StopOrganizing(Items))
+	{
+		return;
+	}
+
+	// There can be a lot of them, so they're spread out around the character's feet rather than all landing in one spot. The golden angle keeps a spiral like this evenly filled, however many there are.
+	constexpr double SpreadPerItem = 12.0;
+	constexpr double GoldenAngle = 2.39996;
+
+	for (int32 Index = 0; Index < Items.Num(); ++Index)
+	{
+		const double Radius = SpreadPerItem * FMath::Sqrt(static_cast<double>(Index));
+		const double Angle = GoldenAngle * Index;
+		AFSItemPickup::DropAtFeet(GetDroppedItemClass(), Items[Index].Definition, *FSCharacter, FVector2D(Radius * FMath::Cos(Angle), Radius * FMath::Sin(Angle)));
 	}
 }
 
@@ -276,6 +354,9 @@ void AFSPlayerController::DropBackpack()
 	{
 		return;
 	}
+
+	// There's nothing left to organize
+	StopOrganizing();
 
 	FFSBackpackContents Contents;
 	Inventory->RemoveBackpack(Contents);
@@ -399,6 +480,7 @@ void AFSPlayerController::CloseInventory()
 		return;
 	}
 
+	StopOrganizing();
 	TossCarriedItem();
 	RefreshInventoryView();
 
@@ -418,6 +500,7 @@ void AFSPlayerController::CloseInventoryImmediately()
 	GetWorldTimerManager().ClearTimer(InventoryMidpointTimer);
 	GetWorldTimerManager().ClearTimer(InventoryFinishedTimer);
 
+	StopOrganizing();
 	TossCarriedItem();
 	RefreshInventoryView();
 
@@ -514,11 +597,13 @@ void AFSPlayerController::UpdateHoveredInventoryCell()
 	int32 HandSlot = INDEX_NONE;
 	int32 QuickSlot = INDEX_NONE;
 	int32 ArmorSlot = INDEX_NONE;
-	bool bOverDropBackpackButton = false;
+	int32 Button = INDEX_NONE;
+	FIntPoint OrganizeCell(INDEX_NONE, INDEX_NONE);
 
 	if (DeprojectMousePositionToWorld(RayOrigin, RayDirection))
 	{
-		bOverDropBackpackButton = InventoryRig->IsDropBackpackButtonOnWorldRay(RayOrigin, RayDirection);
+		InventoryRig->GetOrganizeCellFromWorldRay(RayOrigin, RayDirection, OrganizeCell);
+		InventoryRig->GetButtonFromWorldRay(RayOrigin, RayDirection, Button);
 		InventoryRig->GetCellFromWorldRay(RayOrigin, RayDirection, Cell);
 		InventoryRig->GetHandSlotFromWorldRay(RayOrigin, RayDirection, HandSlot);
 		InventoryRig->GetQuickSlotFromWorldRay(RayOrigin, RayDirection, QuickSlot);
@@ -530,5 +615,6 @@ void AFSPlayerController::UpdateHoveredInventoryCell()
 	InventoryRig->SetHoveredHandSlot(HandSlot);
 	InventoryRig->SetHoveredQuickSlot(QuickSlot);
 	InventoryRig->SetHoveredArmorSlot(ArmorSlot);
-	InventoryRig->SetDropBackpackButtonHovered(bOverDropBackpackButton);
+	InventoryRig->SetHoveredButton(Button);
+	InventoryRig->SetHoveredOrganizeCell(OrganizeCell);
 }

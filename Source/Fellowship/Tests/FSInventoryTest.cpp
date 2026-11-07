@@ -760,7 +760,8 @@ bool FFSQuickSlotAppearanceTest::RunTest(const FString& Parameters)
 
 	// It's in front of the slot, so this follows the ray from the camera back to the plane of the slot
 	const FVector MeshLocation = LeftMesh->GetRelativeLocation();
-	const double BackToSlot = GridDistanceForTests / (GridDistanceForTests + MeshLocation.X);
+	const double CameraDistance = GridDistanceForTests / Rig->GetDisplayScale();
+	const double BackToSlot = CameraDistance / (CameraDistance + MeshLocation.X);
 	TestEqual(TEXT("Centred on the slot across the screen"), MeshLocation.Y * BackToSlot, Centre.X, 0.01);
 	TestEqual(TEXT("Centred on the slot up the screen"), MeshLocation.Z * BackToSlot, Centre.Y, 0.01);
 
@@ -1175,9 +1176,10 @@ bool FFSInventoryRigCarriedMeshTest::RunTest(const FString& Parameters)
 		Item.Cell = Cell;
 		const FBox OnGrid = MeshBox.TransformBy(Rig->GetItemTransform(Item));
 
-		// How far away something appears shrinks what's seen by this much, with the camera GridDistance in front of the grid
-		const double BoxShrink = 1.0 / (Box.GetCenter().X + GridDistanceForTests);
-		const double OnGridShrink = 1.0 / (OnGrid.GetCenter().X + GridDistanceForTests);
+		// How far away something appears shrinks what's seen by this much. The display moves the grid away from the camera to fit a wide backpack on the screen.
+		const double CameraDistance = GridDistanceForTests / Rig->GetDisplayScale();
+		const double BoxShrink = 1.0 / (Box.GetCenter().X + CameraDistance);
+		const double OnGridShrink = 1.0 / (OnGrid.GetCenter().X + CameraDistance);
 
 		TestEqual(TEXT("In the same place across"), Box.GetCenter().Y * BoxShrink, OnGrid.GetCenter().Y * OnGridShrink, 0.001);
 		TestEqual(TEXT("In the same place down"), Box.GetCenter().Z * BoxShrink, OnGrid.GetCenter().Z * OnGridShrink, 0.001);
@@ -1624,7 +1626,7 @@ bool FFSBackpackRigTest::RunTest(const FString& Parameters)
 		return Rig->GetActorRotation().RotateVector(FromCamera).GetSafeNormal();
 	};
 
-	const FVector2D ButtonCentre = Rig->GetDropBackpackButtonCentre();
+	const FVector2D ButtonCentre = Rig->GetButtonCentre(AFSInventoryRig::UseItemButton);
 	const FVector2D QuickSlotCentre = Rig->GetQuickSlotCentre(AFSInventoryRig::LeftQuickSlot);
 	const FVector ToGridCentre = DirectionToGridPoint(FVector2D::ZeroVector);
 
@@ -1640,11 +1642,12 @@ bool FFSBackpackRigTest::RunTest(const FString& Parameters)
 	TestNull(TEXT("Without a backpack there's no pack mesh"), Rig->GetPack()->GetStaticMesh().Get());
 	TestFalse(TEXT("No grid"), Rig->GetGrid()->GetVisibleFlag());
 	TestFalse(TEXT("No quick slots"), Rig->GetQuickSlots()->GetVisibleFlag());
-	TestFalse(TEXT("And no button"), Rig->GetDropBackpackButton()->GetVisibleFlag());
+	TestFalse(TEXT("And no buttons"), Rig->GetButtons()->GetVisibleFlag());
 	TestTrue(TEXT("But the hands' cells are there"), Rig->GetHandSlots()->GetVisibleFlag());
 	TestFalse(TEXT("The grid can't be pointed at"), Rig->GetCellFromWorldRay(Origin, ToGridCentre, Cell));
 	TestFalse(TEXT("Nor the quick slots"), Rig->GetQuickSlotFromWorldRay(Origin, DirectionToGridPoint(QuickSlotCentre), QuickSlot));
-	TestFalse(TEXT("Nor the button"), Rig->IsDropBackpackButtonOnWorldRay(Origin, DirectionToGridPoint(ButtonCentre)));
+	int32 Button = INDEX_NONE;
+	TestFalse(TEXT("Nor the buttons"), Rig->GetButtonFromWorldRay(Origin, DirectionToGridPoint(ButtonCentre), Button));
 	TestTrue(TEXT("The hands' cells can"), Rig->GetHandSlotFromWorldRay(Origin, DirectionToGridPoint(Rig->GetHandSlotCentre(AFSInventoryRig::LeftHandSlot)), HandSlot));
 
 	UFSItemDefinition* Backpack = MakeBackpack(Cube);
@@ -1656,7 +1659,7 @@ bool FFSBackpackRigTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Turned by the item's rotation"), Rig->GetPack()->GetRelativeRotation().Equals(Backpack->InventoryMeshTransform.Rotator(), 0.001f));
 	TestTrue(TEXT("The grid shows"), Rig->GetGrid()->GetVisibleFlag());
 	TestTrue(TEXT("The quick slots show"), Rig->GetQuickSlots()->GetVisibleFlag());
-	TestTrue(TEXT("The button shows"), Rig->GetDropBackpackButton()->GetVisibleFlag());
+	TestTrue(TEXT("The buttons show"), Rig->GetButtons()->GetVisibleFlag());
 	TestTrue(TEXT("The hands' cells still show"), Rig->GetHandSlots()->GetVisibleFlag());
 	TestTrue(TEXT("The grid can be pointed at"), Rig->GetCellFromWorldRay(Origin, ToGridCentre, Cell));
 	TestTrue(TEXT("So can the quick slots"), Rig->GetQuickSlotFromWorldRay(Origin, DirectionToGridPoint(QuickSlotCentre), QuickSlot));
@@ -1670,6 +1673,173 @@ bool FFSBackpackRigTest::RunTest(const FString& Parameters)
 	TestNull(TEXT("Dropping it removes the pack mesh"), Rig->GetPack()->GetStaticMesh().Get());
 	TestFalse(TEXT("And hides the grid again"), Rig->GetGrid()->GetVisibleFlag());
 	TestTrue(TEXT("But not the hands' cells"), Rig->GetHandSlots()->GetVisibleFlag());
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSOrganizeGridTest, "Fellowship.Inventory.Organizing.GridHoldsItemsLikeTheBackpacks", TestFlags)
+
+bool FFSOrganizeGridTest::RunTest(const FString& Parameters)
+{
+	FInventoryPlayerTestWorld Test(false);
+	UFSInventoryComponent* Inventory = Test.Inventory;
+	const FIntPoint Cell(11, 0);
+
+	UFSItemDefinition* Small = MakeItem(FIntPoint(1, 1));
+	UFSItemDefinition* Sword = MakeItem(SwordSize);
+
+	TestFalse(TEXT("There's nothing to organize without a backpack"), Inventory->StartOrganizing());
+	TestFalse(TEXT("So it doesn't start"), Inventory->IsOrganizing());
+
+	Inventory->EquipBackpack(MakeBackpack());
+	Inventory->AddItem(Small);
+
+	Inventory->CarryNewItem(Sword);
+	TestTrue(TEXT("Before organizing, the grid isn't there to place in"), Inventory->GetCarriedItemPlacement(Cell, EFSItemGrid::Organize) == EFSItemPlacement::Blocked);
+
+	TestTrue(TEXT("With one, it starts"), Inventory->StartOrganizing());
+	TestFalse(TEXT("Only the once"), Inventory->StartOrganizing());
+	TestEqual(TEXT("The grid is 12 by 12"), Inventory->GetGrid(EFSItemGrid::Organize).GetSize(), FIntPoint(12, 12));
+
+	TestTrue(TEXT("A long item can't hang off it"), Inventory->GetCarriedItemPlacement(Cell, EFSItemGrid::Organize) == EFSItemPlacement::Blocked);
+	TestTrue(TEXT("It can go where it fits"), Inventory->PlaceCarriedItem(FIntPoint(0, 0), EFSItemGrid::Organize));
+	TestFalse(TEXT("Which takes it off the cursor"), Inventory->IsCarryingItem());
+	TestEqual(TEXT("It's in that grid"), Inventory->GetItems(EFSItemGrid::Organize).Num(), 1);
+	TestEqual(TEXT("And not the backpack's"), Inventory->GetItems().Num(), 1);
+	TestTrue(TEXT("It can be found there"), Inventory->FindItemAt(FIntPoint(0, 0), EFSItemGrid::Organize)->Definition == Sword);
+	TestTrue(TEXT("The backpack's cell is its own"), Inventory->FindItemAt(FIntPoint(0, 0))->Definition == Small);
+
+	TestTrue(TEXT("The backpack's item can be picked up"), Inventory->PickUpItemAt(FIntPoint(0, 0)));
+	TestTrue(TEXT("And land on an item in the other grid, which swaps them"), Inventory->GetCarriedItemPlacement(FIntPoint(0, 0), EFSItemGrid::Organize) == EFSItemPlacement::Swap);
+	TestTrue(TEXT("It goes in"), Inventory->PlaceCarriedItem(FIntPoint(0, 0), EFSItemGrid::Organize));
+	TestTrue(TEXT("Taking the other's place"), Inventory->GetCarriedItem().Definition == Sword);
+	Inventory->PlaceCarriedItem(FIntPoint(0, 0));
+	TestEqual(TEXT("The other goes in the backpack"), Inventory->GetItems().Num(), 1);
+
+	TArray<FFSInventoryItem> Left;
+	TestTrue(TEXT("It stops"), Inventory->StopOrganizing(Left));
+	TestEqual(TEXT("Handing over what was left"), Left.Num(), 1);
+	TestTrue(TEXT("Which is the right item"), Left[0].Definition == Small);
+	TestFalse(TEXT("It's stopped"), Inventory->IsOrganizing());
+	TestEqual(TEXT("Nothing stays"), Inventory->GetItems(EFSItemGrid::Organize).Num(), 0);
+	TestFalse(TEXT("And there's nothing more to stop"), Inventory->StopOrganizing(Left));
+	TestTrue(TEXT("It starts empty next time"), Inventory->StartOrganizing() && Inventory->GetItems(EFSItemGrid::Organize).IsEmpty());
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSOrganizeLeavingTest, "Fellowship.Inventory.Organizing.LeavingDropsWhatsInTheGrid", TestFlags)
+
+bool FFSOrganizeLeavingTest::RunTest(const FString& Parameters)
+{
+	FInventoryPlayerTestWorld Test(false);
+	UFSInventoryComponent* Inventory = Test.Inventory;
+	AFSPlayerController* Controller = Test.Controller;
+	UFSItemDefinition* Sword = MakeItem(SwordSize, LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube")));
+
+	const auto PutInOrganizeGrid = [&](const FIntPoint& Cell)
+	{
+		Inventory->CarryNewItem(Sword);
+		Controller->SelectInventoryOrganizeCell(Cell);
+	};
+
+	Inventory->EquipBackpack(MakeBackpack());
+	Test.OpenInventory();
+
+	Controller->SelectInventoryButton(AFSInventoryRig::OrganizeBackpackButton);
+	TestTrue(TEXT("The button starts organizing"), Inventory->IsOrganizing());
+	TestTrue(TEXT("Which the rig follows"), Controller->GetInventoryRig()->IsOrganizing());
+
+	PutInOrganizeGrid(FIntPoint(0, 0));
+	PutInOrganizeGrid(FIntPoint(3, 0));
+	TestEqual(TEXT("Both are in the grid"), Inventory->GetItems(EFSItemGrid::Organize).Num(), 2);
+	TestEqual(TEXT("Each with a mesh"), Controller->GetInventoryRig()->GetItemMeshes().Num(), 2);
+
+	Controller->SelectInventoryOrganizeCell(FIntPoint(0, 0));
+	TestTrue(TEXT("Selecting one picks it up"), Inventory->IsCarryingItem());
+	Controller->SelectInventoryOrganizeCell(FIntPoint(0, 0));
+	TestFalse(TEXT("And again puts it down"), Inventory->IsCarryingItem());
+
+	// Held on the cursor, which the button leaves alone
+	Inventory->CarryNewItem(Sword);
+	Controller->SelectInventoryButton(AFSInventoryRig::OrganizeBackpackButton);
+	TestFalse(TEXT("The button also stops it"), Inventory->IsOrganizing());
+	TestFalse(TEXT("Which the rig follows"), Controller->GetInventoryRig()->IsOrganizing());
+	TestEqual(TEXT("Dropping what's in the grid"), Test.CountPickups(), 2);
+	TestTrue(TEXT("While the cursor keeps what it holds"), Inventory->IsCarryingItem());
+	TestEqual(TEXT("And the meshes go"), Controller->GetInventoryRig()->GetItemMeshes().Num(), 0);
+	Inventory->ClearCarriedItem();
+
+	// Closing the inventory
+	Controller->SelectInventoryButton(AFSInventoryRig::OrganizeBackpackButton);
+	PutInOrganizeGrid(FIntPoint(0, 0));
+	Controller->CloseInventory();
+	TestFalse(TEXT("Closing stops it"), Inventory->IsOrganizing());
+	TestEqual(TEXT("Dropping what's in the grid"), Test.CountPickups(), 3);
+
+	// Being pulled out of the inventory by something else. A timer manager won't tick twice in the same frame, and the first tick only starts timers that were just set.
+	const auto NextFrame = [&Test]()
+	{
+		++GFrameCounter;
+		Test.World->GetTimerManager().Tick(0.0f);
+		++GFrameCounter;
+		Test.World->GetTimerManager().Tick(2.0f);
+		++GFrameCounter;
+	};
+
+	NextFrame();
+	Test.OpenInventory();
+	++GFrameCounter;
+	Controller->SelectInventoryButton(AFSInventoryRig::OrganizeBackpackButton);
+	PutInOrganizeGrid(FIntPoint(0, 0));
+	Controller->UnPossess();
+	TestFalse(TEXT("Losing the character stops it"), Inventory->IsOrganizing());
+	TestEqual(TEXT("Dropping what's in the grid"), Test.CountPickups(), 4);
+	Controller->Possess(Test.Character);
+
+	// Dropping the backpack
+	NextFrame();
+	Test.OpenInventory();
+	Controller->SelectInventoryButton(AFSInventoryRig::OrganizeBackpackButton);
+	PutInOrganizeGrid(FIntPoint(0, 0));
+	Controller->SelectInventoryButton(AFSInventoryRig::DropBackpackButton);
+	TestFalse(TEXT("Dropping the backpack stops it"), Inventory->IsOrganizing());
+	TestFalse(TEXT("As well as dropping it"), Inventory->HasBackpack());
+	TestEqual(TEXT("Dropping the backpack and what's in the grid"), Test.CountPickups(), 6);
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSInventoryButtonsTest, "Fellowship.Inventory.Backpack.ButtonsDoWhatTheySay", TestFlags)
+
+bool FFSInventoryButtonsTest::RunTest(const FString& Parameters)
+{
+	FInventoryPlayerTestWorld Test(false);
+	UFSInventoryComponent* Inventory = Test.Inventory;
+	AFSPlayerController* Controller = Test.Controller;
+
+	UFSItemDefinition* Backpack = MakeBackpack();
+	UFSItemDefinition* Sword = MakeItem(SwordSize);
+	Inventory->EquipBackpack(Backpack);
+	Inventory->CarryNewItem(Sword);
+
+	Controller->SelectInventoryButton(AFSInventoryRig::DropBackpackButton);
+	TestTrue(TEXT("With the inventory closed, no button does anything"), Inventory->HasBackpack());
+
+	Test.OpenInventory();
+
+	for (const int32 Button : { AFSInventoryRig::UseItemButton, AFSInventoryRig::OrganizeBackpackButton, AFSInventoryRig::OrganizeBackpackButton })
+	{
+		Controller->SelectInventoryButton(Button);
+		TestTrue(TEXT("It leaves the backpack on"), Inventory->GetBackpack() == Backpack);
+		TestTrue(TEXT("It doesn't toss what's carried, as selecting outside the grid would"), Inventory->IsCarryingItem() && Inventory->GetCarriedItem().Definition == Sword);
+		TestEqual(TEXT("Nothing lands on the ground"), Test.CountPickups(), 0);
+	}
+
+	Controller->SelectInventoryButton(AFSInventoryRig::DropBackpackButton);
+	TestFalse(TEXT("Drop Backpack drops it"), Inventory->HasBackpack());
+	TestEqual(TEXT("It's on the ground"), Test.CountPickups(), 1);
+	TestTrue(TEXT("While the cursor keeps what it holds"), Inventory->IsCarryingItem());
 
 	return true;
 }
@@ -1742,7 +1912,9 @@ bool FFSInventoryRigCarriedSwayTest::RunTest(const FString& Parameters)
 
 	const auto PointAt = [Rig](const FVector2D& Point)
 	{
-		const FVector FromCamera = FRotator(-20.0, 0.0, 0.0).RotateVector(FVector(GridDistanceForTests, Point.X, Point.Y));
+		// The display moves away from the camera to fit a wide backpack on the screen, so a point on it looks closer to the middle
+		const FVector2D OnScreen = Point * Rig->GetDisplayScale();
+		const FVector FromCamera = FRotator(-20.0, 0.0, 0.0).RotateVector(FVector(GridDistanceForTests, OnScreen.X, OnScreen.Y));
 		Rig->SetCursorRay(Rig->GetActorLocation(), Rig->GetActorRotation().RotateVector(FromCamera).GetSafeNormal());
 	};
 

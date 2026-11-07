@@ -48,10 +48,10 @@ AFSItemPickup::AFSItemPickup()
 	Mesh->SetCanEverAffectNavigation(false);
 }
 
-AFSItemPickup* AFSItemPickup::DropAtFeet(TSubclassOf<AFSItemPickup> PickupClass, UFSItemDefinition* DroppedItem, const ACharacter& Character)
+AFSItemPickup* AFSItemPickup::DropAtFeet(TSubclassOf<AFSItemPickup> PickupClass, UFSItemDefinition* DroppedItem, const ACharacter& Character, const FVector2D& Spread)
 {
 	UWorld* World = Character.GetWorld();
-	const FVector CharacterLocation = Character.GetActorLocation();
+	const FVector CharacterLocation = Character.GetActorLocation() + FVector(Spread.X, Spread.Y, 0.0);
 	FVector Feet = CharacterLocation - FVector(0.0, 0.0, Character.GetCapsuleComponent()->GetScaledCapsuleHalfHeight());
 
 	// The character is in the air if they were knocked off a ledge while the inventory was open

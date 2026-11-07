@@ -27,8 +27,8 @@ class FELLOWSHIP_API AFSItemPickup : public AActor
 public:
 	AFSItemPickup();
 
-	// Leaves an item lying on the floor under a character's feet. Returns null if it couldn't be spawned.
-	static AFSItemPickup* DropAtFeet(TSubclassOf<AFSItemPickup> PickupClass, UFSItemDefinition* DroppedItem, const ACharacter& Character);
+	// Leaves an item lying on the floor under a character's feet, or this far across the floor from them. Returns null if it couldn't be spawned.
+	static AFSItemPickup* DropAtFeet(TSubclassOf<AFSItemPickup> PickupClass, UFSItemDefinition* DroppedItem, const ACharacter& Character, const FVector2D& Spread = FVector2D::ZeroVector);
 
 	virtual void OnConstruction(const FTransform& Transform) override;
 

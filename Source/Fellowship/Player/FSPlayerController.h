@@ -122,6 +122,12 @@ public:
 	// What selecting an armor slot's cell does in the open inventory: puts the carried item in that slot if it's armor of that type, taking what it held onto the cursor
 	void SelectInventoryArmorSlot(EFSArmorType ArmorType);
 
+	// What selecting a cell of the organizing grid does in the open inventory: picks up the item there or places the carried one
+	void SelectInventoryOrganizeCell(const FIntPoint& Cell);
+
+	// What selecting one of AFSInventoryRig's buttons does in the open inventory. Using an item doesn't do anything yet.
+	void SelectInventoryButton(int32 Button);
+
 	// Turns the carried item a quarter turn clockwise, if the inventory is open and an item is carried
 	void RotateCarriedInventoryItem();
 
@@ -136,6 +142,9 @@ protected:
 private:
 	void ToggleInventory();
 	void SelectAtInventoryCursor();
+
+	// Closes the organizing grid, leaving what's in it on the ground
+	void StopOrganizing();
 	void TossCarriedItem();
 	void RefreshInventoryView();
 

@@ -184,7 +184,9 @@ void AFSHUD::DrawInventorySlotNames()
 		DrawSlotName(UFSInventoryComponent::GetQuickSlotName(AFSInventoryRig::GetQuickSlotOfIndex(QuickSlot)), Rig->GetQuickSlotLabelLocation(QuickSlot));
 	}
 
-	DrawSlotName(LOCTEXT("DropBackpackButton", "Drop Backpack"), Rig->GetDropBackpackButtonLabelLocation());
+	DrawSlotName(LOCTEXT("DropBackpackButton", "Drop Backpack"), Rig->GetButtonLabelLocation(AFSInventoryRig::DropBackpackButton));
+	DrawSlotName(LOCTEXT("UseItemButton", "Use Item"), Rig->GetButtonLabelLocation(AFSInventoryRig::UseItemButton));
+	DrawSlotName(Rig->IsOrganizing() ? LOCTEXT("StopOrganizingButton", "Stop Organizing") : LOCTEXT("OrganizeBackpackButton", "Organize Backpack"), Rig->GetButtonLabelLocation(AFSInventoryRig::OrganizeBackpackButton));
 }
 
 void AFSHUD::DrawShadedRing(const FVector2D& Centre, float Radius, const UFSItemDefinition* Item)

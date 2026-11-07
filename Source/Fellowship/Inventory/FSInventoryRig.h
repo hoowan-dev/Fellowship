@@ -22,10 +22,13 @@ struct FFSInventoryItem;
 enum class EFSHand : uint8;
 enum class EFSQuickSlot : uint8;
 enum class EFSArmorType : uint8;
+enum class EFSItemGrid : uint8;
 
 /**
  * What the player sees with the inventory open: a first person camera looking at the held backpack, with the grid floating between them,
- * the player's forearms raised either side of it with a large cell over each hand, a cell for each quick slot above it, and a button below it that drops the backpack.
+ * the player's forearms raised either side of it with a large cell over each hand, a cell for each quick slot above it, and a row of buttons below it.
+ * While organizing, all of that slides to the left to make room for a second grid on the right.
+ * The display moves away from the camera by however much it takes to keep every box on a 16:9 screen.
  * Without a backpack only the forearms and the hands' cells are there.
  * Exists only on the owning client. The grid's cells run from (0, 0) at the top left.
  */
@@ -61,6 +64,12 @@ public:
 	static constexpr int32 LeftQuickSlot = 0;
 	static constexpr int32 RightQuickSlot = 1;
 	static constexpr int32 QuickSlotCount = 2;
+
+	// The buttons below the grid, from left to right
+	static constexpr int32 DropBackpackButton = 0;
+	static constexpr int32 UseItemButton = 1;
+	static constexpr int32 OrganizeBackpackButton = 2;
+	static constexpr int32 ButtonCount = 3;
 
 	// Which of the inventory's quick slots an instance of the quick slots is for
 	static EFSQuickSlot GetQuickSlotOfIndex(int32 QuickSlotIndex);
@@ -108,13 +117,19 @@ public:
 	// Highlights an armor slot, showing whether the carried item would go in it, swap with what's there or isn't allowed there. INDEX_NONE clears the highlight.
 	void SetHoveredArmorSlot(int32 ArmorSlot);
 
-	// Whether a world space ray passes through the button that drops the backpack. There's no button without a backpack.
-	bool IsDropBackpackButtonOnWorldRay(const FVector& RayOrigin, const FVector& RayDirection) const;
+	// Finds the button a world space ray passes through. Returns false if it misses them all. There are no buttons without a backpack.
+	bool GetButtonFromWorldRay(const FVector& RayOrigin, const FVector& RayDirection, int32& OutButton) const;
 
-	// Highlights the button that drops the backpack, or clears the highlight
-	void SetDropBackpackButtonHovered(bool bHovered);
+	// Finds the cell of the organizing grid a world space ray passes through. Returns false if it misses, or if the player isn't organizing.
+	bool GetOrganizeCellFromWorldRay(const FVector& RayOrigin, const FVector& RayDirection, FIntPoint& OutCell) const;
 
-	FORCEINLINE bool IsDropBackpackButtonHovered() const { return bDropBackpackButtonHovered; }
+	// Highlights a cell of the organizing grid, and any item it covers, or previews where the carried item would go. Cells outside that grid clear the highlight.
+	void SetHoveredOrganizeCell(const FIntPoint& Cell);
+
+	// Highlights a button. INDEX_NONE clears the highlight.
+	void SetHoveredButton(int32 Button);
+
+	FORCEINLINE int32 GetHoveredButton() const { return HoveredButton; }
 
 	// Moves the light and the carried item to where the mouse points, given as a world space ray. The carried item leans the way the point has been moving on tick.
 	void SetCursorRay(const FVector& RayOrigin, const FVector& RayDirection);
@@ -132,6 +147,9 @@ public:
 	// Where an item's mesh sits relative to the grid, fitted to the cells it covers
 	FTransform GetItemTransform(const FFSInventoryItem& Item) const;
 
+	// The same for an item in the organizing grid
+	FTransform GetOrganizeItemTransform(const FFSInventoryItem& Item) const;
+
 	// Where a carried item's mesh sits relative to the grid, with the top left of its cells at a point on the grid. It's closer to the camera
 	// than every item in the grid, and shrunk by just enough to look the same size and in the same place as if it were on the grid.
 	FTransform GetCarriedItemTransform(const FFSInventoryItem& Item, const FVector2D& GridPoint) const;
@@ -142,6 +160,17 @@ public:
 	FORCEINLINE int32 GetHoveredHandSlot() const { return HoveredHandSlot; }
 	FORCEINLINE UPointLightComponent* GetCursorLight() const { return CursorLight; }
 	FORCEINLINE const FIntPoint& GetHoveredCell() const { return HoveredCell; }
+	FORCEINLINE const FIntPoint& GetHoveredOrganizeCell() const { return HoveredOrganizeCell; }
+	FORCEINLINE UInstancedStaticMeshComponent* GetOrganizeGrid() const { return OrganizeGrid; }
+
+	// Whether the last inventory shown was being organized
+	FORCEINLINE bool IsOrganizing() const { return bOrganizing; }
+
+	// How far the display is across the screen right now, in cm of the display. On screen, that's this much smaller.
+	FORCEINLINE double GetDisplaySlide() const { return DisplaySlide; }
+
+	// How big the plane of the grid looks right now, as a fraction of how big it looks at its usual distance
+	FORCEINLINE double GetDisplayScale() const { return DisplayScale; }
 	FORCEINLINE UInstancedStaticMeshComponent* GetGrid() const { return Grid; }
 	FORCEINLINE UInstancedStaticMeshComponent* GetItemBorders() const { return ItemBorders; }
 	FORCEINLINE int32 GetCellIndex(const FIntPoint& Cell) const { return Cell.Y * GridWidth + Cell.X; }
@@ -159,9 +188,9 @@ public:
 
 	// How far the carried item is leaning, in degrees: X to the right and Y up
 	FORCEINLINE const FVector2D& GetCarriedItemSway() const { return CarriedItemSway; }
-	FORCEINLINE UInstancedStaticMeshComponent* GetDropBackpackButton() const { return DropBackpackButton; }
+	FORCEINLINE UInstancedStaticMeshComponent* GetButtons() const { return Buttons; }
 
-	// Whether the last inventory shown had a backpack, which is what the grid, quick slots and button belong to. True until one is shown.
+	// Whether the last inventory shown had a backpack, which is what the grid, quick slots and buttons belong to. True until one is shown.
 	FORCEINLINE bool HasBackpack() const { return bHasBackpack; }
 
 	// The centre of a hand's cell on the plane of the grid, in cm from the grid's centre: X to the right and Y up
@@ -182,11 +211,14 @@ public:
 	// The point in the world to centre an armor slot's name on, just above its cell
 	FVector GetArmorSlotLabelLocation(int32 ArmorSlot) const;
 
-	// The centre of the button that drops the backpack on the plane of the grid, in cm from the grid's centre: X to the right and Y up
-	FVector2D GetDropBackpackButtonCentre() const;
+	// The centre of a button on the plane of the grid, in cm from the grid's centre: X to the right and Y up
+	FVector2D GetButtonCentre(int32 Button) const;
 
-	// The point in the world to centre the button's label on
-	FVector GetDropBackpackButtonLabelLocation() const;
+	// The point in the world to centre a button's label on
+	FVector GetButtonLabelLocation(int32 Button) const;
+
+	// How far the middle of the organizing grid is to the right of the middle of the grid, just clear of the right hand's cell. It slides along with everything else, starting off screen.
+	double GetOrganizeGridOffset() const;
 
 protected:
 	virtual void BeginPlay() override;
@@ -195,7 +227,8 @@ protected:
 	void BuildHandSlots();
 	void BuildQuickSlots();
 	void BuildArmorSlots();
-	void BuildDropBackpackButton();
+	void BuildButtons();
+	void BuildOrganizeGrid();
 	// Matches the arms to the character, or to what's worn on its body
 	void RefreshArmsMesh();
 
@@ -208,7 +241,7 @@ protected:
 	// Shows the grid and everything on it if the display is showing and it's scaled in, except for what needs a backpack when there isn't one
 	void UpdateGridVisibility();
 
-	void AddItemBorder(const FFSInventoryItem& Item);
+	void AddItemBorder(const FFSInventoryItem& Item, const FVector2D& TopLeft);
 
 	// Borders a hand or quick slot in the colour of what's in it. An empty slot gets none.
 	void AddSlotBorder(const FFSInventoryItem& Item, const FVector2D& SlotCentre, double SlotSize);
@@ -220,7 +253,30 @@ protected:
 	bool GetGridPointFromWorldRay(const FVector& RayOrigin, const FVector& RayDirection, FVector2D& OutGridPoint) const;
 	FIntPoint GetCellFromGridPoint(const FVector2D& GridPoint) const;
 	FTransform GetItemTransformAt(const FFSInventoryItem& Item, const FVector2D& TopLeft) const;
-	void HighlightCells(TArray<FIntPoint>&& Cells, int32 CellData);
+	// Matches the highlight on one of the grids to a newly hovered cell
+	void UpdateCellHighlight(UInstancedStaticMeshComponent& Cells, EFSItemGrid Which, const FIntPoint& NewCell, FIntPoint& Hovered, TArray<FIntPoint>& Highlighted, int32& HighlightedData);
+
+	// The top left of an item's cells on the plane of the grid, in cm from the grid's centre: X to the right and Y up
+	FVector2D GetItemTopLeft(const FFSInventoryItem& Item) const;
+	FVector2D GetOrganizeItemTopLeft(const FFSInventoryItem& Item) const;
+
+	bool IsCellInOrganizeGrid(const FIntPoint& Cell) const;
+	FIntPoint GetOrganizeCellFromGridPoint(const FVector2D& GridPoint) const;
+
+	// Where the display goes to keep every box on the screen, either at rest or making room for the organizing grid: how far across it is, and how big it looks
+	void GetDisplayLayout(bool bForOrganizing, double& OutSlide, double& OutScale) const;
+
+	// How much further from the camera something at a depth in the display is than the grid is
+	double GetDepthRatio(double Depth) const;
+
+	// How far something at a depth has to move across the display to stay lined up with the grid on screen. Sliding the display moves everything the same distance, which looks like less the further away it is.
+	double GetSlideCorrection(double Depth) const;
+
+	// Puts the display where the slide has got to, and everything that has to stay lined up with its cell as it goes
+	void ApplySlide();
+
+	// Where the slot items rest depends on the slide
+	void UpdateSlotItemRests();
 	FTransform GetSlotItemTransform(const FFSInventoryItem& Item, const FVector2D& SlotCentre, double SlotSize) const;
 	FVector GetSlotLabelLocation(const FVector2D& SlotCentre, double SlotSize) const;
 	FVector GetLocationOnGrid(const FVector2D& GridPoint) const;
@@ -301,7 +357,10 @@ protected:
 
 	// A wide cell below the grid that drops the backpack when selected. Attached to the grid so it scales in and out along with it.
 	UPROPERTY(VisibleAnywhere, Category = "Inventory")
-	TObjectPtr<UInstancedStaticMeshComponent> DropBackpackButton;
+	TObjectPtr<UInstancedStaticMeshComponent> Buttons;
+
+	UPROPERTY(VisibleAnywhere, Category = "Inventory")
+	TObjectPtr<UInstancedStaticMeshComponent> OrganizeGrid;
 
 	// Fills the screen just behind the grid and everything on it, shading the arms, the pack and the world beyond them
 	UPROPERTY(VisibleAnywhere, Category = "Inventory")
@@ -450,16 +509,35 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Armor Slots", meta = (Units = cm))
 	float ArmorSlotHeight = 0.0f;
 
-	// Wide enough for its label
-	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Drop Backpack Button", meta = (ClampMin = "0.1", Units = cm))
-	float DropBackpackButtonWidth = 12.0f;
+	// Wide enough for the longest label
+	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Buttons", meta = (ClampMin = "0.1", Units = cm))
+	float ButtonWidth = 16.0f;
 
-	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Drop Backpack Button", meta = (ClampMin = "0.1", Units = cm))
-	float DropBackpackButtonHeight = 2.5f;
+	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Buttons", meta = (ClampMin = "0.1", Units = cm))
+	float ButtonHeight = 2.5f;
 
-	// Between the bottom of the grid and the button
-	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Drop Backpack Button", meta = (ClampMin = "0.0", Units = cm))
-	float DropBackpackButtonGap = 1.0f;
+	// Between the bottom of the grid and the buttons
+	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Buttons", meta = (ClampMin = "0.0", Units = cm))
+	float ButtonGap = 1.0f;
+
+	// Between one button and the next
+	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Buttons", meta = (ClampMin = "0.0", Units = cm))
+	float ButtonSpacing = 1.0f;
+
+	// How far across from the middle of the screen the boxes can go, at the grid's usual distance. 90 degrees across makes the edge of the screen 40cm away.
+	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Layout", meta = (ClampMin = "1.0", Units = cm))
+	float ScreenHalfWidth = 39.0f;
+
+	// How far up and down from the middle of the screen they can go. A 16:9 screen's edge is 22.5cm away.
+	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Layout", meta = (ClampMin = "1.0", Units = cm))
+	float ScreenHalfHeight = 22.0f;
+
+	// Between the right hand's cell and the organizing grid
+	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Organizing", meta = (ClampMin = "0.0", Units = cm))
+	float OrganizeGridGap = 1.0f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Organizing", meta = (ClampMin = "0.01", Units = s))
+	float OrganizeSlideTime = 0.35f;
 
 	// From the camera to the centre of the pack
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Pack", meta = (ClampMin = "1.0", Units = cm))
@@ -507,7 +585,25 @@ private:
 	// Which of the cell custom data values the hovered armor slot has set
 	int32 HoveredArmorSlotData = CellHoveredData;
 
-	bool bDropBackpackButtonHovered = false;
+	int32 HoveredButton = INDEX_NONE;
+
+	FIntPoint HoveredOrganizeCell = FIntPoint(INDEX_NONE, INDEX_NONE);
+	TArray<FIntPoint> HighlightedOrganizeCells;
+	int32 HighlightedOrganizeCellData = CellHoveredData;
+
+	bool bOrganizing = false;
+
+	// How far through the slide the display is, from 0 at rest to 1 making room for the organizing grid
+	float SlideAmount = 0.0f;
+
+	double DisplaySlide = 0.0;
+	double DisplayScale = 1.0;
+
+	// How far the display is further from the camera than usual, which is what makes it look smaller
+	double DisplayDepth = 0.0;
+
+	// Where the pack sits with the display at rest
+	FVector PackRestLocation = FVector::ZeroVector;
 
 	bool bHasBackpack = true;
 
