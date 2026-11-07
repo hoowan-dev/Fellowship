@@ -85,12 +85,15 @@ protected:
 	void Move(const FInputActionValue& Value);
 	void Look(const FInputActionValue& Value);
 
-	// Lets go of the surface while climbing, otherwise jumps
-	void JumpOrLetGo();
-
 	void ToggleWeaponsDrawn();
 
 public:
+	// What pressing jump does: lets go of the surface while climbing, grabs one that's in reach while in the air, and otherwise jumps.
+	// Unless it let go, keeping it held grips onto surfaces that come into reach, until StopJumping. A press in the air also grabs if one becomes grabbable just afterwards.
+	void JumpOrClimb();
+
+	virtual void StopJumping() override;
+
 	// Called every frame
 	virtual void Tick(float DeltaTime) override;
 

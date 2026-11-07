@@ -181,7 +181,7 @@ void AFSCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompone
 
 	if (JumpAction)
 	{
-		EnhancedInput->BindAction(JumpAction, ETriggerEvent::Started, this, &AFSCharacter::JumpOrLetGo);
+		EnhancedInput->BindAction(JumpAction, ETriggerEvent::Started, this, &AFSCharacter::JumpOrClimb);
 		EnhancedInput->BindAction(JumpAction, ETriggerEvent::Completed, this, &ACharacter::StopJumping);
 	}
 
@@ -225,15 +225,35 @@ void AFSCharacter::ToggleWeaponsDrawn()
 	Equipment->ToggleDrawn();
 }
 
-void AFSCharacter::JumpOrLetGo()
+void AFSCharacter::JumpOrClimb()
 {
 	UFSCharacterMovementComponent* Movement = GetCharacterMovement<UFSCharacterMovementComponent>();
 	if (Movement && Movement->IsClimbing())
 	{
-		Movement->StopClimbing();
+		Movement->LetGoUntilGripReleased();
 		return;
 	}
 
+	if (Movement)
+	{
+		Movement->HoldClimbGrip();
+
+		if (Movement->TryGrabClimbSurface())
+		{
+			return;
+		}
+	}
+
 	Jump();
+}
+
+void AFSCharacter::StopJumping()
+{
+	Super::StopJumping();
+
+	if (UFSCharacterMovementComponent* Movement = GetCharacterMovement<UFSCharacterMovementComponent>())
+	{
+		Movement->ReleaseClimbGrip();
+	}
 }
 

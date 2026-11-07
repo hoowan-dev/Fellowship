@@ -74,7 +74,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Movement: Climbing", meta = (ClampMin = "0.0", UIMin = "0.0", ForceUnits = "cm"))
 	float ClimbAttachDistance = 30.0f;
 
-	// How far input can point away from straight into a surface and still start climbing it.
+	// How far input can point away from straight into a surface and still start climbing it. With no input, it's how far the character can face away from it.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Movement: Climbing", meta = (ClampMin = "0.0", ClampMax = "90.0", UIMin = "0.0", UIMax = "90.0", ForceUnits = "deg"))
 	float ClimbAttachInputAngle = 60.0f;
 
@@ -106,13 +106,25 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Movement: Climbing", meta = (ClampMin = "0.0", UIMin = "0.0"))
 	float ClimbNormalInterpSpeed = 10.0f;
 
-	// How quickly the character turns to face the surface.
+	// How quickly the character turns to face the surface and tilts to lie along it.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Movement: Climbing", meta = (ClampMin = "0.0", UIMin = "0.0"))
 	float ClimbRotationInterpSpeed = 10.0f;
 
 	// How long after leaving a surface before the character can grab one again.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Movement: Climbing", meta = (ClampMin = "0.0", UIMin = "0.0", ForceUnits = "s"))
 	float ClimbReattachDelay = 0.4f;
+
+	// How long after releasing the jump press that let go of a surface before the character can grab one again, on top of Climb Reattach Delay.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Movement: Climbing", meta = (ClampMin = "0.0", UIMin = "0.0", ForceUnits = "s"))
+	float ClimbGripReleaseBuffer = 0.15f;
+
+	// How long jump has to be held before it grips onto surfaces that come into reach. Keeps a quick tap next to a wall a jump rather than a grab.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Movement: Climbing", meta = (ClampMin = "0.0", UIMin = "0.0", ForceUnits = "s"))
+	float ClimbGripHoldDelay = 0.15f;
+
+	// How long a jump press in the air keeps trying to grab, held or not, if there's nothing to grab yet. Presses on the ground don't, so they stay jumps.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Movement: Climbing", meta = (ClampMin = "0.0", UIMin = "0.0", ForceUnits = "s"))
+	float ClimbGrabBufferTime = 0.2f;
 
 	// How far ahead of the capsule a surface can be to start turning onto it at an inside corner.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Movement: Climbing", meta = (ClampMin = "0.0", UIMin = "0.0", ForceUnits = "cm"))
@@ -134,7 +146,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Movement: Climbing", meta = (ClampMin = "0.0", UIMin = "0.0", ForceUnits = "cm"))
 	float ClimbDismountArmHeight = 30.0f;
 
-	// In the air, draws the grab traces (green grabs, yellow is refused and says why, orange misses) and why a grab can't be attempted.
+	// In the air, draws a point on what pressing jump would grab, the grab traces (green grabs, yellow is refused and says why, orange misses) and why a grab can't be attempted.
 	// While climbing, draws the sensing traces (green is used, red isn't), the capsule, the surface normal (blue) and up and right axes (green, red), and the speed and surface angle.
 	// Marks where the character grabbed on and let go, and why it let go. Not available in Shipping builds.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Movement: Climbing")
@@ -175,20 +187,35 @@ public:
 	// Direction along the climbed surface that points as far upwards as the surface allows
 	FVector GetClimbUpDirection() const;
 
+	// Finds what the character could grab right now: a climbable surface in reach while it's in the air, that input is pushing it into or with no input, that it's facing
+	bool FindClimbGrab(FHitResult& OutHit);
+
+	// Starts climbing what FindClimbGrab finds. Returns false, changing nothing, if there's nothing to grab.
+	bool TryGrabClimbSurface();
+
+	// Jump was pressed: for a moment if in the air, and for as long as it stays held, the character grabs what FindClimbGrab finds
+	void HoldClimbGrip();
+
+	// Jump was pressed to let go: holding it doesn't grip, and releasing it starts Climb Grip Release Buffer
+	void LetGoUntilGripReleased();
+
+	// Jump was released
+	void ReleaseClimbGrip();
+
 	// Where the skeletal mesh has been and is predicted to go if the current input is held, updated every tick after movement.
 	// In the format the Pose History node expects: world space, oldest first, with time 0 being the previous frame.
 	const FTransformTrajectory& GetTrajectory() const { return Trajectory; }
 
 protected:
 	virtual FRotator ComputeOrientToMovementRotation(const FRotator& CurrentRotation, float DeltaTime, FRotator& DeltaRotation) const override;
-	virtual void UpdateCharacterStateBeforeMovement(float DeltaSeconds) override;
 	virtual void OnMovementModeChanged(EMovementMode PreviousMovementMode, uint8 PreviousCustomMode) override;
+	virtual void UpdateCharacterStateBeforeMovement(float DeltaSeconds) override;
 	virtual void PhysCustom(float DeltaTime, int32 Iterations) override;
 	virtual void PhysicsRotation(float DeltaTime) override;
 
 private:
-	// Starts climbing if input is pushing the airborne character into a climbable surface
-	void TryStartClimbing();
+	// Marks the point FindClimbGrab finds, which is what pressing jump would grab right now
+	void DrawDebugClimbGrab();
 
 	void PhysClimbing(float DeltaTime);
 
@@ -266,12 +293,14 @@ private:
 	void UpdateClimbLedge(float DeltaTime);
 
 	bool ClimbLineTrace(FHitResult& OutHit, const FVector& Start, const FVector& End) const;
-	bool ClimbCapsuleSweep(FHitResult& OutHit, const FVector& Start, const FVector& End) const;
+
+	// Sweeps the capsule tilted to lie along a surface with this normal
+	bool ClimbCapsuleSweep(FHitResult& OutHit, const FVector& Start, const FVector& End, const FVector& Normal) const;
 
 	// Whether a surface can be turned onto from the current one, as opposed to being a continuation of it or doubling back on it
 	bool IsClimbCornerNormal(const FVector& Normal) const;
 
-	// The character's rotation after turning towards the current surface for this frame. Only its yaw follows the surface.
+	// The character's rotation after turning towards the current surface for this frame. Its yaw and pitch follow the surface, tilting the capsule with it.
 	FQuat GetClimbFacingRotation(float DeltaTime) const;
 
 	void DrawDebugClimbing() const;
@@ -311,6 +340,16 @@ private:
 
 	// World time at which the character can next grab a surface
 	double NextClimbAttachTime = 0.0;
+
+	// Whether jump is being held to grip, and when holding it starts to count
+	bool bHoldingClimbGrip = false;
+	double ClimbGripStartTime = 0.0;
+
+	// World time until which the last press in the air keeps trying to grab
+	double ClimbGrabBufferEndTime = 0.0;
+
+	// Whether the jump press that let go of a surface hasn't been released yet
+	bool bLetGoPressHeld = false;
 
 	// Unscaled half height to restore when climbing ends
 	float StandingCapsuleHalfHeight = 0.0f;
