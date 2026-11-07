@@ -494,6 +494,16 @@ bool UFSCharacterMovementComponent::ClimbLineTrace(FHitResult& OutHit, const FVe
 	return IsClimbableHit(OutHit);
 }
 
+bool UFSCharacterMovementComponent::TraceClimbableSurface(FHitResult& OutHit, const FVector& Start, const FVector& End) const
+{
+	return ClimbLineTrace(OutHit, Start, End) && IsClimbableNormal(OutHit.ImpactNormal);
+}
+
+bool UFSCharacterMovementComponent::TraceLedgeSurface(FHitResult& OutHit, const FVector& Start, const FVector& End) const
+{
+	return ClimbLineTrace(OutHit, Start, End);
+}
+
 bool UFSCharacterMovementComponent::ClimbCapsuleSweep(FHitResult& OutHit, const FVector& Start, const FVector& End, const FVector& Normal) const
 {
 	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(ClimbCorner), false, CharacterOwner);
@@ -679,6 +689,7 @@ bool UFSCharacterMovementComponent::TryStartClimbLedge(double SurfaceDistance)
 	}
 
 	FClimbLedgePath Path;
+	Path.Edge = FVector(SurfacePoint.X, SurfacePoint.Y, GroundHit.ImpactPoint.Z);
 	Path.StartLocation = Center;
 	Path.EndLocation = FVector(StandPoint.X, StandPoint.Y, GroundHit.Location.Z - Radius + StandingHalfHeight + MAX_FLOOR_DIST);
 	Path.RaisedLocation = FVector(Center.X, Center.Y, FMath::Max(Center.Z, Path.EndLocation.Z));
@@ -723,6 +734,12 @@ void UFSCharacterMovementComponent::UpdateClimbLedge(float DeltaTime)
 	}
 
 	DrawDebugClimbing();
+}
+
+float UFSCharacterMovementComponent::GetClimbLedgeProgress() const
+{
+	const double Length = FVector::Dist(ClimbLedgePath.StartLocation, ClimbLedgePath.RaisedLocation) + FVector::Dist(ClimbLedgePath.RaisedLocation, ClimbLedgePath.EndLocation);
+	return Length > 0.0 ? FMath::Min(static_cast<float>(ClimbLedgePath.Distance / Length), 1.0f) : 1.0f;
 }
 
 FVector UFSCharacterMovementComponent::FClimbLedgePath::GetLocation() const

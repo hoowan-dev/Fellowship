@@ -12,6 +12,7 @@
  */
 class UAnimSequenceBase;
 class UFSCharacterMovementComponent;
+class UFSClimbIKComponent;
 class UFSEquipmentComponent;
 class UPoseSearchDatabase;
 struct FAnimNode_MotionMatching;
@@ -47,9 +48,17 @@ class FELLOWSHIP_API UFSCharacterAnimInstance : public UAnimInstance
 	float ClimbMoveAmount = 0.0f;
 
 	// Degrees the climbed surface leans from vertical: positive is an overhang leaning over the character, negative is a slope leaning away.
-	// The capsule stays upright while climbing, so use this to tilt the mesh onto the surface. Zero when not climbing.
+	// The character already tilts onto the surface while climbing, so this is for leaning the pose. Zero when not climbing.
 	UPROPERTY(Transient, BlueprintReadOnly, Category = "Climbing", meta = (AllowPrivateAccess = "true"))
 	float ClimbSurfaceLean = 0.0f;
+
+	// How strongly the hands and feet are planted on the surface. Connect to the Alpha pin of the IK Rig node.
+	UPROPERTY(Transient, BlueprintReadOnly, Category = "Climbing", meta = (AllowPrivateAccess = "true"))
+	float ClimbIKAlpha = 0.0f;
+
+	// How strongly the spine bends towards the hands while getting over a ledge. Connect to the Alpha pin of the IK Rig node for the ledge bend.
+	UPROPERTY(Transient, BlueprintReadOnly, Category = "Climbing", meta = (AllowPrivateAccess = "true"))
+	float ClimbLedgeBendAlpha = 0.0f;
 
 	UPROPERTY(Transient, BlueprintReadOnly, Category = "Equipment", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UAnimSequenceBase> JumpStart;
@@ -65,6 +74,9 @@ class FELLOWSHIP_API UFSCharacterAnimInstance : public UAnimInstance
 
 	UPROPERTY(Transient)
 	TObjectPtr<const UFSEquipmentComponent> Equipment;
+
+	UPROPERTY(Transient)
+	TObjectPtr<const UFSClimbIKComponent> ClimbIK;
 
 	// What the Motion Matching node was last told to search. Null until a stance with a database applies, when the node uses the database set on it.
 	UPROPERTY(Transient)

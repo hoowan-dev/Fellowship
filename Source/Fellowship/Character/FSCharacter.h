@@ -10,6 +10,7 @@ class USpringArmComponent;
 class UCameraComponent;
 class AFSItemPickup;
 class AFSPlayerController;
+class UFSClimbIKComponent;
 class UFSEquipmentComponent;
 class UFSStatsComponent;
 class UInputAction;
@@ -36,6 +37,10 @@ public:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Stats", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UFSStatsComponent> Stats;
+
+	// Plants the hands and feet on the surface while climbing
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Climbing", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UFSClimbIKComponent> ClimbIK;
 
 public:
 

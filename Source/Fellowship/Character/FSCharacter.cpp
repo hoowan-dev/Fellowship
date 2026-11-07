@@ -5,6 +5,7 @@
 #include "GameFramework/SpringArmComponent.h"
 #include "Camera/CameraComponent.h"
 #include "FSCharacterMovementComponent.h"
+#include "Character/FSClimbIKComponent.h"
 #include "Character/FSEquipmentComponent.h"
 #include "Character/FSStatsComponent.h"
 #include "Inventory/FSItemPickup.h"
@@ -45,6 +46,7 @@ AFSCharacter::AFSCharacter(const FObjectInitializer& ObjectInitializer)
 
 	Equipment = CreateDefaultSubobject<UFSEquipmentComponent>(TEXT("Equipment"));
 	Stats = CreateDefaultSubobject<UFSStatsComponent>(TEXT("Stats"));
+	ClimbIK = CreateDefaultSubobject<UFSClimbIKComponent>(TEXT("ClimbIK"));
 }
 
 // Called when the game starts or when spawned

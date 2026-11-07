@@ -4,6 +4,7 @@
 #include "FSCharacterAnimInstance.h"
 #include "FSCharacterMovementComponent.h"
 #include "Character/FSCharacter.h"
+#include "Character/FSClimbIKComponent.h"
 #include "Character/FSEquipmentComponent.h"
 #include "Animation/AnimClassInterface.h"
 #include "GameFramework/Character.h"
@@ -20,6 +21,7 @@ void UFSCharacterAnimInstance::NativeInitializeAnimation()
 
 	const AFSCharacter* FSCharacter = Cast<AFSCharacter>(Character);
 	Equipment = FSCharacter ? FSCharacter->GetEquipment() : nullptr;
+	ClimbIK = Character ? Character->FindComponentByClass<UFSClimbIKComponent>() : nullptr;
 
 	// Found by name because the node's struct isn't exported from its module
 	MotionMatchingNode = nullptr;
@@ -63,6 +65,9 @@ void UFSCharacterAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 		JumpAir = nullptr;
 		JumpEnd = nullptr;
 	}
+
+	ClimbIKAlpha = ClimbIK ? ClimbIK->GetAlpha() : 0.0f;
+	ClimbLedgeBendAlpha = ClimbIK ? ClimbIK->GetLedgeBendAlpha() : 0.0f;
 
 	if (MovementComponent)
 	{

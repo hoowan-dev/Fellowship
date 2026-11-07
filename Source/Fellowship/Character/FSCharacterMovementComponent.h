@@ -56,7 +56,7 @@ public:
 
 	// Fastest speed along a climbed surface.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Movement: Climbing", meta = (ClampMin = "0.0", UIMin = "0.0", ForceUnits = "cm/s"))
-	float ClimbSpeed = 150.0f;
+	float ClimbSpeed = 50.0f;
 
 	// How quickly the character speeds up along a climbed surface.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Movement: Climbing", meta = (ClampMin = "0.0", UIMin = "0.0", ForceUnits = "cm/s^2"))
@@ -140,7 +140,7 @@ public:
 
 	// How quickly the character moves along its path up and over a ledge once its top half is above it. Once started, the path always finishes unless the character lets go.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Movement: Climbing", meta = (ClampMin = "1.0", UIMin = "1.0", ForceUnits = "cm/s"))
-	float ClimbLedgeSpeed = 200.0f;
+	float ClimbLedgeSpeed = 100.0f;
 
 	// How far above the floor the character's standing feet have to get before reaching the floor climbs off onto it. Keeps a grab made from the ground from ending straight away.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Movement: Climbing", meta = (ClampMin = "0.0", UIMin = "0.0", ForceUnits = "cm"))
@@ -186,6 +186,18 @@ public:
 
 	// Direction along the climbed surface that points as far upwards as the surface allows
 	FVector GetClimbUpDirection() const;
+
+	// Finds the first thing on a line, returning whether it's a surface that can be climbed
+	bool TraceClimbableSurface(FHitResult& OutHit, const FVector& Start, const FVector& End) const;
+
+	// Finds the first thing on a line, returning whether it can be stood on or held while getting over a ledge. Unlike a climbable surface, it can be walkable.
+	bool TraceLedgeSurface(FHitResult& OutHit, const FVector& Start, const FVector& End) const;
+
+	// The middle of the top of the surface where the character is getting over it. Only meaningful while climbing onto a ledge.
+	FVector GetClimbLedgeEdge() const { return ClimbLedgePath.Edge; }
+
+	// How far along its path over a ledge the character is, from 0 to 1. Only meaningful while climbing onto a ledge.
+	float GetClimbLedgeProgress() const;
 
 	// Finds what the character could grab right now: a climbable surface in reach while it's in the air, that input is pushing it into or with no input, that it's facing
 	bool FindClimbGrab(FHitResult& OutHit);
@@ -281,6 +293,7 @@ private:
 		FVector StartLocation = FVector::ZeroVector;
 		FVector RaisedLocation = FVector::ZeroVector;
 		FVector EndLocation = FVector::ZeroVector;
+		FVector Edge = FVector::ZeroVector;
 		double Distance = 0.0;
 
 		FVector GetLocation() const;
