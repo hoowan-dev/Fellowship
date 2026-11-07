@@ -20,6 +20,7 @@ class UStaticMeshComponent;
 struct FFSInventoryItem;
 enum class EFSHand : uint8;
 enum class EFSQuickSlot : uint8;
+enum class EFSArmorType : uint8;
 
 /**
  * What the player sees with the inventory open: a first person camera looking at the held backpack, with the grid floating between them,
@@ -39,7 +40,13 @@ public:
 	static constexpr int32 CellCanPlaceData = 2;
 	static constexpr int32 CellCannotPlaceData = 3;
 	static constexpr int32 CellCanSwapData = 4;
-	static constexpr int32 CellDataCount = 5;
+
+	// The first of the three values for the red, green and blue of the rarity of the item in a cell, which only matter while it's taken
+	static constexpr int32 CellItemColorData = 5;
+	static constexpr int32 CellDataCount = 8;
+
+	// Each border bar's custom data is its colour's red, green and blue, which M_InventoryItemBorder reads
+	static constexpr int32 BorderDataCount = 3;
 
 	// The instance of the hand slots each hand's cell is
 	static constexpr int32 LeftHandSlot = 0;
@@ -56,6 +63,12 @@ public:
 
 	// Which of the inventory's quick slots an instance of the quick slots is for
 	static EFSQuickSlot GetQuickSlotOfIndex(int32 QuickSlotIndex);
+
+	// There's a cell for each type of armor, and an instance of the armor slots is that type's value
+	static constexpr int32 ArmorSlotCount = 3;
+
+	// Which of the inventory's armor slots an instance of the armor slots is for
+	static EFSArmorType GetArmorTypeOfSlot(int32 ArmorSlot);
 
 	AFSInventoryRig();
 
@@ -88,6 +101,12 @@ public:
 	// Highlights a quick slot, showing whether the carried item would go in it or swap with what's there. INDEX_NONE clears the highlight.
 	void SetHoveredQuickSlot(int32 QuickSlot);
 
+	// Finds the armor slot a world space ray passes through. Returns false if it misses them all. They're there without a backpack.
+	bool GetArmorSlotFromWorldRay(const FVector& RayOrigin, const FVector& RayDirection, int32& OutArmorSlot) const;
+
+	// Highlights an armor slot, showing whether the carried item would go in it, swap with what's there or isn't allowed there. INDEX_NONE clears the highlight.
+	void SetHoveredArmorSlot(int32 ArmorSlot);
+
 	// Whether a world space ray passes through the button that drops the backpack. There's no button without a backpack.
 	bool IsDropBackpackButtonOnWorldRay(const FVector& RayOrigin, const FVector& RayDirection) const;
 
@@ -107,6 +126,7 @@ public:
 
 	// Where a quick slot's item's mesh sits relative to the grid, upright and fitted to the slot's cell
 	FTransform GetQuickSlotItemTransform(const FFSInventoryItem& Item, int32 QuickSlot) const;
+	FTransform GetArmorSlotItemTransform(const FFSInventoryItem& Item, int32 ArmorSlot) const;
 
 	// Where an item's mesh sits relative to the grid, fitted to the cells it covers
 	FTransform GetItemTransform(const FFSInventoryItem& Item) const;
@@ -128,6 +148,9 @@ public:
 	FORCEINLINE UInstancedStaticMeshComponent* GetQuickSlots() const { return QuickSlots; }
 	FORCEINLINE UStaticMeshComponent* GetQuickSlotItemMesh(int32 QuickSlot) const { return QuickSlot == LeftQuickSlot ? LeftQuickSlotItemMesh : RightQuickSlotItemMesh; }
 	FORCEINLINE int32 GetHoveredQuickSlot() const { return HoveredQuickSlot; }
+	FORCEINLINE UInstancedStaticMeshComponent* GetArmorSlots() const { return ArmorSlots; }
+	FORCEINLINE UStaticMeshComponent* GetArmorSlotItemMesh(int32 ArmorSlot) const { return ArmorSlotItemMeshes[ArmorSlot]; }
+	FORCEINLINE int32 GetHoveredArmorSlot() const { return HoveredArmorSlot; }
 	FORCEINLINE UPoseableMeshComponent* GetArms() const { return Arms; }
 	FORCEINLINE UStaticMeshComponent* GetPack() const { return Pack; }
 	FORCEINLINE UStaticMeshComponent* GetBackgroundDarkener() const { return BackgroundDarkener; }
@@ -146,11 +169,17 @@ public:
 	// The centre of a quick slot's cell on the plane of the grid, in cm from the grid's centre: X to the right and Y up
 	FVector2D GetQuickSlotCentre(int32 QuickSlot) const;
 
+	// The centre of an armor slot's cell on the plane of the grid, in cm from the grid's centre: X to the right and Y up
+	FVector2D GetArmorSlotCentre(int32 ArmorSlot) const;
+
 	// The point in the world to centre a hand slot's name on, just above its cell
 	FVector GetHandSlotLabelLocation(int32 HandSlot) const;
 
 	// The point in the world to centre a quick slot's name on, just above its cell
 	FVector GetQuickSlotLabelLocation(int32 QuickSlot) const;
+
+	// The point in the world to centre an armor slot's name on, just above its cell
+	FVector GetArmorSlotLabelLocation(int32 ArmorSlot) const;
 
 	// The centre of the button that drops the backpack on the plane of the grid, in cm from the grid's centre: X to the right and Y up
 	FVector2D GetDropBackpackButtonCentre() const;
@@ -164,17 +193,23 @@ protected:
 	void BuildGrid();
 	void BuildHandSlots();
 	void BuildQuickSlots();
+	void BuildArmorSlots();
 	void BuildDropBackpackButton();
 	void PoseArms();
 	void PoseArm(bool bLeft);
 
-	// Shows the backpack's mesh in the background, turned by its Inventory Mesh Rotation. Null shows nothing.
+	// Shows the backpack's mesh in the background, placed by its Inventory Mesh Transform. Null shows nothing.
 	void FitPackMesh(const UFSItemDefinition* Backpack);
 
 	// Shows the grid and everything on it if the display is showing and it's scaled in, except for what needs a backpack when there isn't one
 	void UpdateGridVisibility();
 
 	void AddItemBorder(const FFSInventoryItem& Item);
+
+	// Borders a hand or quick slot in the colour of what's in it. An empty slot gets none.
+	void AddSlotBorder(const FFSInventoryItem& Item, const FVector2D& SlotCentre, double SlotSize);
+
+	void AddBorder(double Left, double Top, double Width, double Height, double Thickness, const FLinearColor& Color);
 	bool IsCellInGrid(const FIntPoint& Cell) const;
 
 	// Finds where a world space ray meets the plane of the grid, in cm from the grid's centre: X to the right and Y up. Returns false if it never does.
@@ -202,7 +237,7 @@ protected:
 	FQuat GetSlotItemSwayRotation(double Phase) const;
 
 	// Moves a highlight between the cells of one kind of slot. Hovered and HoveredData are that kind's record of what it has set.
-	void SetHoveredSlot(UInstancedStaticMeshComponent& Slots, int32& Hovered, int32& HoveredData, int32 NewHovered, bool bNewHoveredTaken);
+	void SetHoveredSlot(UInstancedStaticMeshComponent& Slots, int32& Hovered, int32& HoveredData, int32 NewHovered, bool bNewHoveredTaken, bool bNewHoveredBlocked = false);
 
 	UPROPERTY(VisibleAnywhere, Category = "Inventory")
 	TObjectPtr<USceneComponent> Root;
@@ -252,6 +287,14 @@ protected:
 	UPROPERTY(VisibleAnywhere, Category = "Inventory")
 	TObjectPtr<UStaticMeshComponent> RightQuickSlotItemMesh;
 
+	// A cell for each armor slot, in a column left of the left hand. Attached to the grid so they scale in and out along with it, but they stay without a backpack.
+	UPROPERTY(VisibleAnywhere, Category = "Inventory")
+	TObjectPtr<UInstancedStaticMeshComponent> ArmorSlots;
+
+	// Attached to the grid so they scale in and out along with it. They have no mesh while their slot is empty.
+	UPROPERTY(VisibleAnywhere, Category = "Inventory")
+	TObjectPtr<UStaticMeshComponent> ArmorSlotItemMeshes[ArmorSlotCount];
+
 	// A wide cell below the grid that drops the backpack when selected. Attached to the grid so it scales in and out along with it.
 	UPROPERTY(VisibleAnywhere, Category = "Inventory")
 	TObjectPtr<UInstancedStaticMeshComponent> DropBackpackButton;
@@ -281,7 +324,7 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Grid")
 	TObjectPtr<UMaterialInterface> ItemBorderMaterial;
 
-	// How wide the border around an item is. It's drawn inside the cells the item covers.
+	// How wide the border around an item on the grid is. It's drawn inside the cells the item covers.
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Grid", meta = (ClampMin = "0.01", Units = cm))
 	float ItemBorderThickness = 0.3f;
 
@@ -388,6 +431,21 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Quick Slots", meta = (ClampMin = "0.0", Units = cm))
 	float QuickSlotGap = 1.5f;
 
+	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Armor Slots", meta = (ClampMin = "0.1", Units = cm))
+	float ArmorSlotSize = 7.5f;
+
+	// Between the left hand's cell and the armor slots' cells
+	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Armor Slots", meta = (ClampMin = "0.0", Units = cm))
+	float ArmorSlotGap = 1.5f;
+
+	// Between one armor slot's cell and the next, which has to leave room for the name above each
+	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Armor Slots", meta = (ClampMin = "0.0", Units = cm))
+	float ArmorSlotSpacing = 2.5f;
+
+	// How far the middle of the column of armor slots is above the middle of the grid
+	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Armor Slots", meta = (Units = cm))
+	float ArmorSlotHeight = 0.0f;
+
 	// Wide enough for its label
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Drop Backpack Button", meta = (ClampMin = "0.1", Units = cm))
 	float DropBackpackButtonWidth = 12.0f;
@@ -437,6 +495,11 @@ private:
 	// Which of the cell custom data values the hovered quick slot has set
 	int32 HoveredQuickSlotData = CellHoveredData;
 
+	int32 HoveredArmorSlot = INDEX_NONE;
+
+	// Which of the cell custom data values the hovered armor slot has set
+	int32 HoveredArmorSlotData = CellHoveredData;
+
 	bool bDropBackpackButtonHovered = false;
 
 	bool bHasBackpack = true;
@@ -472,6 +535,7 @@ private:
 	// Where the items in the hands and quick slots sit, which they sway about
 	FTransform HandItemRests[HandSlotCount];
 	FTransform QuickSlotItemRests[QuickSlotCount];
+	FTransform ArmorSlotItemRests[ArmorSlotCount];
 	double SlotItemSwayTime = 0.0;
 
 	// Made from BackgroundDarkenMaterial, so the rig can fade it

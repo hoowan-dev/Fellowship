@@ -45,6 +45,9 @@ namespace
 	const FLinearColor BorderLitColor(1.0f, 1.0f, 1.0f, 0.35f);
 	const FLinearColor BorderShadowColor(0.0f, 0.0f, 0.0f, 0.6f);
 
+	// How bright the shadowed side of a ring around an item is, as a fraction of the lit side
+	constexpr float ItemRingShadow = 0.4f;
+
 	// The size inside a stat bar's border. Narrow enough that the row stays clear of the event log on a screen 1280 wide.
 	constexpr float StatBarWidth = 200.0f;
 	constexpr float StatBarHeight = 16.0f;
@@ -128,7 +131,7 @@ void AFSHUD::DrawEquipmentSlots()
 
 void AFSHUD::DrawEquipmentSlot(const FVector2D& Centre, const UFSItemDefinition* Item, const FText& SlotName)
 {
-	DrawShadedRing(Centre, AFSEquipmentDisplay::SlotRadius);
+	DrawShadedRing(Centre, AFSEquipmentDisplay::SlotRadius, Item);
 
 	const double NameDistance = AFSEquipmentDisplay::SlotRadius + BorderThickness + EquipmentSlotNameOffset;
 
@@ -166,6 +169,11 @@ void AFSHUD::DrawInventorySlotNames()
 		DrawSlotName(UFSInventoryComponent::GetHandSlotName(AFSInventoryRig::GetHandOfSlot(HandSlot)), Rig->GetHandSlotLabelLocation(HandSlot));
 	}
 
+	for (int32 ArmorSlot = 0; ArmorSlot < AFSInventoryRig::ArmorSlotCount; ++ArmorSlot)
+	{
+		DrawSlotName(UFSInventoryComponent::GetArmorSlotName(AFSInventoryRig::GetArmorTypeOfSlot(ArmorSlot)), Rig->GetArmorSlotLabelLocation(ArmorSlot));
+	}
+
 	if (!Rig->HasBackpack())
 	{
 		return;
@@ -179,14 +187,17 @@ void AFSHUD::DrawInventorySlotNames()
 	DrawSlotName(LOCTEXT("DropBackpackButton", "Drop Backpack"), Rig->GetDropBackpackButtonLabelLocation());
 }
 
-void AFSHUD::DrawShadedRing(const FVector2D& Centre, float Radius)
+void AFSHUD::DrawShadedRing(const FVector2D& Centre, float Radius, const UFSItemDefinition* Item)
 {
+	const FLinearColor LitColor = Item ? UFSItemDefinition::GetRarityColor(Item->Rarity) : BorderLitColor;
+	const FLinearColor ShadowColor = Item ? FLinearColor(LitColor.R * ItemRingShadow, LitColor.G * ItemRingShadow, LitColor.B * ItemRingShadow) : BorderShadowColor;
+
 	// The light comes from the top left of the screen, the same as on the event log's border
-	const auto GetBorderColor = [](const FVector2D& Direction)
+	const auto GetBorderColor = [&LitColor, &ShadowColor](const FVector2D& Direction)
 	{
 		const FVector2D TowardsLight = FVector2D(-1.0, -1.0).GetSafeNormal();
 		const float Shade = 0.5f - 0.5f * static_cast<float>(FVector2D::DotProduct(Direction, TowardsLight));
-		return FMath::Lerp(BorderLitColor, BorderShadowColor, Shade);
+		return FMath::Lerp(LitColor, ShadowColor, Shade);
 	};
 
 	const auto GetDirection = [](int32 Side)
@@ -319,8 +330,9 @@ void AFSHUD::DrawShadedBorder(float Left, float Top, float Width, float Height)
 
 void AFSHUD::DrawEventLog()
 {
+	const AFSPlayerController* PlayerController = Cast<AFSPlayerController>(GetOwningPlayerController());
 	const UFSEventLog* EventLog = GetWorld()->GetSubsystem<UFSEventLog>();
-	if (!EventLog)
+	if (!EventLog || !PlayerController || PlayerController->GetInventoryViewState() != EFSInventoryViewState::Closed)
 	{
 		return;
 	}

@@ -77,9 +77,9 @@ public:
 	// The centre of a slot's circle, or of the compass's case, on the screen, in pixels
 	static FVector2D GetSlotCentre(const FVector2D& ViewportSize, EFSEquipmentSlot Slot);
 
-	// Places a mesh turned by MeshRotation relative to the camera, so that it's centred on a point and fits inside a circle facing the camera there.
-	// The mesh is fitted with FittedScale applied to it, and SlotScale then scales the result.
-	static FTransform GetMeshTransform(const UStaticMesh& Mesh, const FRotator& MeshRotation, const FQuat& CameraRotation, const FVector& Centre, double Radius, const FVector& FittedScale = FVector::OneVector, const FVector& SlotScale = FVector::OneVector);
+	// Places a mesh by an item's Inventory Mesh Transform relative to the camera, so that it's centred on a point and fits inside a circle facing the camera there.
+	// The scale makes it bigger or smaller on top of that fit, unless bFillCircle is set, which keeps its proportions from the scale but not its size.
+	static FTransform GetMeshTransform(const UStaticMesh& Mesh, const FTransform& MeshTransform, const FQuat& CameraRotation, const FVector& Centre, double Radius, bool bFillCircle = false);
 
 	// How the north half of the needle turns relative to the camera, for a camera with this yaw. Its +Z points up the screen when the camera faces north, which is +X in the world.
 	static FQuat GetCompassNeedleRotation(double CameraYaw);

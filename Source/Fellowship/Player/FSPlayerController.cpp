@@ -121,6 +121,12 @@ const FFSInventoryItem* AFSPlayerController::GetHoveredInventoryItem() const
 		return QuickSlotItem.Definition ? &QuickSlotItem : nullptr;
 	}
 
+	if (InventoryRig->GetHoveredArmorSlot() != INDEX_NONE)
+	{
+		const FFSInventoryItem& ArmorItem = Inventory->GetArmorItem(AFSInventoryRig::GetArmorTypeOfSlot(InventoryRig->GetHoveredArmorSlot()));
+		return ArmorItem.Definition ? &ArmorItem : nullptr;
+	}
+
 	return Inventory->FindItemAt(InventoryRig->GetHoveredCell());
 }
 
@@ -157,7 +163,7 @@ void AFSPlayerController::SelectAtInventoryCursor()
 	{
 		UpdateHoveredInventoryCell();
 
-		// Outside the grid means tossing the carried item, so the button, hands and quick slots have to be checked first
+		// Outside the grid means tossing the carried item, so the button and the slots have to be checked first
 		if (InventoryRig->IsDropBackpackButtonHovered())
 		{
 			DropBackpack();
@@ -169,6 +175,10 @@ void AFSPlayerController::SelectAtInventoryCursor()
 		else if (InventoryRig->GetHoveredQuickSlot() != INDEX_NONE)
 		{
 			SelectInventoryQuickSlot(AFSInventoryRig::GetQuickSlotOfIndex(InventoryRig->GetHoveredQuickSlot()));
+		}
+		else if (InventoryRig->GetHoveredArmorSlot() != INDEX_NONE)
+		{
+			SelectInventoryArmorSlot(AFSInventoryRig::GetArmorTypeOfSlot(InventoryRig->GetHoveredArmorSlot()));
 		}
 		else
 		{
@@ -214,6 +224,15 @@ void AFSPlayerController::SelectInventoryQuickSlot(EFSQuickSlot QuickSlot)
 {
 	UFSInventoryComponent* Inventory = GetInventory();
 	if (Inventory && InventoryViewState == EFSInventoryViewState::Open && Inventory->SwapCarriedItemWithQuickSlot(QuickSlot))
+	{
+		RefreshInventoryView();
+	}
+}
+
+void AFSPlayerController::SelectInventoryArmorSlot(EFSArmorType ArmorType)
+{
+	UFSInventoryComponent* Inventory = GetInventory();
+	if (Inventory && InventoryViewState == EFSInventoryViewState::Open && Inventory->SwapCarriedItemWithArmorSlot(ArmorType))
 	{
 		RefreshInventoryView();
 	}
@@ -494,6 +513,7 @@ void AFSPlayerController::UpdateHoveredInventoryCell()
 	FIntPoint Cell(INDEX_NONE, INDEX_NONE);
 	int32 HandSlot = INDEX_NONE;
 	int32 QuickSlot = INDEX_NONE;
+	int32 ArmorSlot = INDEX_NONE;
 	bool bOverDropBackpackButton = false;
 
 	if (DeprojectMousePositionToWorld(RayOrigin, RayDirection))
@@ -502,11 +522,13 @@ void AFSPlayerController::UpdateHoveredInventoryCell()
 		InventoryRig->GetCellFromWorldRay(RayOrigin, RayDirection, Cell);
 		InventoryRig->GetHandSlotFromWorldRay(RayOrigin, RayDirection, HandSlot);
 		InventoryRig->GetQuickSlotFromWorldRay(RayOrigin, RayDirection, QuickSlot);
+		InventoryRig->GetArmorSlotFromWorldRay(RayOrigin, RayDirection, ArmorSlot);
 		InventoryRig->SetCursorRay(RayOrigin, RayDirection);
 	}
 
 	InventoryRig->SetHoveredCell(Cell);
 	InventoryRig->SetHoveredHandSlot(HandSlot);
 	InventoryRig->SetHoveredQuickSlot(QuickSlot);
+	InventoryRig->SetHoveredArmorSlot(ArmorSlot);
 	InventoryRig->SetDropBackpackButtonHovered(bOverDropBackpackButton);
 }

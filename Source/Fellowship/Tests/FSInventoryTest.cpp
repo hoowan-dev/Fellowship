@@ -757,8 +757,12 @@ bool FFSQuickSlotAppearanceTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("It shows the item's mesh"), LeftMesh->GetStaticMesh() == Cube);
 
 	const FVector2D Centre = Rig->GetQuickSlotCentre(AFSInventoryRig::LeftQuickSlot);
-	TestEqual(TEXT("Centred on the slot across the screen"), LeftMesh->GetRelativeLocation().Y, Centre.X, 0.01);
-	TestEqual(TEXT("Centred on the slot up the screen"), LeftMesh->GetRelativeLocation().Z, Centre.Y, 0.01);
+
+	// It's in front of the slot, so this follows the ray from the camera back to the plane of the slot
+	const FVector MeshLocation = LeftMesh->GetRelativeLocation();
+	const double BackToSlot = GridDistanceForTests / (GridDistanceForTests + MeshLocation.X);
+	TestEqual(TEXT("Centred on the slot across the screen"), MeshLocation.Y * BackToSlot, Centre.X, 0.01);
+	TestEqual(TEXT("Centred on the slot up the screen"), MeshLocation.Z * BackToSlot, Centre.Y, 0.01);
 
 	Test.Inventory->SwapCarriedItemWithQuickSlot(EFSQuickSlot::Left);
 	Rig->ShowInventory(*Test.Inventory);
@@ -812,11 +816,11 @@ bool FFSEquipmentDisplayLayoutTest::RunTest(const FString& Parameters)
 
 	const FVector Centre(100.0, 200.0, 300.0);
 	const FQuat Camera = FRotator(-20.0f, 70.0f, 0.0f).Quaternion();
-	const FRotator Turn(0.0f, 45.0f, 0.0f);
+	const FTransform Turn(FRotator(0.0f, 45.0f, 0.0f));
 	const FTransform Placed = AFSEquipmentDisplay::GetMeshTransform(*Cube, Turn, Camera, Centre, 1.0);
 
 	TestTrue(TEXT("The mesh is centred on the point"), Placed.TransformPosition(Cube->GetBounds().Origin).Equals(Centre, 0.001));
-	TestTrue(TEXT("It's turned along with the camera"), Placed.GetRotation().Equals(Camera * Turn.Quaternion(), 0.001));
+	TestTrue(TEXT("It's turned along with the camera"), Placed.GetRotation().Equals(Camera * Turn.GetRotation(), 0.001));
 
 	// Seen from the camera, its corners have to stay inside the circle
 	const double Half = Cube->GetBounds().BoxExtent.X;
@@ -1644,12 +1648,12 @@ bool FFSBackpackRigTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("The hands' cells can"), Rig->GetHandSlotFromWorldRay(Origin, DirectionToGridPoint(Rig->GetHandSlotCentre(AFSInventoryRig::LeftHandSlot)), HandSlot));
 
 	UFSItemDefinition* Backpack = MakeBackpack(Cube);
-	Backpack->InventoryMeshRotation = FRotator(0.0f, -90.0f, 0.0f);
+	Backpack->InventoryMeshTransform.SetRotation(FRotator(0.0f, -90.0f, 0.0f).Quaternion());
 	Inventory->EquipBackpack(Backpack);
 	Rig->ShowInventory(*Inventory);
 
 	TestTrue(TEXT("The pack mesh comes from the item"), Rig->GetPack()->GetStaticMesh() == Cube);
-	TestTrue(TEXT("Turned by the item's rotation"), Rig->GetPack()->GetRelativeRotation().Equals(Backpack->InventoryMeshRotation, 0.001f));
+	TestTrue(TEXT("Turned by the item's rotation"), Rig->GetPack()->GetRelativeRotation().Equals(Backpack->InventoryMeshTransform.Rotator(), 0.001f));
 	TestTrue(TEXT("The grid shows"), Rig->GetGrid()->GetVisibleFlag());
 	TestTrue(TEXT("The quick slots show"), Rig->GetQuickSlots()->GetVisibleFlag());
 	TestTrue(TEXT("The button shows"), Rig->GetDropBackpackButton()->GetVisibleFlag());
@@ -2045,8 +2049,7 @@ bool FFSDiscardedOffsetTest::RunTest(const FString& Parameters)
 
 	// Twice as long along its Z axis, and then laid on its side so that it's as tall as it was
 	UFSItemDefinition* Item = MakeItem(SwordSize, Cube);
-	Item->GlobalScale = FVector(1.0, 1.0, 2.0);
-	Item->DiscardedTransformOffset = FTransform(FRotator(90.0f, 0.0f, 0.0f), FVector(0.0, 0.0, 5.0));
+	Item->DiscardedTransform = FTransform(FRotator(90.0f, 0.0f, 0.0f), FVector(0.0, 0.0, 5.0), FVector(1.0, 1.0, 2.0));
 
 	AFSCharacter* Character = Test.SpawnCharacter(FVector(500.0, 200.0, 88.0));
 	Character->SetActorLocation(FVector(500.0, 200.0, Character->GetCapsuleComponent()->GetScaledCapsuleHalfHeight()));
@@ -2087,19 +2090,30 @@ bool FFSInventoryScalesTest::RunTest(const FString& Parameters)
 	const FTransform Grid = Rig->GetItemTransform(Item);
 	const FTransform Slot = Rig->GetHandItemTransform(Item, AFSInventoryRig::LeftHandSlot);
 	const FTransform Quick = Rig->GetQuickSlotItemTransform(Item, AFSInventoryRig::LeftQuickSlot);
-	const FTransform Hud = AFSEquipmentDisplay::GetMeshTransform(*Cube, FRotator::ZeroRotator, FQuat::Identity, FVector::ZeroVector, 1.0);
+	const FTransform Hud = AFSEquipmentDisplay::GetMeshTransform(*Cube, FTransform::Identity, FQuat::Identity, FVector::ZeroVector, 1.0);
 
-	Definition->GlobalScale = FVector(0.5);
-	TestTrue(TEXT("Global scale scales a hand slot's item"), Rig->GetHandItemTransform(Item, AFSInventoryRig::LeftHandSlot).GetScale3D().Equals(Slot.GetScale3D() * 0.5));
+	const FTransform Half(FQuat::Identity, FVector::ZeroVector, FVector(0.5));
+	Definition->InventoryMeshTransform = Half;
+	TestTrue(TEXT("Its scale scales a hand slot's item"), Rig->GetHandItemTransform(Item, AFSInventoryRig::LeftHandSlot).GetScale3D().Equals(Slot.GetScale3D() * 0.5));
 	TestTrue(TEXT("And a quick slot's"), Rig->GetQuickSlotItemTransform(Item, AFSInventoryRig::LeftQuickSlot).GetScale3D().Equals(Quick.GetScale3D() * 0.5));
-	TestTrue(TEXT("And what the HUD shows"), AFSEquipmentDisplay::GetMeshTransform(*Cube, FRotator::ZeroRotator, FQuat::Identity, FVector::ZeroVector, 1.0, FVector::OneVector, FVector(0.5)).GetScale3D().Equals(Hud.GetScale3D() * 0.5));
-	TestTrue(TEXT("But doesn't change the size of an item on the grid"), Rig->GetItemTransform(Item).TransformPosition(FVector(50.0)).Equals(Grid.TransformPosition(FVector(50.0)), 0.001));
+	TestTrue(TEXT("And what the HUD shows"), AFSEquipmentDisplay::GetMeshTransform(*Cube, Half, FQuat::Identity, FVector::ZeroVector, 1.0).GetScale3D().Equals(Hud.GetScale3D() * 0.5));
+	TestTrue(TEXT("Unless it's filling the circle"), AFSEquipmentDisplay::GetMeshTransform(*Cube, Half, FQuat::Identity, FVector::ZeroVector, 1.0, true).GetScale3D().Equals(Hud.GetScale3D()));
+	TestTrue(TEXT("It doesn't change the size of an item on the grid"), Rig->GetItemTransform(Item).TransformPosition(FVector(50.0)).Equals(Grid.TransformPosition(FVector(50.0)), 0.001));
 
-	Definition->GlobalScale = FVector(1.0, 1.0, 2.0);
+	Definition->InventoryMeshTransform = FTransform(FQuat::Identity, FVector::ZeroVector, FVector(1.0, 1.0, 2.0));
 	const FVector OnGrid = Rig->GetItemTransform(Item).GetScale3D();
 	const FVector InSlot = Rig->GetHandItemTransform(Item, AFSInventoryRig::LeftHandSlot).GetScale3D();
 	TestEqual(TEXT("An uneven one changes the proportions on the grid"), OnGrid.Z / OnGrid.X, 2.0, 0.001);
 	TestEqual(TEXT("And in a slot"), InSlot.Z / InSlot.X, 2.0, 0.001);
+
+	// The location moves it by the same fraction of its size wherever it's shown, so it's in units of what the mesh is scaled by there
+	Definition->InventoryMeshTransform = FTransform(FVector(0.0, 10.0, 20.0));
+	const FVector SlotMove = Rig->GetHandItemTransform(Item, AFSInventoryRig::LeftHandSlot).GetLocation() - Slot.GetLocation();
+	TestTrue(TEXT("Its location moves it in a slot"), SlotMove.Equals(FVector(0.0, 10.0, 20.0) * Slot.GetScale3D().X, 0.001));
+	const FVector GridMove = Rig->GetItemTransform(Item).GetLocation() - Grid.GetLocation();
+	TestTrue(TEXT("And on the grid"), GridMove.Equals(FVector(0.0, 10.0, 20.0) * Grid.GetScale3D().X, 0.001));
+	const FVector HudMove = AFSEquipmentDisplay::GetMeshTransform(*Cube, Definition->InventoryMeshTransform, FQuat::Identity, FVector::ZeroVector, 1.0).GetLocation() - Hud.GetLocation();
+	TestTrue(TEXT("And on the HUD"), HudMove.Equals(FVector(0.0, 10.0, 20.0) * Hud.GetScale3D().X, 0.001));
 
 	return true;
 }
@@ -2169,6 +2183,262 @@ bool FFSItemRarityLoggedTest::RunTest(const FString& Parameters)
 		TestEqual(TEXT("And only its name set apart"), Events.Last().ItemName, FString(TEXT("Test Item")));
 		TestEqual(TEXT("From the rest of the message"), Events.Last().Before, FString(TEXT("Picked up ")));
 	}
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSRarityBordersTest, "Fellowship.Inventory.Rarity.BordersTakeTheItemsColor", TestFlags)
+
+bool FFSRarityBordersTest::RunTest(const FString& Parameters)
+{
+	FInventoryTestWorld Test;
+	UFSInventoryComponent* Inventory = Test.Inventory;
+	AFSInventoryRig* Rig = Test.World->SpawnActor<AFSInventoryRig>();
+	const UInstancedStaticMeshComponent* Borders = Rig->GetItemBorders();
+
+	const auto MakeRareItem = [](EFSItemRarity Rarity)
+	{
+		UFSItemDefinition* Item = MakeItem(FIntPoint(1, 1));
+		Item->Rarity = Rarity;
+		return Item;
+	};
+
+	Rig->ShowInventory(*Inventory);
+	TestEqual(TEXT("Empty slots have no border"), Borders->GetInstanceCount(), 0);
+
+	Inventory->AddItem(MakeRareItem(EFSItemRarity::Epic));
+	Inventory->CarryNewItem(MakeRareItem(EFSItemRarity::Legendary));
+	Inventory->SwapCarriedItemWithHand(EFSHand::Left);
+	Inventory->CarryNewItem(MakeRareItem(EFSItemRarity::Uncommon));
+	Inventory->SwapCarriedItemWithQuickSlot(EFSQuickSlot::Right);
+	Rig->ShowInventory(*Inventory);
+
+	// Four bars each: the item on the grid, then the hand's, then the quick slot's
+	if (!TestEqual(TEXT("Each item has four bars"), Borders->GetInstanceCount(), 12))
+	{
+		return false;
+	}
+
+	const auto TestBorder = [this, Borders](const FString& What, int32 FirstBar, EFSItemRarity Rarity)
+	{
+		const FLinearColor Color = UFSItemDefinition::GetRarityColor(Rarity);
+		for (int32 Bar = FirstBar; Bar < FirstBar + 4; ++Bar)
+		{
+			const int32 Data = Bar * AFSInventoryRig::BorderDataCount;
+			TestEqual(What + TEXT(": red"), Borders->PerInstanceSMCustomData[Data], Color.R);
+			TestEqual(What + TEXT(": green"), Borders->PerInstanceSMCustomData[Data + 1], Color.G);
+			TestEqual(What + TEXT(": blue"), Borders->PerInstanceSMCustomData[Data + 2], Color.B);
+		}
+	};
+
+	TestBorder(TEXT("The grid item's border"), 0, EFSItemRarity::Epic);
+	TestBorder(TEXT("The hand's border"), 4, EFSItemRarity::Legendary);
+	TestBorder(TEXT("The quick slot's border"), 8, EFSItemRarity::Uncommon);
+
+	const auto TestCell = [this](const FString& What, const UInstancedStaticMeshComponent* Cells, int32 Cell, EFSItemRarity Rarity)
+	{
+		const FLinearColor Color = UFSItemDefinition::GetRarityColor(Rarity);
+		const int32 Data = Cell * AFSInventoryRig::CellDataCount + AFSInventoryRig::CellItemColorData;
+		TestEqual(What + TEXT(": red"), Cells->PerInstanceSMCustomData[Data], Color.R);
+		TestEqual(What + TEXT(": green"), Cells->PerInstanceSMCustomData[Data + 1], Color.G);
+		TestEqual(What + TEXT(": blue"), Cells->PerInstanceSMCustomData[Data + 2], Color.B);
+	};
+
+	TestCell(TEXT("The grid item's background"), Rig->GetGrid(), Rig->GetCellIndex(FIntPoint(0, 0)), EFSItemRarity::Epic);
+	TestCell(TEXT("The hand's background"), Rig->GetHandSlots(), AFSInventoryRig::LeftHandSlot, EFSItemRarity::Legendary);
+	TestCell(TEXT("The quick slot's background"), Rig->GetQuickSlots(), AFSInventoryRig::RightQuickSlot, EFSItemRarity::Uncommon);
+	TestTrue(TEXT("Borders go over the cells"), Borders->TranslucencySortPriority > Rig->GetHandSlots()->TranslucencySortPriority);
+
+	const auto GetBox = [Borders](int32 FirstBar)
+	{
+		// The engine's plane is 100cm square, centred on its pivot
+		const FBox Plane(FVector(-50.0, -50.0, 0.0), FVector(50.0, 50.0, 0.0));
+		FBox Box(ForceInit);
+		for (int32 Bar = FirstBar; Bar < FirstBar + 4; ++Bar)
+		{
+			FTransform Transform;
+			Borders->GetInstanceTransform(Bar, Transform, false);
+			Box += Plane.TransformBy(Transform);
+		}
+		return Box;
+	};
+
+	const FVector HandCentre = GetBox(4).GetCenter();
+	const FVector2D HandSlot = Rig->GetHandSlotCentre(AFSInventoryRig::LeftHandSlot);
+	TestEqual(TEXT("It's around the hand's slot across the screen"), HandCentre.Y, HandSlot.X, 0.01);
+
+	// The plane's X axis runs up the screen, so this is how thick a bar across the top of the slot is. The cell's lines take up 3% of its width.
+	FTransform HandBar;
+	Borders->GetInstanceTransform(4, HandBar, false);
+	const double HandSlotWidth = GetBox(4).GetSize().Y;
+	TestTrue(TEXT("It covers the line of the hand's cell"), HandBar.GetScale3D().X * 100.0 > HandSlotWidth * 0.03);
+
+	FTransform QuickBar;
+	Borders->GetInstanceTransform(8, QuickBar, false);
+	TestTrue(TEXT("And the quick slot's"), QuickBar.GetScale3D().X * 100.0 > GetBox(8).GetSize().Y * 0.03);
+
+	TestEqual(TEXT("And up the screen"), HandCentre.Z, HandSlot.Y, 0.01);
+
+	const FVector QuickCentre = GetBox(8).GetCenter();
+	const FVector2D QuickSlot = Rig->GetQuickSlotCentre(AFSInventoryRig::RightQuickSlot);
+	TestEqual(TEXT("It's around the quick slot across the screen"), QuickCentre.Y, QuickSlot.X, 0.01);
+	TestEqual(TEXT("And up the screen"), QuickCentre.Z, QuickSlot.Y, 0.01);
+
+	Inventory->SwapCarriedItemWithHand(EFSHand::Left);
+	Rig->ShowInventory(*Inventory);
+	TestEqual(TEXT("Taking an item out of its slot removes the border"), Borders->GetInstanceCount(), 8);
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSArmorSlotRulesTest, "Fellowship.Inventory.Armor.OnlyGoesInItsOwnSlot", TestFlags)
+
+bool FFSArmorSlotRulesTest::RunTest(const FString& Parameters)
+{
+	FInventoryTestWorld Test(false);
+	UFSInventoryComponent* Inventory = Test.Inventory;
+
+	const auto MakeArmor = [](EFSArmorType ArmorType)
+	{
+		UFSItemDefinition* Item = MakeItem(FIntPoint(1, 1));
+		Item->ItemType = EFSItemType::Armor;
+		Item->ArmorType = ArmorType;
+		return Item;
+	};
+
+	UFSItemDefinition* Helmet = MakeArmor(EFSArmorType::Head);
+	UFSItemDefinition* Mask = MakeArmor(EFSArmorType::Face);
+	UFSItemDefinition* Tunic = MakeArmor(EFSArmorType::Body);
+
+	TestFalse(TEXT("Nothing to swap with nothing"), Inventory->SwapCarriedItemWithArmorSlot(EFSArmorType::Head));
+
+	Inventory->CarryNewItem(Helmet);
+	TestFalse(TEXT("Head armor doesn't go on the face"), Inventory->SwapCarriedItemWithArmorSlot(EFSArmorType::Face));
+	TestFalse(TEXT("Or the body"), Inventory->SwapCarriedItemWithArmorSlot(EFSArmorType::Body));
+	TestTrue(TEXT("So it's still carried"), Inventory->GetCarriedItem().Definition == Helmet);
+	TestNull(TEXT("And the face slot is still empty"), Inventory->GetArmorItem(EFSArmorType::Face).Definition.Get());
+
+	TestTrue(TEXT("Without a backpack, it goes on the head"), Inventory->SwapCarriedItemWithArmorSlot(EFSArmorType::Head));
+	TestTrue(TEXT("It's in the slot"), Inventory->GetArmorItem(EFSArmorType::Head).Definition == Helmet);
+	TestFalse(TEXT("And off the cursor"), Inventory->IsCarryingItem());
+
+	Inventory->CarryNewItem(Mask);
+	TestTrue(TEXT("Face armor goes on the face"), Inventory->SwapCarriedItemWithArmorSlot(EFSArmorType::Face));
+	Inventory->CarryNewItem(Tunic);
+	TestTrue(TEXT("Body armor goes on the body"), Inventory->SwapCarriedItemWithArmorSlot(EFSArmorType::Body));
+
+	for (const EFSItemType ItemType : { EFSItemType::Weapon, EFSItemType::Consumable })
+	{
+		UFSItemDefinition* NotArmor = MakeItem(FIntPoint(1, 1));
+		NotArmor->ItemType = ItemType;
+
+		Inventory->CarryNewItem(NotArmor);
+		for (const EFSArmorType ArmorType : { EFSArmorType::Head, EFSArmorType::Face, EFSArmorType::Body })
+		{
+			TestFalse(TEXT("Anything else can't go in an armor slot"), Inventory->SwapCarriedItemWithArmorSlot(ArmorType));
+		}
+		Inventory->ClearCarriedItem();
+	}
+
+	UFSItemDefinition* BetterHelmet = MakeArmor(EFSArmorType::Head);
+	Inventory->CarryNewItem(BetterHelmet);
+	TestTrue(TEXT("Armor swaps with what's on"), Inventory->SwapCarriedItemWithArmorSlot(EFSArmorType::Head));
+	TestTrue(TEXT("The new one is on"), Inventory->GetArmorItem(EFSArmorType::Head).Definition == BetterHelmet);
+	TestTrue(TEXT("And the old one is carried"), Inventory->GetCarriedItem().Definition == Helmet);
+	Inventory->ClearCarriedItem();
+
+	TestTrue(TEXT("An empty cursor takes armor off"), Inventory->SwapCarriedItemWithArmorSlot(EFSArmorType::Body));
+	TestTrue(TEXT("Onto the cursor"), Inventory->GetCarriedItem().Definition == Tunic);
+	TestNull(TEXT("Leaving the slot empty"), Inventory->GetArmorItem(EFSArmorType::Body).Definition.Get());
+	Inventory->ClearCarriedItem();
+
+	Inventory->EquipBackpack(MakeBackpack());
+	FFSBackpackContents Contents;
+	Inventory->RemoveBackpack(Contents);
+	TestTrue(TEXT("Dropping a backpack leaves armor on"), Inventory->GetArmorItem(EFSArmorType::Face).Definition == Mask);
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSArmorSlotRigTest, "Fellowship.Inventory.Armor.SlotsStandBesideTheLeftHandWithoutABackpack", TestFlags)
+
+bool FFSArmorSlotRigTest::RunTest(const FString& Parameters)
+{
+	FInventoryTestWorld Test(false);
+	UFSInventoryComponent* Inventory = Test.Inventory;
+	AFSInventoryRig* Rig = Test.World->SpawnActor<AFSInventoryRig>();
+
+	UStaticMesh* Cube = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
+	if (!TestNotNull(TEXT("The test mesh loads"), Cube))
+	{
+		return false;
+	}
+
+	const int32 Head = static_cast<int32>(EFSArmorType::Head);
+	const int32 Face = static_cast<int32>(EFSArmorType::Face);
+	const int32 Body = static_cast<int32>(EFSArmorType::Body);
+
+	TestEqual(TEXT("A cell for each slot"), Rig->GetArmorSlots()->GetInstanceCount(), AFSInventoryRig::ArmorSlotCount);
+	TestTrue(TEXT("Body is below face"), Rig->GetArmorSlotCentre(Body).Y < Rig->GetArmorSlotCentre(Face).Y);
+	TestTrue(TEXT("Face is below head"), Rig->GetArmorSlotCentre(Face).Y < Rig->GetArmorSlotCentre(Head).Y);
+	TestTrue(TEXT("They're on the left of the left hand"), Rig->GetArmorSlotCentre(Head).X < Rig->GetHandSlotCentre(AFSInventoryRig::LeftHandSlot).X);
+
+	Rig->ShowInventory(*Inventory);
+	Rig->SetPackVisible(true);
+	Rig->SetGridVisible(true);
+	Rig->Tick(1.0f);
+	TestTrue(TEXT("They show without a backpack"), Rig->GetArmorSlots()->GetVisibleFlag());
+
+	const FVector Origin = Rig->GetActorLocation();
+	const auto DirectionToGridPoint = [Rig](const FVector2D& Point)
+	{
+		const FVector FromCamera = FRotator(-20.0, 0.0, 0.0).RotateVector(FVector(GridDistanceForTests, Point.X, Point.Y));
+		return Rig->GetActorRotation().RotateVector(FromCamera).GetSafeNormal();
+	};
+
+	int32 ArmorSlot = INDEX_NONE;
+	TestTrue(TEXT("They can be pointed at without a backpack"), Rig->GetArmorSlotFromWorldRay(Origin, DirectionToGridPoint(Rig->GetArmorSlotCentre(Face)), ArmorSlot));
+	TestEqual(TEXT("It finds the right one"), ArmorSlot, Face);
+	TestFalse(TEXT("And misses when pointed elsewhere"), Rig->GetArmorSlotFromWorldRay(Origin, DirectionToGridPoint(FVector2D(0.0, 0.0)), ArmorSlot));
+
+	const auto IsSet = [Rig](int32 Slot, int32 Data)
+	{
+		return Rig->GetArmorSlots()->PerInstanceSMCustomData[Slot * AFSInventoryRig::CellDataCount + Data] > 0.5f;
+	};
+
+	UFSItemDefinition* Helmet = MakeItem(FIntPoint(1, 1), Cube);
+	Helmet->ItemType = EFSItemType::Armor;
+	Helmet->ArmorType = EFSArmorType::Head;
+	Helmet->Rarity = EFSItemRarity::Rare;
+	Inventory->CarryNewItem(Helmet);
+	Rig->ShowInventory(*Inventory);
+
+	Rig->SetHoveredArmorSlot(Face);
+	TestTrue(TEXT("It shows it can't go in another type's slot"), IsSet(Face, AFSInventoryRig::CellCannotPlaceData));
+
+	Rig->SetHoveredArmorSlot(Head);
+	TestFalse(TEXT("Moving away clears that"), IsSet(Face, AFSInventoryRig::CellCannotPlaceData));
+	TestTrue(TEXT("It shows it can go in its own"), IsSet(Head, AFSInventoryRig::CellCanPlaceData));
+
+	Inventory->SwapCarriedItemWithArmorSlot(EFSArmorType::Head);
+	Rig->ShowInventory(*Inventory);
+
+	TestTrue(TEXT("The slot shows the item's mesh"), Rig->GetArmorSlotItemMesh(Head)->GetStaticMesh() == Cube);
+	TestNull(TEXT("The others stay empty"), Rig->GetArmorSlotItemMesh(Face)->GetStaticMesh().Get());
+	TestTrue(TEXT("Its cell is taken"), IsSet(Head, AFSInventoryRig::CellTakenData));
+	TestEqual(TEXT("It has a border"), Rig->GetItemBorders()->GetInstanceCount(), 4);
+
+	// Seen from the camera, whose position relative to the grid is along -X, it's in the middle of the cell
+	const FVector Camera(-GridDistanceForTests, 0.0, 0.0);
+	const FVector2D HeadCentre = Rig->GetArmorSlotCentre(Head);
+	const FVector ItemCentre = Rig->GetArmorSlotItemTransform(Inventory->GetArmorItem(EFSArmorType::Head), Head).TransformPosition(Cube->GetBounds().Origin);
+	const FVector ToItem = (ItemCentre - Camera).GetSafeNormal();
+	const FVector ToSlot = (FVector(0.0, HeadCentre.X, HeadCentre.Y) - Camera).GetSafeNormal();
+	TestTrue(TEXT("It's centred on its cell from where the player is looking"), ToItem.Equals(ToSlot, 0.001));
+
+	const FLinearColor Rare = UFSItemDefinition::GetRarityColor(EFSItemRarity::Rare);
+	const int32 Color = Head * AFSInventoryRig::CellDataCount + AFSInventoryRig::CellItemColorData;
+	TestEqual(TEXT("And a background in its rarity's colour"), Rig->GetArmorSlots()->PerInstanceSMCustomData[Color], Rare.R);
 
 	return true;
 }

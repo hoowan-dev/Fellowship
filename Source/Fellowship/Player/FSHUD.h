@@ -35,8 +35,8 @@ private:
 	void DrawInventorySlotNames();
 
 	// Draws a shaded ring, whose radius doesn't include its thickness. It's empty in the middle because
-	// the HUD is drawn over the scene, so anything there would cover the mesh.
-	void DrawShadedRing(const FVector2D& Centre, float Radius);
+	// the HUD is drawn over the scene, so anything there would cover the mesh. With an item, it takes the colour of the item's rarity.
+	void DrawShadedRing(const FVector2D& Centre, float Radius, const UFSItemDefinition* Item);
 
 	// Draws the prompt for the nearest pickup above it
 	void DrawPickupPrompt();
@@ -47,7 +47,7 @@ private:
 	// Draws a bar for each of the character's stats at the bottom centre of the screen, side by side with health in the middle
 	void DrawStatBars();
 
-	// Draws the most recent events in the bottom left corner of the screen, newest at the bottom
+	// Draws the most recent events in the bottom left corner of the screen, newest at the bottom, except while the inventory is showing
 	void DrawEventLog();
 
 	// Draws a shaded border around a rectangle

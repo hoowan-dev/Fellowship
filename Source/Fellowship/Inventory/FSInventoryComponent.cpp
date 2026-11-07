@@ -20,7 +20,7 @@ FTransform FFSHungItemMeshes::GetTransform(const UFSItemDefinition& Backpack, co
 	// Weapons point along +Z from their grip, with their crossguards along X. This puts the point down and the crossguard along the backpack's side.
 	const FQuat WeaponHang = FQuat(FVector::RightVector, UE_DOUBLE_PI) * FQuat(FVector::UpVector, UE_DOUBLE_HALF_PI);
 
-	FTransform Transform = FTransform(FQuat::Identity, FVector::ZeroVector, Item.GlobalScale) * FTransform(Item.ItemType == EFSItemType::Weapon ? WeaponHang : FQuat::Identity) * Item.QuickStoredOffsetTransform;
+	FTransform Transform = FTransform(Item.ItemType == EFSItemType::Weapon ? WeaponHang : FQuat::Identity) * Item.QuickStoredTransform;
 	Transform.SetTranslation(FVector::ZeroVector);
 
 	const bool bLeft = QuickSlot == EFSQuickSlot::Left;
@@ -37,7 +37,7 @@ FTransform FFSHungItemMeshes::GetTransform(const UFSItemDefinition& Backpack, co
 	const FBox ItemBox = FBox(ItemBounds.Origin - ItemBounds.BoxExtent, ItemBounds.Origin + ItemBounds.BoxExtent).TransformBy(Transform);
 
 	const FBoxSphereBounds PackBounds = PackMesh->GetBounds();
-	const FBox PackBox = FBox(PackBounds.Origin - PackBounds.BoxExtent, PackBounds.Origin + PackBounds.BoxExtent).TransformBy(FTransform(FQuat::Identity, FVector::ZeroVector, Backpack.GlobalScale));
+	const FBox PackBox(PackBounds.Origin - PackBounds.BoxExtent, PackBounds.Origin + PackBounds.BoxExtent);
 
 	const double Top = PackBox.Min.Z + PackBox.GetSize().Z * Backpack.HungItemHeight;
 	const double Bottom = FMath::Max(Top - ItemBox.GetSize().Z, PackBox.Min.Z - MaxDrop);
@@ -47,19 +47,15 @@ FTransform FFSHungItemMeshes::GetTransform(const UFSItemDefinition& Backpack, co
 		PackBox.GetCenter().Y - ItemBox.GetCenter().Y,
 		Bottom - ItemBox.Min.Z);
 
-	const FVector Adjustment = Item.QuickStoredOffsetTransform.GetTranslation();
+	const FVector Adjustment = Item.QuickStoredTransform.GetTranslation();
 	const FVector Location = Place + FVector(bLeft ? Adjustment.X : -Adjustment.X, Adjustment.Y, Adjustment.Z);
-
-	// The mesh is attached to the backpack's, so this takes out the scale it inherits from it, and the item stays the size it's set to on any backpack
-	const FVector FromPackScale = FTransform::GetSafeScaleReciprocal(Backpack.GlobalScale);
-	Transform.SetTranslation(Location * FromPackScale);
-	Transform.SetScale3D(Transform.GetScale3D() * FromPackScale);
+	Transform.SetTranslation(Location);
 
 	if (OutPivot)
 	{
 		// Over the middle of the item, where it's tied on at the hanging height, however far a long item had to be raised
 		const FVector Centre = ItemBox.GetCenter() + Location;
-		*OutPivot = FVector(Centre.X, Centre.Y, Top + Adjustment.Z) * FromPackScale;
+		*OutPivot = FVector(Centre.X, Centre.Y, Top + Adjustment.Z);
 	}
 
 	return Transform;
@@ -114,6 +110,19 @@ FText UFSInventoryComponent::GetHandSlotName(EFSHand Hand)
 FText UFSInventoryComponent::GetQuickSlotName(EFSQuickSlot QuickSlot)
 {
 	return QuickSlot == EFSQuickSlot::Left ? LOCTEXT("LeftQuickSlot", "Left Quick Slot") : LOCTEXT("RightQuickSlot", "Right Quick Slot");
+}
+
+FText UFSInventoryComponent::GetArmorSlotName(EFSArmorType ArmorType)
+{
+	switch (ArmorType)
+	{
+	case EFSArmorType::Head:
+		return LOCTEXT("HeadArmorSlot", "Head");
+	case EFSArmorType::Face:
+		return LOCTEXT("FaceArmorSlot", "Face");
+	default:
+		return LOCTEXT("BodyArmorSlot", "Body");
+	}
 }
 
 bool UFSInventoryComponent::CanAddItem(const UFSItemDefinition* Definition) const
@@ -302,6 +311,16 @@ bool UFSInventoryComponent::SwapCarriedItemWithQuickSlot(EFSQuickSlot QuickSlot)
 	return true;
 }
 
+bool UFSInventoryComponent::CanCarriedItemGoInArmorSlot(EFSArmorType ArmorType) const
+{
+	return !IsCarryingItem() || (CarriedItem.Definition->ItemType == EFSItemType::Armor && CarriedItem.Definition->ArmorType == ArmorType);
+}
+
+bool UFSInventoryComponent::SwapCarriedItemWithArmorSlot(EFSArmorType ArmorType)
+{
+	return CanCarriedItemGoInArmorSlot(ArmorType) && SwapCarriedItemWith(ArmorItems[static_cast<int32>(ArmorType)], GetArmorSlotName(ArmorType));
+}
+
 bool UFSInventoryComponent::SwapCarriedItemWith(FFSInventoryItem& HeldItem, const FText& SlotName)
 {
 	if (!IsCarryingItem() && !HeldItem.Definition)
@@ -309,7 +328,7 @@ bool UFSInventoryComponent::SwapCarriedItemWith(FFSInventoryItem& HeldItem, cons
 		return false;
 	}
 
-	// Hands and quick slots always show an item upright
+	// These slots always show an item upright
 	CarriedItem.Rotation = 0;
 	Swap(CarriedItem, HeldItem);
 

@@ -34,6 +34,8 @@ enum class EFSQuickSlot : uint8
 	Right
 };
 
+enum class EFSArmorType : uint8;
+
 DECLARE_MULTICAST_DELEGATE(FFSOnHandItemsChanged);
 DECLARE_MULTICAST_DELEGATE(FFSOnBackpackChanged);
 DECLARE_MULTICAST_DELEGATE(FFSOnQuickSlotItemsChanged);
@@ -102,8 +104,8 @@ private:
 
 /**
  * The items a player owns. Lives on the player state, so it outlasts the character.
- * One item at a time can be carried on the cursor, and each hand and quick slot can hold one. Those items cover no cells and aren't in GetItems(). They only get there from the cursor.
- * The grid and the quick slots belong to the backpack, so without one only the hands and the cursor can hold anything.
+ * One item at a time can be carried on the cursor, and each hand, quick slot and armor slot can hold one. Those items cover no cells and aren't in GetItems(). They only get there from the cursor.
+ * The grid and the quick slots belong to the backpack, so without one only the hands, the armor slots and the cursor can hold anything.
  */
 UCLASS(ClassGroup = (Inventory), meta = (BlueprintSpawnableComponent))
 class FELLOWSHIP_API UFSInventoryComponent : public UActorComponent
@@ -118,6 +120,9 @@ public:
 
 	// What the player sees a quick slot called
 	static FText GetQuickSlotName(EFSQuickSlot QuickSlot);
+
+	// What the player sees an armor slot called
+	static FText GetArmorSlotName(EFSArmorType ArmorType);
 
 	// Whether there's a backpack with space for the item in its grid, in either orientation
 	bool CanAddItem(const UFSItemDefinition* Definition) const;
@@ -182,6 +187,15 @@ public:
 	// What a quick slot holds. Its definition is null if the slot is empty.
 	FORCEINLINE const FFSInventoryItem& GetQuickSlotItem(EFSQuickSlot QuickSlot) const { return QuickSlotItems[static_cast<int32>(QuickSlot)]; }
 
+	// Whether what's being carried could go in an armor slot: nothing can, or armor of that type
+	bool CanCarriedItemGoInArmorSlot(EFSArmorType ArmorType) const;
+
+	// Puts the carried item in an armor slot, and what the slot held becomes the carried item. Returns false, changing nothing, if both are empty or the carried item isn't armor of that type.
+	bool SwapCarriedItemWithArmorSlot(EFSArmorType ArmorType);
+
+	// What an armor slot holds. Its definition is null if the slot is empty.
+	FORCEINLINE const FFSInventoryItem& GetArmorItem(EFSArmorType ArmorType) const { return ArmorItems[static_cast<int32>(ArmorType)]; }
+
 	FORCEINLINE const FFSInventoryGrid& GetGrid() const { return Grid; }
 	FORCEINLINE const TArray<FFSInventoryItem>& GetItems() const { return Items; }
 
@@ -210,6 +224,9 @@ private:
 
 	UPROPERTY(Transient)
 	FFSInventoryItem QuickSlotItems[2];
+
+	UPROPERTY(Transient)
+	FFSInventoryItem ArmorItems[3];
 
 	int32 NextItemId = 0;
 };

@@ -197,19 +197,20 @@ FVector2D AFSEquipmentDisplay::GetSlotCentre(const FVector2D& ViewportSize, EFSE
 	return FVector2D(ViewportSize.X * 0.5 + FromMiddle * SlotSpacing, SlotHeight);
 }
 
-FTransform AFSEquipmentDisplay::GetMeshTransform(const UStaticMesh& Mesh, const FRotator& MeshRotation, const FQuat& CameraRotation, const FVector& Centre, double Radius, const FVector& FittedScale, const FVector& SlotScale)
+FTransform AFSEquipmentDisplay::GetMeshTransform(const UStaticMesh& Mesh, const FTransform& MeshTransform, const FQuat& CameraRotation, const FVector& Centre, double Radius, bool bFillCircle)
 {
 	const FBoxSphereBounds Bounds = Mesh.GetBounds();
-	const FVector Extent = Bounds.BoxExtent * FittedScale.GetAbs();
+	const FVector Extent = bFillCircle ? Bounds.BoxExtent * MeshTransform.GetScale3D().GetAbs() : Bounds.BoxExtent;
 
 	// A box fits inside a circle if its diagonal does
-	const FVector Size = FBox(-Extent, Extent).TransformBy(FTransform(MeshRotation)).GetSize();
+	const FVector Size = FBox(-Extent, Extent).TransformBy(FTransform(MeshTransform.GetRotation())).GetSize();
 	const double Diagonal = FVector2D(Size.Y, Size.Z).Size();
-	const FVector Scale = FittedScale * (MeshFillFraction * Radius * 2.0 / FMath::Max(Diagonal, UE_KINDA_SMALL_NUMBER)) * SlotScale;
+	const double Fit = MeshFillFraction * Radius * 2.0 / FMath::Max(Diagonal, UE_KINDA_SMALL_NUMBER);
+	const FVector Scale = MeshTransform.GetScale3D() * Fit;
 
 	// Mesh pivots are wherever suited the character holding them, so the mesh is centred by its bounds
-	const FQuat Rotation = CameraRotation * MeshRotation.Quaternion();
-	return FTransform(Rotation, Centre - Rotation.RotateVector(Bounds.Origin * Scale), Scale);
+	const FQuat Rotation = CameraRotation * MeshTransform.GetRotation();
+	return FTransform(Rotation, Centre - Rotation.RotateVector(Bounds.Origin * Scale) + CameraRotation.RotateVector(MeshTransform.GetLocation() * Fit), Scale);
 }
 
 FQuat AFSEquipmentDisplay::GetCompassNeedleRotation(double CameraYaw)
@@ -344,11 +345,8 @@ void AFSEquipmentDisplay::UpdateSlot(const AFSPlayerController& PlayerController
 
 	Component->SetStaticMesh(Mesh);
 
-	// A hand or quick slot's item can be made bigger or smaller by its global scale. A backpack always fills its slot.
-	const bool bFillsSlot = Slot == EFSEquipmentSlot::Backpack;
-	Component->SetWorldTransform(GetMeshTransform(*Mesh, Item->InventoryMeshRotation, Rotation, Centre, Radius,
-		bFillsSlot ? Item->GlobalScale : FVector::OneVector,
-		bFillsSlot ? FVector::OneVector : Item->GlobalScale));
+	// A hand or quick slot's item can be made bigger or smaller by its transform's scale. A backpack always fills its slot.
+	Component->SetWorldTransform(GetMeshTransform(*Mesh, Item->InventoryMeshTransform, Rotation, Centre, Radius, Slot == EFSEquipmentSlot::Backpack));
 }
 
 void AFSEquipmentDisplay::UpdateCompass(const AFSPlayerController& PlayerController)

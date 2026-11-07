@@ -22,7 +22,7 @@ namespace
 	// Mesh pivots are wherever suited the character holding them, so the mesh is centred on the actor by its bounds, and turned about its middle
 	FTransform GetDiscardedMeshTransform(const UFSItemDefinition& Item, const UStaticMesh& Mesh)
 	{
-		return FTransform(FQuat::Identity, -Mesh.GetBounds().Origin * Item.GlobalScale, Item.GlobalScale) * Item.DiscardedTransformOffset;
+		return FTransform(-Mesh.GetBounds().Origin) * Item.DiscardedTransform;
 	}
 }
 
@@ -68,7 +68,7 @@ AFSItemPickup* AFSItemPickup::DropAtFeet(TSubclassOf<AFSItemPickup> PickupClass,
 	if (DroppedMesh)
 	{
 		FTransform Resting = GetDiscardedMeshTransform(*DroppedItem, *DroppedMesh);
-		Resting.AddToTranslation(-DroppedItem->DiscardedTransformOffset.GetTranslation());
+		Resting.AddToTranslation(-DroppedItem->DiscardedTransform.GetTranslation());
 
 		const FBoxSphereBounds Bounds = DroppedMesh->GetBounds();
 		FloorClearance = -FBox(Bounds.Origin - Bounds.BoxExtent, Bounds.Origin + Bounds.BoxExtent).TransformBy(Resting).Min.Z;

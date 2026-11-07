@@ -244,7 +244,7 @@ void UFSEquipmentComponent::RefreshBackpackMesh()
 
 	BackpackMesh->SetStaticMesh(Mesh);
 	BackpackMesh->AttachToComponent(CharacterMesh, FAttachmentTransformRules::SnapToTargetNotIncludingScale, BackpackBone);
-	BackpackMesh->SetRelativeTransform(FTransform(FQuat::Identity, FVector::ZeroVector, Backpack->GlobalScale));
+	BackpackMesh->SetRelativeTransform(FTransform::Identity);
 	BackpackMesh->SetVisibility(!bMeshesHidden);
 
 	HungItemMeshes.Show(*BackpackMesh, Backpack, Inventory->GetQuickSlotItem(EFSQuickSlot::Left).Definition, Inventory->GetQuickSlotItem(EFSQuickSlot::Right).Definition, HungItemMaxDrop);
@@ -304,9 +304,9 @@ void UFSEquipmentComponent::RefreshMesh(EFSHand Hand)
 
 	HandMesh->SetStaticMesh(Mesh);
 	HandMesh->AttachToComponent(CharacterMesh, FAttachmentTransformRules::SnapToTargetNotIncludingScale, Socket);
-	const FTransform& ItemTransform = bDrawn ? Item->HandEquippedOffsetTransform : Item->HandStoredOffsetTransform;
+	const FTransform& ItemTransform = bDrawn ? Item->HandEquippedTransform : Item->HandStoredTransform;
 	const FTransform& HandTransform = bDrawn ? (bRight ? RightHeldOffset : LeftHeldOffset) : (bRight ? RightSheathOffset : LeftSheathOffset);
-	HandMesh->SetRelativeTransform(FTransform(FQuat::Identity, FVector::ZeroVector, Item->GlobalScale) * ItemTransform * HandTransform);
+	HandMesh->SetRelativeTransform(ItemTransform * HandTransform);
 	HandMesh->SetVisibility(!bMeshesHidden);
 
 	// It swings about its grip, which is the mesh's pivot. A different socket is a different place to measure from.

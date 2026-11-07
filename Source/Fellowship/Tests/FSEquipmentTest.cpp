@@ -271,8 +271,8 @@ bool FFSEquipmentAttachTest::RunTest(const FString& Parameters)
 {
 	FEquipmentTestWorld Test;
 	UFSItemDefinition* Sword = MakeWeapon(EFSWeaponType::Sword);
-	Sword->HandEquippedOffsetTransform.SetLocation(FVector(1.0, 2.0, 3.0));
-	Sword->HandStoredOffsetTransform.SetLocation(FVector(4.0, 5.0, 6.0));
+	Sword->HandEquippedTransform.SetLocation(FVector(1.0, 2.0, 3.0));
+	Sword->HandStoredTransform.SetLocation(FVector(4.0, 5.0, 6.0));
 	Test.Equipment->RightSheathOffset = FTransform(FVector(10.0, 0.0, 0.0));
 	Test.Equipment->RightHeldOffset = FTransform(FVector(0.0, 10.0, 0.0));
 
@@ -434,7 +434,7 @@ bool FFSHungItemsTest::RunTest(const FString& Parameters)
 	UFSItemDefinition* Small = MakeWeapon(EFSWeaponType::Sword);
 	Small->ItemType = EFSItemType::Consumable;
 	Small->Mesh = Cube;
-	Small->QuickStoredOffsetTransform = FTransform(FQuat::Identity, FVector::ZeroVector, FVector(0.1));
+	Small->QuickStoredTransform = FTransform(FQuat::Identity, FVector::ZeroVector, FVector(0.1));
 
 	// As tall as the backpack is
 	UFSItemDefinition* Long = MakeWeapon(EFSWeaponType::Sword);
@@ -525,7 +525,7 @@ bool FFSSwingTest::RunTest(const FString& Parameters)
 	UFSItemDefinition* Potion = MakeWeapon(EFSWeaponType::Sword);
 	Potion->ItemType = EFSItemType::Consumable;
 	Potion->Mesh = Cube;
-	Potion->QuickStoredOffsetTransform = FTransform(FQuat::Identity, FVector::ZeroVector, FVector(0.1));
+	Potion->QuickStoredTransform = FTransform(FQuat::Identity, FVector::ZeroVector, FVector(0.1));
 
 	UFSItemDefinition* Sword = MakeWeapon(EFSWeaponType::Sword);
 	Sword->Mesh = Cube;
@@ -835,14 +835,15 @@ bool FFSEquipmentAssetsTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSGlobalScaleInHandsTest, "Fellowship.Equipment.Display.GlobalScaleAppliesOnTheBackAndInTheHand", EquipmentTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSItemScaleInHandsTest, "Fellowship.Equipment.Display.EachPlaceHasItsOwnScale", EquipmentTestFlags)
 
-bool FFSGlobalScaleInHandsTest::RunTest(const FString& Parameters)
+bool FFSItemScaleInHandsTest::RunTest(const FString& Parameters)
 {
 	FEquipmentTestWorld Test;
 	UFSItemDefinition* Sword = MakeWeapon(EFSWeaponType::Sword);
-	Sword->GlobalScale = FVector(1.0, 2.0, 3.0);
-	Sword->HandStoredOffsetTransform.SetScale3D(FVector(2.0));
+	Sword->HandStoredTransform.SetScale3D(FVector(2.0));
+	Sword->HandEquippedTransform.SetScale3D(FVector(3.0));
+	Sword->InventoryMeshTransform.SetScale3D(FVector(5.0));
 
 	Test.Hold(Sword, EFSHand::Right);
 	UStaticMeshComponent* Mesh = Test.Equipment->GetHandMesh(EFSHand::Right);
@@ -851,10 +852,10 @@ bool FFSGlobalScaleInHandsTest::RunTest(const FString& Parameters)
 		return false;
 	}
 
-	TestEqual(TEXT("On the back, it's scaled by both"), Mesh->GetRelativeScale3D(), FVector(2.0, 4.0, 6.0));
+	TestEqual(TEXT("On the back, it has the stored scale"), Mesh->GetRelativeScale3D(), FVector(2.0));
 
 	Test.Equipment->Draw();
-	TestEqual(TEXT("In the hand, it has only the global scale"), Mesh->GetRelativeScale3D(), FVector(1.0, 2.0, 3.0));
+	TestEqual(TEXT("In the hand, it has the equipped scale"), Mesh->GetRelativeScale3D(), FVector(3.0));
 
 	return true;
 }
@@ -893,60 +894,6 @@ bool FFSQuickStoredTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSScaledBackpackTest, "Fellowship.Equipment.Display.ScalingABackpackLeavesItsHungItemsTheirOwnSize", EquipmentTestFlags)
-
-bool FFSScaledBackpackTest::RunTest(const FString& Parameters)
-{
-	UStaticMesh* Cube = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
-	if (!TestNotNull(TEXT("The test mesh loads"), Cube))
-	{
-		return false;
-	}
-
-	FEquipmentTestWorld Test;
-
-	FFSBackpackContents Contents;
-	Test.Inventory->RemoveBackpack(Contents);
-
-	// Scaled, the backpack is 200cm wide, 300cm deep and 400cm tall
-	const FVector PackScale(2.0, 3.0, 4.0);
-	UFSItemDefinition* Backpack = NewObject<UFSItemDefinition>();
-	Backpack->ItemType = EFSItemType::Backpack;
-	Backpack->InventoryDimensions = FIntPoint(8, 8);
-	Backpack->Mesh = Cube;
-	Backpack->GlobalScale = PackScale;
-	Test.Inventory->EquipBackpack(Backpack);
-
-	TestEqual(TEXT("The backpack is scaled"), Test.Equipment->GetBackpackMesh()->GetRelativeScale3D(), PackScale);
-
-	// A 10cm cube
-	UFSItemDefinition* Small = MakeWeapon(EFSWeaponType::Sword);
-	Small->ItemType = EFSItemType::Consumable;
-	Small->Mesh = Cube;
-	Small->GlobalScale = FVector(0.1);
-
-	Test.Inventory->CarryNewItem(Small);
-	Test.Inventory->SwapCarriedItemWithQuickSlot(EFSQuickSlot::Left);
-
-	UStaticMeshComponent* Left = Test.Equipment->GetHungItemMesh(EFSQuickSlot::Left);
-	if (!TestNotNull(TEXT("It hangs"), Left))
-	{
-		return false;
-	}
-
-	const FBoxSphereBounds Bounds = Cube->GetBounds();
-	const FBox InPack = FBox(Bounds.Origin - Bounds.BoxExtent, Bounds.Origin + Bounds.BoxExtent).TransformBy(Left->GetRelativeTransform());
-	const FVector Size = InPack.GetSize() * PackScale;
-
-	TestEqual(TEXT("It's as wide as it's set to be"), Size.X, 10.0, 0.01);
-	TestEqual(TEXT("And as deep"), Size.Y, 10.0, 0.01);
-	TestEqual(TEXT("And as tall"), Size.Z, 10.0, 0.01);
-	TestEqual(TEXT("It touches the scaled backpack's side"), InPack.Min.X * PackScale.X, 100.0 - Backpack->HungItemInset, 0.01);
-	TestEqual(TEXT("It hangs from the scaled backpack's hanging height"), InPack.Max.Z * PackScale.Z, -200.0 + 400.0 * Backpack->HungItemHeight, 0.01);
-
-	return true;
-}
-
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSQuickStoredMirrorTest, "Fellowship.Equipment.Display.QuickSlotItemsAreMirroredAcrossTheBackpack", EquipmentTestFlags)
 
 bool FFSQuickStoredMirrorTest::RunTest(const FString& Parameters)
@@ -970,7 +917,7 @@ bool FFSQuickStoredMirrorTest::RunTest(const FString& Parameters)
 		UFSItemDefinition* Item = NewObject<UFSItemDefinition>();
 		Item->ItemType = ItemType;
 		Item->Mesh = Cube;
-		Item->QuickStoredOffsetTransform = Offset;
+		Item->QuickStoredTransform = Offset;
 
 		FVector LeftPivot, RightPivot;
 		const FTransform Left = FFSHungItemMeshes::GetTransform(*Backpack, *Item, EFSQuickSlot::Left, 0.0, &LeftPivot);
