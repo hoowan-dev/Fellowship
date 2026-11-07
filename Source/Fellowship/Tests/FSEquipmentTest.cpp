@@ -5,7 +5,7 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Character/FSCharacter.h"
-#include "Character/FSCharacterAnimInstance.h"
+#include "Animation/FSCharacterAnimInstance.h"
 #include "Character/FSCharacterMovementComponent.h"
 #include "Character/FSEquipmentComponent.h"
 #include "Components/PoseableMeshComponent.h"

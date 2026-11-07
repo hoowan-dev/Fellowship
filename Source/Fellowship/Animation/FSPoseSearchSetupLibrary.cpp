@@ -1,6 +1,6 @@
 // Copyright HoowanDev 2026 all rights reserved.
 
-#include "Character/FSPoseSearchSetupLibrary.h"
+#include "Animation/FSPoseSearchSetupLibrary.h"
 #include "PoseSearch/PoseSearchDatabase.h"
 
 bool UFSPoseSearchSetupLibrary::SetDatabaseAnimation(UPoseSearchDatabase* Database, int32 Index, UObject* Animation)

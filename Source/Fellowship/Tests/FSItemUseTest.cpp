@@ -5,6 +5,7 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Character/FSCharacter.h"
+#include "Character/FSEquipmentComponent.h"
 #include "Character/FSItemUseComponent.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
@@ -87,6 +88,7 @@ bool FFSItemUseHandsTest::RunTest(const FString& Parameters)
 	Sword->InventoryDimensions = FIntPoint(2, 6);
 	Test.Inventory->CarryNewItem(Sword);
 	Test.Inventory->SwapCarriedItemWithHand(EFSHand::Right);
+	Test.Character->GetEquipment()->Draw();
 
 	TArray<TPair<EFSItemUseSlot, const UFSItemDefinition*>> Started;
 	TArray<EFSItemUseSlot> Stopped;
@@ -111,6 +113,49 @@ bool FFSItemUseHandsTest::RunTest(const FString& Parameters)
 
 	Test.ItemUse->StopUsing(EFSItemUseSlot::RightHand);
 	TestEqual(TEXT("Releasing what isn't held announces nothing"), Stopped.Num(), 1);
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSItemUseSheathedTest, "Fellowship.ItemUse.Hands.SheathedWeaponsAreDrawnFirst", ItemUseTestFlags)
+
+bool FFSItemUseSheathedTest::RunTest(const FString& Parameters)
+{
+	FItemUseTestWorld Test;
+	UFSEquipmentComponent* Equipment = Test.Character->GetEquipment();
+
+	UFSItemDefinition* Sword = NewObject<UFSItemDefinition>();
+	Sword->InventoryDimensions = FIntPoint(2, 6);
+	Test.Inventory->CarryNewItem(Sword);
+	Test.Inventory->SwapCarriedItemWithHand(EFSHand::Right);
+
+	int32 Starts = 0;
+	Test.ItemUse->OnUseStarted.AddLambda([&Starts](EFSItemUseSlot, const UFSItemDefinition*) { ++Starts; });
+
+	TestFalse(TEXT("The sword starts sheathed"), Equipment->IsDrawn());
+	TestFalse(TEXT("So pressing its button doesn't use it"), Test.ItemUse->StartUsing(EFSItemUseSlot::RightHand));
+	TestFalse(TEXT("It isn't being used"), Test.ItemUse->IsUsing(EFSItemUseSlot::RightHand));
+	TestEqual(TEXT("Nothing is announced"), Starts, 0);
+	TestTrue(TEXT("The press drew it instead"), Equipment->IsDrawn());
+	TestTrue(TEXT("But the button still counts as pressed, so its circle lights up"), Test.ItemUse->IsPressed(EFSItemUseSlot::RightHand));
+	TestFalse(TEXT("Pressing again while held doesn't do anything more"), Test.ItemUse->StartUsing(EFSItemUseSlot::RightHand));
+
+	Test.ItemUse->StopUsing(EFSItemUseSlot::RightHand);
+	TestFalse(TEXT("Releasing it lets go"), Test.ItemUse->IsPressed(EFSItemUseSlot::RightHand));
+	TestTrue(TEXT("The next press uses it"), Test.ItemUse->StartUsing(EFSItemUseSlot::RightHand));
+	TestEqual(TEXT("Which is announced"), Starts, 1);
+	Test.ItemUse->StopUsing(EFSItemUseSlot::RightHand);
+
+	Equipment->Sheathe();
+	TestTrue(TEXT("Sheathed again, an empty hand is still used straight away"), Test.ItemUse->StartUsing(EFSItemUseSlot::LeftHand));
+	TestFalse(TEXT("Without drawing"), Equipment->IsDrawn());
+
+	Equipment->Draw();
+	Test.ItemUse->StartUsing(EFSItemUseSlot::RightHand);
+	Test.ItemUse->StopUsingItems();
+	TestFalse(TEXT("Sheathing stops using the sword"), Test.ItemUse->IsUsing(EFSItemUseSlot::RightHand));
+	TestTrue(TEXT("Though its button is still held"), Test.ItemUse->IsPressed(EFSItemUseSlot::RightHand));
+	TestTrue(TEXT("But not the empty hand"), Test.ItemUse->IsUsing(EFSItemUseSlot::LeftHand));
 
 	return true;
 }

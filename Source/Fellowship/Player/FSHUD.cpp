@@ -165,7 +165,7 @@ void AFSHUD::UpdateUseGlow()
 
 	for (int32 Slot = 0; Slot < UE_ARRAY_COUNT(UseGlow); ++Slot)
 	{
-		if (ItemUse && ItemUse->IsUsing(static_cast<EFSItemUseSlot>(Slot)))
+		if (ItemUse && ItemUse->IsPressed(static_cast<EFSItemUseSlot>(Slot)))
 		{
 			UseGlow[Slot] = 1.0f;
 		}

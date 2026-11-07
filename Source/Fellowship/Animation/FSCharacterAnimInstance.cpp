@@ -1,10 +1,10 @@
 // Copyright HoowanDev 2026 all rights reserved.
 
 
-#include "FSCharacterAnimInstance.h"
-#include "FSCharacterMovementComponent.h"
+#include "Animation/FSCharacterAnimInstance.h"
+#include "Character/FSCharacterMovementComponent.h"
 #include "Character/FSCharacter.h"
-#include "Character/FSClimbIKComponent.h"
+#include "Animation/FSClimbIKComponent.h"
 #include "Character/FSEquipmentComponent.h"
 #include "Animation/AnimClassInterface.h"
 #include "GameFramework/Character.h"

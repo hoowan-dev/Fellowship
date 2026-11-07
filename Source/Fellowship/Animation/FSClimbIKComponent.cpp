@@ -1,6 +1,6 @@
 // Copyright HoowanDev 2026 all rights reserved.
 
-#include "Character/FSClimbIKComponent.h"
+#include "Animation/FSClimbIKComponent.h"
 #include "Character/FSCharacterMovementComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "DrawDebugHelpers.h"

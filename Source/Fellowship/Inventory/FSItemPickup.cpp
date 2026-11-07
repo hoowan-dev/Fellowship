@@ -157,16 +157,16 @@ FFSItemText AFSItemPickup::GetPromptText(const UFSInventoryComponent* Inventory)
 	if (IsBackpack())
 	{
 		return Inventory && Inventory->HasBackpack()
-			? FFSItemText::Format(LOCTEXT("SwapBackpackPrompt", "[E / X] Swap backpack for {0}"), Item)
-			: FFSItemText::Format(LOCTEXT("PickUpBackpackPrompt", "[E / X] Pick up {0}"), Item);
+			? FFSItemText::Format(LOCTEXT("SwapBackpackPrompt", "[F / X] Swap backpack for {0}"), Item)
+			: FFSItemText::Format(LOCTEXT("PickUpBackpackPrompt", "[F / X] Pick up {0}"), Item);
 	}
 
 	if (Inventory && Inventory->CanAddItem(Item))
 	{
-		return FFSItemText::Format(LOCTEXT("PickUpPrompt", "[E / X] Pick up {0}"), Item);
+		return FFSItemText::Format(LOCTEXT("PickUpPrompt", "[F / X] Pick up {0}"), Item);
 	}
 
-	return FFSItemText::Format(LOCTEXT("MakeRoomPrompt", "[E / X] Make room for {0}"), Item);
+	return FFSItemText::Format(LOCTEXT("MakeRoomPrompt", "[F / X] Make room for {0}"), Item);
 }
 
 FVector AFSItemPickup::GetPromptLocation() const

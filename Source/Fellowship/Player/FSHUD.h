@@ -34,7 +34,7 @@ private:
 	// Glow from 0 to 1 lights it up, for while it's being used.
 	void DrawEquipmentSlot(const FVector2D& Centre, const UFSItemDefinition* Item, const FText& SlotName, float Glow = 0.0f);
 
-	// Brightens the glow of each slot being used and fades the rest
+	// Brightens the glow of each slot whose button is held and fades the rest
 	void UpdateUseGlow();
 
 	// How lit up a slot's circle is, or 0 for a slot that can't be used
@@ -76,6 +76,6 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<AFSEquipmentDisplay> EquipmentDisplay;
 
-	// By EFSItemUseSlot. Full while a slot is used, then fading, so that even a quick tap shows.
+	// By EFSItemUseSlot. Full while a slot's button is held, then fading, so that even a quick tap shows.
 	float UseGlow[static_cast<int32>(EFSItemUseSlot::Count)] = {};
 };

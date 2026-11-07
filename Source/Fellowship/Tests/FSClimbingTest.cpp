@@ -6,7 +6,7 @@
 
 #include "Character/FSCharacter.h"
 #include "Character/FSCharacterMovementComponent.h"
-#include "Character/FSClimbIKComponent.h"
+#include "Animation/FSClimbIKComponent.h"
 #include "Components/BoxComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"

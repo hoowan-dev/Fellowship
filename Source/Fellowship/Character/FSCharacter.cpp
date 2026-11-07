@@ -4,8 +4,8 @@
 #include "FSCharacter.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "Camera/CameraComponent.h"
-#include "FSCharacterMovementComponent.h"
-#include "Character/FSClimbIKComponent.h"
+#include "Character/FSCharacterMovementComponent.h"
+#include "Animation/FSClimbIKComponent.h"
 #include "Character/FSEquipmentComponent.h"
 #include "Character/FSItemUseComponent.h"
 #include "Character/FSStatsComponent.h"
@@ -149,6 +149,7 @@ void AFSCharacter::OnMovementModeChanged(EMovementMode PrevMovementMode, uint8 P
 	if (Movement && Movement->IsClimbing())
 	{
 		Equipment->Sheathe();
+		ItemUse->StopUsingItems();
 	}
 }
 
@@ -248,6 +249,11 @@ void AFSCharacter::Look(const FInputActionValue& Value)
 void AFSCharacter::ToggleWeaponsDrawn()
 {
 	Equipment->ToggleDrawn();
+
+	if (!Equipment->IsDrawn())
+	{
+		ItemUse->StopUsingItems();
+	}
 }
 
 void AFSCharacter::StartUsingItem(EFSItemUseSlot Slot)

@@ -2,6 +2,8 @@
 
 
 #include "FSItemUseComponent.h"
+#include "Character/FSEquipmentComponent.h"
+#include "GameFramework/Actor.h"
 #include "Inventory/FSInventoryComponent.h"
 
 namespace
@@ -47,8 +49,21 @@ void UFSItemUseComponent::SetInventory(UFSInventoryComponent* NewInventory)
 
 bool UFSItemUseComponent::StartUsing(EFSItemUseSlot Slot)
 {
-	if (!CanUse(Slot) || IsUsing(Slot))
+	if (!CanUse(Slot) || IsPressed(Slot))
 	{
+		return false;
+	}
+
+	bPressed[static_cast<int32>(Slot)] = true;
+
+	// The press is spent drawing, even if the weapons can't come out right now, such as while climbing
+	if (GetItem(Slot) && AreHeldWeaponsSheathed())
+	{
+		if (UFSEquipmentComponent* Equipment = GetOwner()->FindComponentByClass<UFSEquipmentComponent>())
+		{
+			Equipment->Draw();
+		}
+
 		return false;
 	}
 
@@ -58,6 +73,17 @@ bool UFSItemUseComponent::StartUsing(EFSItemUseSlot Slot)
 }
 
 void UFSItemUseComponent::StopUsing(EFSItemUseSlot Slot)
+{
+	if (!IsPressed(Slot))
+	{
+		return;
+	}
+
+	bPressed[static_cast<int32>(Slot)] = false;
+	EndUse(Slot);
+}
+
+void UFSItemUseComponent::EndUse(EFSItemUseSlot Slot)
 {
 	if (!IsUsing(Slot))
 	{
@@ -76,9 +102,25 @@ void UFSItemUseComponent::StopUsingAll()
 	}
 }
 
+void UFSItemUseComponent::StopUsingItems()
+{
+	for (int32 Slot = 0; Slot < static_cast<int32>(EFSItemUseSlot::Count); ++Slot)
+	{
+		if (GetItem(static_cast<EFSItemUseSlot>(Slot)))
+		{
+			EndUse(static_cast<EFSItemUseSlot>(Slot));
+		}
+	}
+}
+
 bool UFSItemUseComponent::IsUsing(EFSItemUseSlot Slot) const
 {
 	return IsValidSlot(Slot) && bUsing[static_cast<int32>(Slot)];
+}
+
+bool UFSItemUseComponent::IsPressed(EFSItemUseSlot Slot) const
+{
+	return IsValidSlot(Slot) && bPressed[static_cast<int32>(Slot)];
 }
 
 bool UFSItemUseComponent::CanUse(EFSItemUseSlot Slot) const
@@ -118,6 +160,18 @@ void UFSItemUseComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	SetInventory(nullptr);
 
 	Super::EndPlay(EndPlayReason);
+}
+
+bool UFSItemUseComponent::AreHeldWeaponsSheathed() const
+{
+	const UFSEquipmentComponent* Equipment = GetOwner()->FindComponentByClass<UFSEquipmentComponent>();
+	if (!Equipment || Equipment->IsDrawn() || !Inventory)
+	{
+		return false;
+	}
+
+	// With empty hands there's nothing to draw, so a quick slot's item is used straight away
+	return Inventory->GetHandItem(EFSHand::Right).Definition || Inventory->GetHandItem(EFSHand::Left).Definition;
 }
 
 void UFSItemUseComponent::HandleBackpackChanged()
