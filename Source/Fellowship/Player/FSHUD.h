@@ -4,9 +4,11 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/HUD.h"
+#include "Character/FSItemUseComponent.h"
 #include "FSHUD.generated.h"
 
 struct FFSItemText;
+enum class EFSEquipmentSlot : uint8;
 class UFSItemDefinition;
 class AFSEquipmentDisplay;
 
@@ -29,14 +31,22 @@ private:
 	void DrawEquipmentSlots();
 
 	// Draws one of those circles, with what it's for named above and what it holds named underneath, if anything.
-	void DrawEquipmentSlot(const FVector2D& Centre, const UFSItemDefinition* Item, const FText& SlotName);
+	// Glow from 0 to 1 lights it up, for while it's being used.
+	void DrawEquipmentSlot(const FVector2D& Centre, const UFSItemDefinition* Item, const FText& SlotName, float Glow = 0.0f);
+
+	// Brightens the glow of each slot being used and fades the rest
+	void UpdateUseGlow();
+
+	// How lit up a slot's circle is, or 0 for a slot that can't be used
+	float GetUseGlow(EFSEquipmentSlot Slot) const;
 
 	// Draws the name of each hand and quick slot above its cell in the open inventory, and the label on the button that drops the backpack
 	void DrawInventorySlotNames();
 
 	// Draws a shaded ring, whose radius doesn't include its thickness. It's empty in the middle because
 	// the HUD is drawn over the scene, so anything there would cover the mesh. With an item, it takes the colour of the item's rarity.
-	void DrawShadedRing(const FVector2D& Centre, float Radius, const UFSItemDefinition* Item);
+	// Glow from 0 to 1 brightens it and spreads a halo around the outside.
+	void DrawShadedRing(const FVector2D& Centre, float Radius, const UFSItemDefinition* Item, float Glow = 0.0f);
 
 	// Draws the prompt for the nearest pickup above it
 	void DrawPickupPrompt();
@@ -65,4 +75,7 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<AFSEquipmentDisplay> EquipmentDisplay;
+
+	// By EFSItemUseSlot. Full while a slot is used, then fading, so that even a quick tap shows.
+	float UseGlow[static_cast<int32>(EFSItemUseSlot::Count)] = {};
 };

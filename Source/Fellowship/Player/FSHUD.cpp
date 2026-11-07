@@ -81,6 +81,33 @@ namespace
 	constexpr float EquipmentSlotNameOffset = 16.0f;
 
 	constexpr int32 RingSides = 64;
+
+	// How long a slot's circle takes to stop glowing once it's no longer used
+	constexpr float UseGlowFadeTime = 0.25f;
+
+	// How far the halo around a glowing circle spreads past its ring, at full glow
+	constexpr float UseGlowHaloWidth = 10.0f;
+
+	// How opaque the inside edge of the halo is, at full glow
+	constexpr float UseGlowHaloOpacity = 0.7f;
+
+	// The circle each use slot lights up
+	EFSEquipmentSlot GetEquipmentSlotOfUseSlot(EFSItemUseSlot Slot)
+	{
+		switch (Slot)
+		{
+		case EFSItemUseSlot::RightHand:
+			return EFSEquipmentSlot::RightHand;
+		case EFSItemUseSlot::LeftHand:
+			return EFSEquipmentSlot::LeftHand;
+		case EFSItemUseSlot::RightQuickSlot:
+			return EFSEquipmentSlot::RightQuickSlot;
+		case EFSItemUseSlot::LeftQuickSlot:
+			return EFSEquipmentSlot::LeftQuickSlot;
+		default:
+			return EFSEquipmentSlot::Count;
+		}
+	}
 }
 
 void AFSHUD::BeginPlay()
@@ -96,6 +123,7 @@ void AFSHUD::DrawHUD()
 {
 	Super::DrawHUD();
 
+	UpdateUseGlow();
 	DrawEquipmentSlots();
 	DrawInventorySlotNames();
 	DrawPickupPrompt();
@@ -118,20 +146,52 @@ void AFSHUD::DrawEquipmentSlots()
 	// The quick slots belong to the backpack
 	if (Inventory->HasBackpack())
 	{
-		DrawEquipmentSlot(AFSEquipmentDisplay::GetSlotCentre(ViewportSize, EFSEquipmentSlot::LeftQuickSlot), Inventory->GetQuickSlotItem(EFSQuickSlot::Left).Definition, UFSInventoryComponent::GetQuickSlotName(EFSQuickSlot::Left));
-		DrawEquipmentSlot(AFSEquipmentDisplay::GetSlotCentre(ViewportSize, EFSEquipmentSlot::RightQuickSlot), Inventory->GetQuickSlotItem(EFSQuickSlot::Right).Definition, UFSInventoryComponent::GetQuickSlotName(EFSQuickSlot::Right));
+		DrawEquipmentSlot(AFSEquipmentDisplay::GetSlotCentre(ViewportSize, EFSEquipmentSlot::LeftQuickSlot), Inventory->GetQuickSlotItem(EFSQuickSlot::Left).Definition, UFSInventoryComponent::GetQuickSlotName(EFSQuickSlot::Left), GetUseGlow(EFSEquipmentSlot::LeftQuickSlot));
+		DrawEquipmentSlot(AFSEquipmentDisplay::GetSlotCentre(ViewportSize, EFSEquipmentSlot::RightQuickSlot), Inventory->GetQuickSlotItem(EFSQuickSlot::Right).Definition, UFSInventoryComponent::GetQuickSlotName(EFSQuickSlot::Right), GetUseGlow(EFSEquipmentSlot::RightQuickSlot));
 	}
 
-	DrawEquipmentSlot(AFSEquipmentDisplay::GetSlotCentre(ViewportSize, EFSEquipmentSlot::LeftHand), Inventory->GetHandItem(EFSHand::Left).Definition, UFSInventoryComponent::GetHandSlotName(EFSHand::Left));
+	DrawEquipmentSlot(AFSEquipmentDisplay::GetSlotCentre(ViewportSize, EFSEquipmentSlot::LeftHand), Inventory->GetHandItem(EFSHand::Left).Definition, UFSInventoryComponent::GetHandSlotName(EFSHand::Left), GetUseGlow(EFSEquipmentSlot::LeftHand));
 
 	DrawEquipmentSlot(AFSEquipmentDisplay::GetSlotCentre(ViewportSize, EFSEquipmentSlot::Backpack), Inventory->GetBackpack(), LOCTEXT("BackpackSlot", "Backpack"));
 
-	DrawEquipmentSlot(AFSEquipmentDisplay::GetSlotCentre(ViewportSize, EFSEquipmentSlot::RightHand), Inventory->GetHandItem(EFSHand::Right).Definition, UFSInventoryComponent::GetHandSlotName(EFSHand::Right));
+	DrawEquipmentSlot(AFSEquipmentDisplay::GetSlotCentre(ViewportSize, EFSEquipmentSlot::RightHand), Inventory->GetHandItem(EFSHand::Right).Definition, UFSInventoryComponent::GetHandSlotName(EFSHand::Right), GetUseGlow(EFSEquipmentSlot::RightHand));
 }
 
-void AFSHUD::DrawEquipmentSlot(const FVector2D& Centre, const UFSItemDefinition* Item, const FText& SlotName)
+void AFSHUD::UpdateUseGlow()
 {
-	DrawShadedRing(Centre, AFSEquipmentDisplay::SlotRadius, Item);
+	const AFSPlayerController* PlayerController = Cast<AFSPlayerController>(GetOwningPlayerController());
+	const AFSCharacter* Character = PlayerController ? PlayerController->GetFSCharacter() : nullptr;
+	const UFSItemUseComponent* ItemUse = Character ? Character->GetItemUse() : nullptr;
+
+	for (int32 Slot = 0; Slot < UE_ARRAY_COUNT(UseGlow); ++Slot)
+	{
+		if (ItemUse && ItemUse->IsUsing(static_cast<EFSItemUseSlot>(Slot)))
+		{
+			UseGlow[Slot] = 1.0f;
+		}
+		else
+		{
+			UseGlow[Slot] = FMath::Max(0.0f, UseGlow[Slot] - RenderDelta / UseGlowFadeTime);
+		}
+	}
+}
+
+float AFSHUD::GetUseGlow(EFSEquipmentSlot Slot) const
+{
+	for (int32 UseSlot = 0; UseSlot < UE_ARRAY_COUNT(UseGlow); ++UseSlot)
+	{
+		if (GetEquipmentSlotOfUseSlot(static_cast<EFSItemUseSlot>(UseSlot)) == Slot)
+		{
+			return UseGlow[UseSlot];
+		}
+	}
+
+	return 0.0f;
+}
+
+void AFSHUD::DrawEquipmentSlot(const FVector2D& Centre, const UFSItemDefinition* Item, const FText& SlotName, float Glow)
+{
+	DrawShadedRing(Centre, AFSEquipmentDisplay::SlotRadius, Item, Glow);
 
 	const double NameDistance = AFSEquipmentDisplay::SlotRadius + BorderThickness + EquipmentSlotNameOffset;
 
@@ -189,10 +249,16 @@ void AFSHUD::DrawInventorySlotNames()
 	DrawSlotName(Rig->IsOrganizing() ? LOCTEXT("StopOrganizingButton", "Stop Organizing") : LOCTEXT("OrganizeBackpackButton", "Organize Backpack"), Rig->GetButtonLabelLocation(AFSInventoryRig::OrganizeBackpackButton));
 }
 
-void AFSHUD::DrawShadedRing(const FVector2D& Centre, float Radius, const UFSItemDefinition* Item)
+void AFSHUD::DrawShadedRing(const FVector2D& Centre, float Radius, const UFSItemDefinition* Item, float Glow)
 {
-	const FLinearColor LitColor = Item ? UFSItemDefinition::GetRarityColor(Item->Rarity) : BorderLitColor;
-	const FLinearColor ShadowColor = Item ? FLinearColor(LitColor.R * ItemRingShadow, LitColor.G * ItemRingShadow, LitColor.B * ItemRingShadow) : BorderShadowColor;
+	const FLinearColor RestingLitColor = Item ? UFSItemDefinition::GetRarityColor(Item->Rarity) : BorderLitColor;
+	const FLinearColor RestingShadowColor = Item ? FLinearColor(RestingLitColor.R * ItemRingShadow, RestingLitColor.G * ItemRingShadow, RestingLitColor.B * ItemRingShadow) : BorderShadowColor;
+
+	// Glowing, the ring goes opaque and its shadowed side catches up with the lit one, so the whole ring is bright.
+	// An empty slot glows white, and an item in the colour of its rarity lifted towards white.
+	const FLinearColor GlowColor = Item ? FMath::Lerp(RestingLitColor, FLinearColor::White, 0.35f).CopyWithNewOpacity(1.0f) : FLinearColor::White;
+	const FLinearColor LitColor = FMath::Lerp(RestingLitColor, GlowColor, Glow);
+	const FLinearColor ShadowColor = FMath::Lerp(RestingShadowColor, GlowColor, Glow * 0.8f);
 
 	// The light comes from the top left of the screen, the same as on the event log's border
 	const auto GetBorderColor = [&LitColor, &ShadowColor](const FVector2D& Direction)
@@ -209,7 +275,7 @@ void AFSHUD::DrawShadedRing(const FVector2D& Centre, float Radius, const UFSItem
 	};
 
 	TArray<FCanvasUVTri> Triangles;
-	Triangles.Reserve(RingSides * 2);
+	Triangles.Reserve(RingSides * 4);
 
 	const auto AddTriangle = [&Triangles](const FVector2D& A, const FLinearColor& ColorA, const FVector2D& B, const FLinearColor& ColorB, const FVector2D& C, const FLinearColor& ColorC)
 	{
@@ -235,6 +301,19 @@ void AFSHUD::DrawShadedRing(const FVector2D& Centre, float Radius, const UFSItem
 
 		AddTriangle(InnerA, BorderA, OuterA, BorderA, OuterB, BorderB);
 		AddTriangle(InnerA, BorderA, OuterB, BorderB, InnerB, BorderB);
+
+		// The halo fades out from the ring's outer edge, and widens with the glow so that it swells as it lights up and shrinks as it fades
+		if (Glow > 0.0f)
+		{
+			const double HaloRadius = Radius + BorderThickness + UseGlowHaloWidth * Glow;
+			const FVector2D HaloA = Centre + DirectionA * HaloRadius;
+			const FVector2D HaloB = Centre + DirectionB * HaloRadius;
+			const FLinearColor HaloInner = GlowColor.CopyWithNewOpacity(UseGlowHaloOpacity * Glow);
+			const FLinearColor HaloOuter = GlowColor.CopyWithNewOpacity(0.0f);
+
+			AddTriangle(OuterA, HaloInner, HaloA, HaloOuter, HaloB, HaloOuter);
+			AddTriangle(OuterA, HaloInner, HaloB, HaloOuter, OuterB, HaloInner);
+		}
 	}
 
 	// Canvas items are opaque unless told otherwise

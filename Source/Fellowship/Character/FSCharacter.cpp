@@ -7,6 +7,7 @@
 #include "FSCharacterMovementComponent.h"
 #include "Character/FSClimbIKComponent.h"
 #include "Character/FSEquipmentComponent.h"
+#include "Character/FSItemUseComponent.h"
 #include "Character/FSStatsComponent.h"
 #include "Inventory/FSItemPickup.h"
 #include "Player/FSPlayerController.h"
@@ -46,6 +47,7 @@ AFSCharacter::AFSCharacter(const FObjectInitializer& ObjectInitializer)
 
 	Equipment = CreateDefaultSubobject<UFSEquipmentComponent>(TEXT("Equipment"));
 	Stats = CreateDefaultSubobject<UFSStatsComponent>(TEXT("Stats"));
+	ItemUse = CreateDefaultSubobject<UFSItemUseComponent>(TEXT("ItemUse"));
 	ClimbIK = CreateDefaultSubobject<UFSClimbIKComponent>(TEXT("ClimbIK"));
 }
 
@@ -136,6 +138,7 @@ void AFSCharacter::OnPlayerStateChanged(APlayerState* NewPlayerState, APlayerSta
 
 	const AFSPlayerState* FSPlayerState = Cast<AFSPlayerState>(NewPlayerState);
 	Equipment->SetInventory(FSPlayerState ? FSPlayerState->GetInventory() : nullptr);
+	ItemUse->SetInventory(FSPlayerState ? FSPlayerState->GetInventory() : nullptr);
 }
 
 void AFSCharacter::OnMovementModeChanged(EMovementMode PrevMovementMode, uint8 PreviousCustomMode)
@@ -191,6 +194,26 @@ void AFSCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompone
 	{
 		EnhancedInput->BindAction(ToggleDrawnAction, ETriggerEvent::Started, this, &AFSCharacter::ToggleWeaponsDrawn);
 	}
+
+	const TPair<UInputAction*, EFSItemUseSlot> UseActions[] =
+	{
+		{ UseRightHandAction, EFSItemUseSlot::RightHand },
+		{ UseLeftHandAction, EFSItemUseSlot::LeftHand },
+		{ UseRightQuickSlotAction, EFSItemUseSlot::RightQuickSlot },
+		{ UseLeftQuickSlotAction, EFSItemUseSlot::LeftQuickSlot }
+	};
+
+	for (const TPair<UInputAction*, EFSItemUseSlot>& UseAction : UseActions)
+	{
+		if (UseAction.Key)
+		{
+			EnhancedInput->BindAction(UseAction.Key, ETriggerEvent::Started, this, &AFSCharacter::StartUsingItem, UseAction.Value);
+
+			// Canceled as well, in case the button stops counting as held without being released
+			EnhancedInput->BindAction(UseAction.Key, ETriggerEvent::Completed, this, &AFSCharacter::StopUsingItem, UseAction.Value);
+			EnhancedInput->BindAction(UseAction.Key, ETriggerEvent::Canceled, this, &AFSCharacter::StopUsingItem, UseAction.Value);
+		}
+	}
 }
 
 void AFSCharacter::Move(const FInputActionValue& Value)
@@ -225,6 +248,16 @@ void AFSCharacter::Look(const FInputActionValue& Value)
 void AFSCharacter::ToggleWeaponsDrawn()
 {
 	Equipment->ToggleDrawn();
+}
+
+void AFSCharacter::StartUsingItem(EFSItemUseSlot Slot)
+{
+	ItemUse->StartUsing(Slot);
+}
+
+void AFSCharacter::StopUsingItem(EFSItemUseSlot Slot)
+{
+	ItemUse->StopUsing(Slot);
 }
 
 void AFSCharacter::JumpOrClimb()

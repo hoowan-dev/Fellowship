@@ -12,9 +12,11 @@ class AFSItemPickup;
 class AFSPlayerController;
 class UFSClimbIKComponent;
 class UFSEquipmentComponent;
+class UFSItemUseComponent;
 class UFSStatsComponent;
 class UInputAction;
 struct FInputActionValue;
+enum class EFSItemUseSlot : uint8;
 
 UCLASS()
 class FELLOWSHIP_API AFSCharacter : public ACharacter
@@ -38,6 +40,10 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Stats", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UFSStatsComponent> Stats;
 
+	// Which of the hands and quick slots are being used
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Equipment", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UFSItemUseComponent> ItemUse;
+
 	// Plants the hands and feet on the surface while climbing
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Climbing", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UFSClimbIKComponent> ClimbIK;
@@ -59,6 +65,22 @@ public:
 	// Digital (bool). Draws the held weapons or sheathes them.
 	UPROPERTY(EditDefaultsOnly, Category = "Input")
 	TObjectPtr<UInputAction> ToggleDrawnAction;
+
+	// Digital (bool). Uses what the right hand holds while held.
+	UPROPERTY(EditDefaultsOnly, Category = "Input")
+	TObjectPtr<UInputAction> UseRightHandAction;
+
+	// Digital (bool). Uses what the left hand holds while held.
+	UPROPERTY(EditDefaultsOnly, Category = "Input")
+	TObjectPtr<UInputAction> UseLeftHandAction;
+
+	// Digital (bool). Uses what's in the right quick slot while held.
+	UPROPERTY(EditDefaultsOnly, Category = "Input")
+	TObjectPtr<UInputAction> UseRightQuickSlotAction;
+
+	// Digital (bool). Uses what's in the left quick slot while held.
+	UPROPERTY(EditDefaultsOnly, Category = "Input")
+	TObjectPtr<UInputAction> UseLeftQuickSlotAction;
 
 public:
 
@@ -92,6 +114,9 @@ protected:
 
 	void ToggleWeaponsDrawn();
 
+	void StartUsingItem(EFSItemUseSlot Slot);
+	void StopUsingItem(EFSItemUseSlot Slot);
+
 public:
 	// What pressing jump does: lets go of the surface while climbing, grabs one that's in reach while in the air, and otherwise jumps.
 	// Unless it let go, keeping it held grips onto surfaces that come into reach, until StopJumping. A press in the air also grabs if one becomes grabbable just afterwards.
@@ -111,6 +136,7 @@ public:
 	FORCEINLINE UCameraComponent* GetFollowCamera() const { return FollowCamera; }
 	FORCEINLINE UFSEquipmentComponent* GetEquipment() const { return Equipment; }
 	FORCEINLINE UFSStatsComponent* GetStats() const { return Stats; }
+	FORCEINLINE UFSItemUseComponent* GetItemUse() const { return ItemUse; }
 
 	// Controller possessing this character, if it is an FSPlayerController
 	UFUNCTION(BlueprintPure, Category = "Character")

@@ -3,6 +3,7 @@
 
 #include "FSPlayerController.h"
 #include "Character/FSCharacter.h"
+#include "Character/FSItemUseComponent.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "GameFramework/CharacterMovementComponent.h"
@@ -532,6 +533,12 @@ void AFSPlayerController::SetInventoryInputActive(bool bActive)
 	}
 
 	bShowMouseCursor = bActive;
+
+	// The use buttons aren't mapped while the inventory is open, so they'd never be released
+	if (bActive && FSCharacter)
+	{
+		FSCharacter->GetItemUse()->StopUsingAll();
+	}
 
 	if (bActive)
 	{

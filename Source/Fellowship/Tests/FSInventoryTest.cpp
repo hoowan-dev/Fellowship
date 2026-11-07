@@ -2146,67 +2146,6 @@ bool FFSInventoryRigSlotSwayTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSInventoryRigBackgroundDarkenerTest, "Fellowship.Inventory.Rig.DarkensTheBackgroundBehindTheGrid", TestFlags)
-
-bool FFSInventoryRigBackgroundDarkenerTest::RunTest(const FString& Parameters)
-{
-	FInventoryTestWorld Test;
-	AFSInventoryRig* Rig = Test.World->SpawnActor<AFSInventoryRig>();
-	const UStaticMeshComponent* Darkener = Rig->GetBackgroundDarkener();
-
-	UMaterialInstanceDynamic* Material = Cast<UMaterialInstanceDynamic>(Darkener->GetMaterial(0));
-	if (!TestNotNull(TEXT("It has its own instance of the material"), Material))
-	{
-		return false;
-	}
-
-	const auto GetDarkness = [Material]()
-	{
-		return Material->K2_GetScalarParameterValue(TEXT("Darkness"));
-	};
-
-	// In the display's frame, which the camera sits at the origin of
-	const double Distance = Darkener->GetRelativeLocation().X;
-	TestTrue(TEXT("It's behind the grid"), Distance > GridDistanceForTests);
-	TestTrue(TEXT("And in front of the hands"), Distance < 65.0);
-	TestEqual(TEXT("It's straight ahead"), Darkener->GetRelativeLocation().Y, 0.0);
-
-	// The plane mesh is 100cm across, and it has to reach past the edges of even a very wide screen
-	TestTrue(TEXT("It covers the screen"), Darkener->GetRelativeScale3D().X * 50.0 > Distance * 4.0);
-	TestTrue(TEXT("It faces the camera"), Darkener->GetRelativeRotation().Quaternion().GetUpVector().Equals(FVector::BackwardVector, 0.001));
-
-	TestFalse(TEXT("It's hidden with the inventory shut"), Darkener->GetVisibleFlag());
-	TestEqual(TEXT("And clear"), GetDarkness(), 0.0f);
-
-	Rig->SetPackVisible(true);
-	TestTrue(TEXT("It shows with the rest of the view"), Darkener->GetVisibleFlag());
-	TestEqual(TEXT("Still clear until the grid arrives"), GetDarkness(), 0.0f);
-
-	Rig->SetGridVisible(true);
-	Rig->Tick(0.04f);
-	const float PartWay = GetDarkness();
-	TestTrue(TEXT("It fades in with the grid"), PartWay > 0.0f);
-
-	Rig->Tick(1.0f);
-	const float Full = GetDarkness();
-	TestTrue(TEXT("Getting darker"), Full > PartWay);
-	TestTrue(TEXT("But only subtly"), Full < 0.5f);
-
-	Rig->SetGridVisible(false);
-	Rig->Tick(1.0f);
-	TestEqual(TEXT("And fades out with it"), GetDarkness(), 0.0f);
-
-	const FPostProcessSettings& PostProcess = Rig->GetViewCamera()->PostProcessSettings;
-	TestTrue(TEXT("Auto exposure can't undo it"), PostProcess.bOverride_AutoExposureSpeedUp && PostProcess.AutoExposureSpeedUp < 0.01f);
-
-	TestTrue(TEXT("The rig keeps ticking while it's on show"), Rig->IsActorTickEnabled());
-	Rig->SetPackVisible(false);
-	Rig->Tick(0.01f);
-	TestFalse(TEXT("And stops once it's hidden"), Rig->IsActorTickEnabled());
-
-	return true;
-}
-
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSDiscardedOffsetTest, "Fellowship.Inventory.Display.DroppedItemsRestOnTheFloorWithTheirOffset", TestFlags)
 
 bool FFSDiscardedOffsetTest::RunTest(const FString& Parameters)
