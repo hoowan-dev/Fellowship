@@ -29,6 +29,9 @@ AFSCharacter::AFSCharacter(const FObjectInitializer& ObjectInitializer)
 	// Turn speed is eased by UFSCharacterMovementComponent::FacingInterpSpeed
 	GetCharacterMovement()->bOrientRotationToMovement = true;
 
+	// Otherwise bones that are hidden stop being animated. Armor hides the body's, which everything else on the character is attached below.
+	GetMesh()->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
+
 	// Camera boom pulls in towards the player if there is a collision
 	CameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraBoom"));
 	CameraBoom->SetupAttachment(RootComponent);

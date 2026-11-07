@@ -8,6 +8,7 @@
 #include "Character/FSCharacterAnimInstance.h"
 #include "Character/FSCharacterMovementComponent.h"
 #include "Character/FSEquipmentComponent.h"
+#include "Components/PoseableMeshComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/Engine.h"
@@ -36,6 +37,25 @@ namespace
 		Item->WeaponType = Type;
 		Item->Mesh = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
 		return Item;
+	}
+
+	UFSItemDefinition* MakeArmor(EFSArmorType Type)
+	{
+		UFSItemDefinition* Item = NewObject<UFSItemDefinition>();
+		Item->ItemType = EFSItemType::Armor;
+		Item->ArmorType = Type;
+		Item->Mesh = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
+		return Item;
+	}
+
+	USkeletalMesh* LoadCharacterMesh()
+	{
+		return LoadObject<USkeletalMesh>(nullptr, TEXT("/Game/Meshes/TinyHero/OneMeshCharacter/OneMeshCharacter01_SK.OneMeshCharacter01_SK"));
+	}
+
+	USkeletalMesh* LoadBodyMesh()
+	{
+		return LoadObject<USkeletalMesh>(nullptr, TEXT("/Game/Meshes/TinyHero/BodyPart/Body13_SK.Body13_SK"));
 	}
 
 	FFSWeaponStanceRule MakeRule(EFSWeaponType RightHand, EFSWeaponType LeftHand, UFSWeaponStance* Stance)
@@ -93,6 +113,19 @@ namespace
 		{
 			GEngine->DestroyWorldContext(World);
 			World->DestroyWorld(false);
+		}
+
+		void Wear(UFSItemDefinition* Item)
+		{
+			Inventory->CarryNewItem(Item);
+			Inventory->SwapCarriedItemWithArmorSlot(Item->ArmorType);
+			Inventory->ClearCarriedItem();
+		}
+
+		void TakeOff(EFSArmorType ArmorType)
+		{
+			Inventory->SwapCarriedItemWithArmorSlot(ArmorType);
+			Inventory->ClearCarriedItem();
 		}
 
 		void Hold(UFSItemDefinition* Item, EFSHand Hand)
@@ -673,6 +706,249 @@ bool FFSWornBackpackTest::RunTest(const FString& Parameters)
 	Test.Inventory->RemoveBackpack(Contents);
 	TestFalse(TEXT("Taking it off removes it"), Worn->IsVisible());
 	TestNull(TEXT("And its mesh"), Worn->GetStaticMesh().Get());
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSWornStaticArmorTest, "Fellowship.Equipment.Armor.StaticMeshesAttachToTheirBones", EquipmentTestFlags)
+
+bool FFSWornStaticArmorTest::RunTest(const FString& Parameters)
+{
+	USkeletalMesh* CharacterMeshAsset = LoadCharacterMesh();
+	if (!TestNotNull(TEXT("The character's mesh loads"), CharacterMeshAsset))
+	{
+		return false;
+	}
+
+	FEquipmentTestWorld Test;
+	USkeletalMeshComponent* CharacterMesh = Test.Character->GetMesh();
+	CharacterMesh->SetSkeletalMeshAsset(CharacterMeshAsset);
+
+	const FName HeadBone(TEXT("head"));
+
+	UFSItemDefinition* Hat = MakeArmor(EFSArmorType::Head);
+	Hat->WornTransform = FTransform(FVector(0.0, 0.0, 5.0));
+	Test.Wear(Hat);
+
+	UStaticMeshComponent* Worn = Test.Equipment->GetArmorMesh(EFSArmorType::Head);
+	if (!TestNotNull(TEXT("Wearing it shows it"), Worn))
+	{
+		return false;
+	}
+
+	TestTrue(TEXT("It's the item's mesh"), Worn->GetStaticMesh() == Hat->Mesh);
+	TestTrue(TEXT("Attached to the character's mesh"), Worn->GetAttachParent() == CharacterMesh);
+	TestEqual(TEXT("At the head"), Worn->GetAttachSocketName(), HeadBone);
+	TestFalse(TEXT("A mesh that doesn't replace anything leaves the head"), CharacterMesh->IsBoneHiddenByName(HeadBone));
+
+	// In the pose the armor was modeled in, its axes are the character mesh's, moved by the item's transform
+	const FTransform AtHead = CharacterMesh->GetSocketTransform(HeadBone, RTS_Component);
+	const FTransform InMesh = Worn->GetRelativeTransform() * AtHead;
+	TestTrue(TEXT("It keeps the axes it was modeled in"), InMesh.GetRotation().Equals(FQuat::Identity, 0.001));
+	TestTrue(TEXT("And the item's transform moves it along them"), InMesh.GetLocation().Equals(AtHead.GetLocation() + FVector(0.0, 0.0, 5.0), 0.001));
+
+	UFSItemDefinition* Vest = MakeArmor(EFSArmorType::Body);
+	Test.Wear(Vest);
+	TestEqual(TEXT("Body armor goes on the chest"), Test.Equipment->GetArmorMesh(EFSArmorType::Body)->GetAttachSocketName(), FName(TEXT("spine_03")));
+
+	Test.TakeOff(EFSArmorType::Head);
+	TestFalse(TEXT("Taking it off removes it"), Worn->IsVisible());
+	TestNull(TEXT("And its mesh"), Worn->GetStaticMesh().Get());
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSReplacingHeadTest, "Fellowship.Equipment.Armor.ReplacingTheHeadHidesItAndTheFace", EquipmentTestFlags)
+
+bool FFSReplacingHeadTest::RunTest(const FString& Parameters)
+{
+	USkeletalMesh* CharacterMeshAsset = LoadCharacterMesh();
+	if (!TestNotNull(TEXT("The character's mesh loads"), CharacterMeshAsset))
+	{
+		return false;
+	}
+
+	FEquipmentTestWorld Test;
+	USkeletalMeshComponent* CharacterMesh = Test.Character->GetMesh();
+	CharacterMesh->SetSkeletalMeshAsset(CharacterMeshAsset);
+
+	const FName HeadBone(TEXT("head"));
+
+	UFSItemDefinition* Glasses = MakeArmor(EFSArmorType::Face);
+	Glasses->bReplacesMesh = true;
+	Test.Wear(Glasses);
+
+	UStaticMeshComponent* Face = Test.Equipment->GetArmorMesh(EFSArmorType::Face);
+	TestTrue(TEXT("Face armor shows"), Face && Face->IsVisible());
+	TestFalse(TEXT("It has no part of its own to replace, because the face is part of the head"), CharacterMesh->IsBoneHiddenByName(HeadBone));
+
+	UFSItemDefinition* Helmet = MakeArmor(EFSArmorType::Head);
+	Helmet->bReplacesMesh = true;
+	Test.Wear(Helmet);
+
+	TestTrue(TEXT("The head is hidden"), CharacterMesh->IsBoneHiddenByName(HeadBone));
+	TestTrue(TEXT("The helmet shows"), Test.Equipment->GetArmorMesh(EFSArmorType::Head)->IsVisible());
+	TestFalse(TEXT("The face armor doesn't"), Face->IsVisible());
+	TestTrue(TEXT("Though it's still worn"), Test.Inventory->GetArmorItem(EFSArmorType::Face).Definition == Glasses);
+
+	Test.TakeOff(EFSArmorType::Head);
+	TestFalse(TEXT("Taking it off brings back the head"), CharacterMesh->IsBoneHiddenByName(HeadBone));
+	TestTrue(TEXT("And the face armor"), Face->IsVisible());
+
+	// A helmet that doesn't replace anything has no effect on either
+	UFSItemDefinition* Hat = MakeArmor(EFSArmorType::Head);
+	Test.Wear(Hat);
+	TestFalse(TEXT("An added mesh leaves the head"), CharacterMesh->IsBoneHiddenByName(HeadBone));
+	TestTrue(TEXT("And the face armor"), Face->IsVisible());
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSSkeletalBodyArmorTest, "Fellowship.Equipment.Armor.SkeletalBodyReplacesTheBodyAndKeepsTheHead", EquipmentTestFlags)
+
+bool FFSSkeletalBodyArmorTest::RunTest(const FString& Parameters)
+{
+	USkeletalMesh* CharacterMeshAsset = LoadCharacterMesh();
+	USkeletalMesh* BodyMesh = LoadBodyMesh();
+	if (!TestNotNull(TEXT("The character's mesh loads"), CharacterMeshAsset) || !TestNotNull(TEXT("The armor's mesh loads"), BodyMesh))
+	{
+		return false;
+	}
+
+	FEquipmentTestWorld Test;
+	USkeletalMeshComponent* CharacterMesh = Test.Character->GetMesh();
+	CharacterMesh->SetSkeletalMeshAsset(CharacterMeshAsset);
+
+	const FName HeadBone(TEXT("head"));
+	const FName BodyBone(TEXT("pelvis"));
+	const FName ChestBone(TEXT("spine_03"));
+	const FName BackpackBone(TEXT("BackpackBone"));
+
+	TestTrue(TEXT("Hidden bones keep being animated, for what's attached to them"), CharacterMesh->VisibilityBasedAnimTickOption == EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones);
+
+	UFSItemDefinition* Armor = MakeArmor(EFSArmorType::Body);
+	Armor->bUsesSkeletalMesh = true;
+	Armor->SkeletalMesh = BodyMesh;
+	Test.Wear(Armor);
+
+	UPoseableMeshComponent* Worn = Test.Equipment->GetSkeletalArmorMesh(EFSArmorType::Body);
+	if (!TestNotNull(TEXT("Wearing it shows it"), Worn))
+	{
+		return false;
+	}
+
+	TestTrue(TEXT("It's the item's skeletal mesh"), Worn->GetSkinnedAsset() == BodyMesh);
+	TestTrue(TEXT("Attached to the character's mesh"), Worn->GetAttachParent() == CharacterMesh);
+	TestTrue(TEXT("It's visible"), Worn->IsVisible());
+	TestFalse(TEXT("It doesn't take on the character's hidden bones"), Worn->LeaderPoseComponent.IsValid());
+	TestFalse(TEXT("Its own bones aren't hidden"), Worn->IsBoneHiddenByName(ChestBone));
+	TestNull(TEXT("The item's static mesh isn't shown as well"), Test.Equipment->GetArmorMesh(EFSArmorType::Body));
+
+	TestTrue(TEXT("The character's body is hidden"), CharacterMesh->IsBoneHiddenByName(BodyBone));
+	TestTrue(TEXT("All the way up"), CharacterMesh->IsBoneHiddenByName(ChestBone));
+	TestFalse(TEXT("Except for the head"), CharacterMesh->IsBoneHiddenByName(HeadBone));
+
+	// Each of these rebuilds the states in a way that would take the head with the body
+	FFSBackpackContents Contents;
+	Test.Inventory->RemoveBackpack(Contents);
+	TestFalse(TEXT("Changing backpack keeps the head"), CharacterMesh->IsBoneHiddenByName(HeadBone));
+	TestTrue(TEXT("And the backpack bone hidden"), CharacterMesh->IsBoneHiddenByName(BackpackBone));
+
+	Test.Character->SetInventoryViewBonesHidden(true);
+	TestTrue(TEXT("The inventory view still hides the head"), CharacterMesh->IsBoneHiddenByName(HeadBone));
+	TestTrue(TEXT("While the armor stays, as all there is of the body"), Worn->IsVisible());
+
+	Test.Character->SetInventoryViewBonesHidden(false);
+	TestFalse(TEXT("And shows it again"), CharacterMesh->IsBoneHiddenByName(HeadBone));
+	TestTrue(TEXT("Without bringing back the body"), CharacterMesh->IsBoneHiddenByName(BodyBone));
+
+	// Out of its reference pose, to show that it's the character's pose being copied
+	Worn->SetBoneRotationByName(HeadBone, FRotator(40.0, 0.0, 0.0), EBoneSpaces::ComponentSpace);
+	Worn->RefreshBoneTransforms();
+	const FQuat Moved = Worn->GetBoneQuaternion(HeadBone, EBoneSpaces::ComponentSpace);
+	TestFalse(TEXT("The armor's pose was moved"), Moved.Equals(CharacterMesh->GetBoneQuaternion(HeadBone, EBoneSpaces::ComponentSpace), 0.001));
+	Test.Equipment->TickComponent(0.016f, LEVELTICK_All, nullptr);
+	TestTrue(TEXT("It follows the character's pose"), Worn->GetBoneQuaternion(HeadBone, EBoneSpaces::ComponentSpace).Equals(CharacterMesh->GetBoneQuaternion(HeadBone, EBoneSpaces::ComponentSpace), 0.001));
+
+	Test.TakeOff(EFSArmorType::Body);
+	TestFalse(TEXT("Taking it off removes it"), Worn->IsVisible());
+	TestNull(TEXT("And its mesh"), Worn->GetSkinnedAsset());
+	TestFalse(TEXT("And brings back the body"), CharacterMesh->IsBoneHiddenByName(BodyBone));
+	TestFalse(TEXT("All the way up"), CharacterMesh->IsBoneHiddenByName(ChestBone));
+	TestFalse(TEXT("With the head still there"), CharacterMesh->IsBoneHiddenByName(HeadBone));
+	TestTrue(TEXT("And the character's own backpack still gone"), CharacterMesh->IsBoneHiddenByName(BackpackBone));
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSArmorSettingsTest, "Fellowship.Equipment.Armor.WhatCountsAsReplacing", EquipmentTestFlags)
+
+bool FFSArmorSettingsTest::RunTest(const FString& Parameters)
+{
+	UFSItemDefinition* Item = MakeArmor(EFSArmorType::Head);
+	TestFalse(TEXT("By default, armor is added on top"), Item->ReplacesCharacterPart());
+
+	Item->bReplacesMesh = true;
+	TestTrue(TEXT("Replaces Mesh replaces"), Item->ReplacesCharacterPart());
+
+	Item->ItemType = EFSItemType::Weapon;
+	TestFalse(TEXT("Only on armor"), Item->ReplacesCharacterPart());
+	Item->ItemType = EFSItemType::Armor;
+
+	// Replaces Mesh can be left on from before, when it's no longer even shown
+	Item->bUsesSkeletalMesh = true;
+	TestFalse(TEXT("With no skeletal mesh, there's nothing to replace it with"), Item->ReplacesCharacterPart());
+
+	Item->bReplacesMesh = false;
+	Item->SkeletalMesh = LoadBodyMesh();
+	TestTrue(TEXT("A skeletal mesh always replaces"), Item->ReplacesCharacterPart());
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSArmorInventoryViewTest, "Fellowship.Equipment.Armor.HeadAndFaceHideInTheInventoryView", EquipmentTestFlags)
+
+bool FFSArmorInventoryViewTest::RunTest(const FString& Parameters)
+{
+	USkeletalMesh* CharacterMeshAsset = LoadCharacterMesh();
+	if (!TestNotNull(TEXT("The character's mesh loads"), CharacterMeshAsset))
+	{
+		return false;
+	}
+
+	FEquipmentTestWorld Test;
+	USkeletalMeshComponent* CharacterMesh = Test.Character->GetMesh();
+	CharacterMesh->SetSkeletalMeshAsset(CharacterMeshAsset);
+
+	const FName HeadBone(TEXT("head"));
+
+	UFSItemDefinition* Helmet = MakeArmor(EFSArmorType::Head);
+	Helmet->bReplacesMesh = true;
+	Test.Wear(Helmet);
+	Test.Wear(MakeArmor(EFSArmorType::Body));
+
+	UStaticMeshComponent* Head = Test.Equipment->GetArmorMesh(EFSArmorType::Head);
+	UStaticMeshComponent* Body = Test.Equipment->GetArmorMesh(EFSArmorType::Body);
+
+	Test.Character->SetInventoryViewBonesHidden(true);
+	TestFalse(TEXT("The helmet would block the camera"), Head->IsVisible());
+	TestTrue(TEXT("Body armor stays"), Body->IsVisible());
+
+	// As if changing armor while looking at the inventory
+	Test.TakeOff(EFSArmorType::Head);
+	TestTrue(TEXT("Taking it off doesn't bring the head back into the camera's way"), CharacterMesh->IsBoneHiddenByName(HeadBone));
+
+	Test.Wear(Helmet);
+	TestFalse(TEXT("Nor does putting it on bring the helmet back"), Head->IsVisible());
+
+	Test.Character->SetInventoryViewBonesHidden(false);
+	TestTrue(TEXT("It shows again afterwards"), Head->IsVisible());
+	TestTrue(TEXT("Without bringing back the head it replaces"), CharacterMesh->IsBoneHiddenByName(HeadBone));
+
+	Test.Character->SetInventoryViewBonesHidden(true);
+	Test.TakeOff(EFSArmorType::Head);
+	Test.Character->SetInventoryViewBonesHidden(false);
+	TestFalse(TEXT("Taken off during the view, the head is back once it closes"), CharacterMesh->IsBoneHiddenByName(HeadBone));
 
 	return true;
 }

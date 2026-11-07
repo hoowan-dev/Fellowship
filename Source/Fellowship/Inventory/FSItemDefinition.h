@@ -90,6 +90,9 @@ public:
 	// The colour an item's name is drawn in
 	static FLinearColor GetRarityColor(EFSItemRarity Rarity);
 
+	// Whether wearing this takes the place of a part of the character, which needs a mesh to show in its place
+	bool ReplacesCharacterPart() const;
+
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Item")
 	FText DisplayName;
 
@@ -138,6 +141,10 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Display", meta = (EditCondition = "bShowHandEquipped", EditConditionHides))
 	FTransform HandEquippedTransform = FTransform::Identity;
 
+	// Adjusts where Mesh sits on the character when worn. With none, its pivot is at the armor's bone with +X towards the character's left, +Y its front and +Z up, for the character's pose in the mesh it was modeled on.
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Display", meta = (EditCondition = "ItemType == EFSItemType::Armor && !bUsesSkeletalMesh", EditConditionHides))
+	FTransform WornTransform = FTransform::Identity;
+
 	// Defaults to Weapon because the assets saved before this existed are all weapons, and they only store what differs from the default
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Usage")
 	EFSItemType ItemType = EFSItemType::Weapon;
@@ -150,16 +157,17 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Usage", meta = (EditCondition = "ItemType == EFSItemType::Armor", EditConditionHides))
 	EFSArmorType ArmorType = EFSArmorType::Head;
 
-	// Whether Skeletal Mesh is what shows when this is worn. Ignored unless Item Type is Armor.
+	// Whether Skeletal Mesh is what shows when this is worn, in place of the character's own head or body. Ignored unless Item Type is Armor.
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Usage", meta = (EditCondition = "ItemType == EFSItemType::Armor", EditConditionHides))
 	bool bUsesSkeletalMesh = false;
 
-	// What will show on the character when this is worn, once wearing armor is added. Mesh is still what shows everywhere else, such as on the floor and in the inventory. Ignored unless Item Type is Armor and Uses Skeletal Mesh is on.
+	// What shows on the character when this is worn, animated along with it. Mesh is still what shows everywhere else, such as on the floor and in the inventory. Ignored unless Item Type is Armor and Uses Skeletal Mesh is on.
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Usage", meta = (EditCondition = "ItemType == EFSItemType::Armor && bUsesSkeletalMesh", EditConditionHides))
 	TObjectPtr<USkeletalMesh> SkeletalMesh;
 
-	// Whether this will substitute a part of the player's skeletal mesh when worn, once wearing armor is added. Ignored unless Item Type is Armor.
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Usage", meta = (EditCondition = "ItemType == EFSItemType::Armor", EditConditionHides))
+	// Whether Mesh takes the place of the character's own head or body when worn, rather than being added on top of it. On head armor, this also hides whatever is worn on the face.
+	// The face is part of the character's head, so on face armor there's nothing to take the place of. Ignored unless Item Type is Armor and Uses Skeletal Mesh is off.
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Usage", meta = (EditCondition = "ItemType == EFSItemType::Armor && !bUsesSkeletalMesh", EditConditionHides))
 	bool bReplacesMesh = false;
 
 	// How far up a backpack's sides the items in its quick slots hang from, as a fraction of its height. Ignored unless Item Type is Backpack.

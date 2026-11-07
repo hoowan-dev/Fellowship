@@ -318,7 +318,13 @@ bool UFSInventoryComponent::CanCarriedItemGoInArmorSlot(EFSArmorType ArmorType) 
 
 bool UFSInventoryComponent::SwapCarriedItemWithArmorSlot(EFSArmorType ArmorType)
 {
-	return CanCarriedItemGoInArmorSlot(ArmorType) && SwapCarriedItemWith(ArmorItems[static_cast<int32>(ArmorType)], GetArmorSlotName(ArmorType));
+	if (!CanCarriedItemGoInArmorSlot(ArmorType) || !SwapCarriedItemWith(ArmorItems[static_cast<int32>(ArmorType)], GetArmorSlotName(ArmorType)))
+	{
+		return false;
+	}
+
+	OnArmorChanged.Broadcast();
+	return true;
 }
 
 bool UFSInventoryComponent::SwapCarriedItemWith(FFSInventoryItem& HeldItem, const FText& SlotName)

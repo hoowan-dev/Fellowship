@@ -1,6 +1,8 @@
 // Copyright HoowanDev 2026 all rights reserved.
 
 #include "FSItemDefinition.h"
+#include "Engine/SkeletalMesh.h"
+#include "Engine/StaticMesh.h"
 
 namespace
 {
@@ -60,4 +62,15 @@ FLinearColor UFSItemDefinition::GetRarityColor(EFSItemRarity Rarity)
 	default:
 		return FLinearColor::White;
 	}
+}
+
+bool UFSItemDefinition::ReplacesCharacterPart() const
+{
+	if (ItemType != EFSItemType::Armor)
+	{
+		return false;
+	}
+
+	// Going by the setting that's being shown, because Replaces Mesh can be left on from before Uses Skeletal Mesh was turned on
+	return bUsesSkeletalMesh ? SkeletalMesh != nullptr : bReplacesMesh && Mesh != nullptr;
 }

@@ -12,7 +12,10 @@
 #include "Engine/World.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/WorldSettings.h"
+#include "Inventory/FSInventoryComponent.h"
 #include "Inventory/FSInventoryRig.h"
+#include "Inventory/FSItemDefinition.h"
+#include "Player/FSPlayerState.h"
 
 namespace
 {
@@ -335,6 +338,51 @@ bool FFSInventoryRigArmsTest::RunTest(const FString& Parameters)
 
 	TestTrue(TEXT("The body is shrunk away"), Arms->GetBoneScaleByName(TEXT("pelvis"), EBoneSpaces::ComponentSpace).X < 0.01);
 	TestTrue(TEXT("So is the head"), Arms->GetBoneScaleByName(TEXT("head"), EBoneSpaces::ComponentSpace).X < 0.01);
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSInventoryRigArmorArmsTest, "Fellowship.Inventory.Rig.ArmsWearWhatsOnTheBody", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FFSInventoryRigArmorArmsTest::RunTest(const FString& Parameters)
+{
+	USkeletalMesh* Mesh = LoadObject<USkeletalMesh>(nullptr, TEXT("/Game/Meshes/TinyHero/OneMeshCharacter/OneMeshCharacter01_SK.OneMeshCharacter01_SK"));
+	USkeletalMesh* ArmorMesh = LoadObject<USkeletalMesh>(nullptr, TEXT("/Game/Meshes/TinyHero/BodyPart/Body13_SK.Body13_SK"));
+	if (!TestNotNull(TEXT("The character's mesh loads"), Mesh) || !TestNotNull(TEXT("The armor's mesh loads"), ArmorMesh))
+	{
+		return false;
+	}
+
+	FInventoryRigTestWorld Test;
+	ACharacter* Character = Test.World->SpawnActor<ACharacter>();
+	Character->GetMesh()->SetSkeletalMeshAsset(Mesh);
+	UFSInventoryComponent* Inventory = Test.World->SpawnActor<AFSPlayerState>()->GetInventory();
+
+	Test.Rig->AttachToCharacter(Character);
+	Test.Rig->ShowInventory(*Inventory);
+
+	UPoseableMeshComponent* Arms = Test.Rig->GetArms();
+	const FName HandBone(TEXT("hand_l"));
+	const FVector HandLocation = Arms->GetBoneLocationByName(HandBone, EBoneSpaces::ComponentSpace);
+	TestTrue(TEXT("With nothing on, the arms are the character's"), Arms->GetSkinnedAsset() == Mesh);
+
+	UFSItemDefinition* Armor = NewObject<UFSItemDefinition>();
+	Armor->ItemType = EFSItemType::Armor;
+	Armor->ArmorType = EFSArmorType::Body;
+	Armor->bUsesSkeletalMesh = true;
+	Armor->SkeletalMesh = ArmorMesh;
+	Inventory->CarryNewItem(Armor);
+	Inventory->SwapCarriedItemWithArmorSlot(EFSArmorType::Body);
+	Test.Rig->ShowInventory(*Inventory);
+
+	TestTrue(TEXT("Skeletal body armor shows on them"), Arms->GetSkinnedAsset() == ArmorMesh);
+	TestTrue(TEXT("Posed the same way"), Arms->GetBoneLocationByName(HandBone, EBoneSpaces::ComponentSpace).Equals(HandLocation, 0.001));
+	TestTrue(TEXT("Still shrinking the body away"), Arms->GetBoneScaleByName(TEXT("pelvis"), EBoneSpaces::ComponentSpace).X < 0.01);
+
+	Inventory->SwapCarriedItemWithArmorSlot(EFSArmorType::Body);
+	Test.Rig->ShowInventory(*Inventory);
+	TestTrue(TEXT("Taking it off brings back the character's"), Arms->GetSkinnedAsset() == Mesh);
+	TestTrue(TEXT("Still posed the same way"), Arms->GetBoneLocationByName(HandBone, EBoneSpaces::ComponentSpace).Equals(HandLocation, 0.001));
 
 	return true;
 }

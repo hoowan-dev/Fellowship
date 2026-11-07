@@ -7,6 +7,7 @@
 #include "FSInventoryRig.generated.h"
 
 class ACharacter;
+class USkeletalMeshComponent;
 class UCameraComponent;
 class UFSInventoryComponent;
 class UFSItemDefinition;
@@ -195,6 +196,9 @@ protected:
 	void BuildQuickSlots();
 	void BuildArmorSlots();
 	void BuildDropBackpackButton();
+	// Matches the arms to the character, or to what's worn on its body
+	void RefreshArmsMesh();
+
 	void PoseArms();
 	void PoseArm(bool bLeft);
 
@@ -483,6 +487,9 @@ private:
 
 	// What ShowInventory last showed, used to find the cells a hovered item covers
 	TWeakObjectPtr<const UFSInventoryComponent> ShownInventory;
+
+	// Where the arms get their mesh from, unless what's worn takes its place
+	TWeakObjectPtr<const USkeletalMeshComponent> AttachedCharacterMesh;
 
 	FIntPoint HoveredCell = FIntPoint(INDEX_NONE, INDEX_NONE);
 	int32 HoveredHandSlot = INDEX_NONE;

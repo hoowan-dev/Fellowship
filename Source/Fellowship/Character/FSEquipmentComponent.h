@@ -8,11 +8,12 @@
 #include "Inventory/FSWeaponStance.h"
 #include "FSEquipmentComponent.generated.h"
 
+class UPoseableMeshComponent;
 class USkeletalMeshComponent;
 class UStaticMeshComponent;
 
 /**
- * Shows what the player's hands hold on the character, whether those weapons are drawn or sheathed on the back, and the backpack being worn with the quick slots' items hanging off it.
+ * Shows what the player's hands hold on the character, whether those weapons are drawn or sheathed on the back, the backpack being worn with the quick slots' items hanging off it, and the armor being worn.
  * The items themselves belong to the inventory, so this only ever follows it.
  */
 UCLASS(ClassGroup = (Inventory), meta = (BlueprintSpawnableComponent))
@@ -69,6 +70,18 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category = "Equipment|Sockets")
 	FName BackpackBone = TEXT("BackpackBone");
 
+	// What head and face armor's meshes attach to. All of the character's own head and face are skinned to this bone, so hiding it is what removes them.
+	UPROPERTY(EditDefaultsOnly, Category = "Equipment|Sockets")
+	FName HeadBone = TEXT("head");
+
+	// What body armor's mesh attaches to, unless it's a skeletal mesh
+	UPROPERTY(EditDefaultsOnly, Category = "Equipment|Sockets")
+	FName BodyArmorBone = TEXT("spine_03");
+
+	// The top of the character's body in the skeleton. Hiding it is what removes the body, with everything but the head going with it.
+	UPROPERTY(EditDefaultsOnly, Category = "Equipment|Sockets")
+	FName BodyBone = TEXT("pelvis");
+
 	// How far a long item hanging off the worn backpack can reach below it. The default stops just short of the floor when standing.
 	UPROPERTY(EditDefaultsOnly, Category = "Equipment|Swinging", meta = (ClampMin = "0.0", Units = cm))
 	float HungItemMaxDrop = 20.0f;
@@ -111,7 +124,8 @@ public:
 	// The stance to animate with right now. Null only if Unarmed Stance isn't set.
 	const UFSWeaponStance* GetCurrentStance() const;
 
-	// Hides the weapons, backpack and what hangs off it without changing where they are, such as while the camera is inside the character's head
+	// Hides the weapons, backpack, what hangs off it and what's worn on the head and face without changing where they are, such as while the camera is inside the character's head.
+	// Body armor stays, because it's all there is of the character's body when it replaces it.
 	void SetMeshesHidden(bool bHidden);
 
 	// Null until something has been shown in that hand
@@ -122,6 +136,12 @@ public:
 
 	// Null until something has hung on that side of the backpack
 	FORCEINLINE UStaticMeshComponent* GetHungItemMesh(EFSQuickSlot QuickSlot) const { return HungItemMeshes.Get(QuickSlot); }
+
+	// Null until armor with a static mesh has been worn in that slot
+	FORCEINLINE UStaticMeshComponent* GetArmorMesh(EFSArmorType ArmorType) const { return ArmorMeshes[static_cast<int32>(ArmorType)]; }
+
+	// Null until armor with a skeletal mesh has been worn in that slot
+	FORCEINLINE UPoseableMeshComponent* GetSkeletalArmorMesh(EFSArmorType ArmorType) const { return SkeletalArmorMeshes[static_cast<int32>(ArmorType)]; }
 
 private:
 	// A mesh that swings about a point as what it's attached to moves
@@ -149,9 +169,17 @@ private:
 	void RefreshMeshes();
 	void RefreshMesh(EFSHand Hand);
 	void RefreshBackpackMesh();
+	void RefreshArmorMeshes();
+	void RefreshArmorMesh(EFSArmorType ArmorType, USkeletalMeshComponent& CharacterMesh);
+
+	// Hides the parts of the character that what's worn takes the place of, and shows them again once it's gone. Has to be what changes the character's hidden bones last, because any other change undoes keeping the head when the body is hidden.
+	void RefreshHiddenBones(USkeletalMeshComponent& CharacterMesh);
 
 	// A mesh to show an item on the character
 	UStaticMeshComponent* CreateAttachedMesh(USkeletalMeshComponent* CharacterMesh) const;
+
+	// Whether what's worn in a slot takes the place of its part of the character
+	bool IsArmorReplacingPart(EFSArmorType ArmorType) const;
 
 	bool IsHoldingAnything() const;
 	EFSWeaponType GetHeldWeaponType(EFSHand Hand) const;
@@ -168,9 +196,20 @@ private:
 	UPROPERTY(Transient)
 	FFSHungItemMeshes HungItemMeshes;
 
+	UPROPERTY(Transient)
+	TObjectPtr<UStaticMeshComponent> ArmorMeshes[3];
+
+	// These copy the character's pose rather than following it as a leader, because a follower also takes on its leader's hidden bones, and the body armor has to show where the character's body is hidden
+	UPROPERTY(Transient)
+	TObjectPtr<UPoseableMeshComponent> SkeletalArmorMeshes[3];
+
 	FSwing HandSwings[2];
 	FSwing HungItemSwings[2];
 
 	bool bDrawn = false;
 	bool bMeshesHidden = false;
+
+	// Whether the head or body bones are hidden on armor's behalf, to know when to show them again
+	bool bHeadReplaced = false;
+	bool bBodyReplaced = false;
 };

@@ -39,6 +39,7 @@ enum class EFSArmorType : uint8;
 DECLARE_MULTICAST_DELEGATE(FFSOnHandItemsChanged);
 DECLARE_MULTICAST_DELEGATE(FFSOnBackpackChanged);
 DECLARE_MULTICAST_DELEGATE(FFSOnQuickSlotItemsChanged);
+DECLARE_MULTICAST_DELEGATE(FFSOnArmorChanged);
 
 USTRUCT()
 struct FELLOWSHIP_API FFSInventoryItem
@@ -192,6 +193,8 @@ public:
 
 	// Puts the carried item in an armor slot, and what the slot held becomes the carried item. Returns false, changing nothing, if both are empty or the carried item isn't armor of that type.
 	bool SwapCarriedItemWithArmorSlot(EFSArmorType ArmorType);
+
+	FFSOnArmorChanged OnArmorChanged;
 
 	// What an armor slot holds. Its definition is null if the slot is empty.
 	FORCEINLINE const FFSInventoryItem& GetArmorItem(EFSArmorType ArmorType) const { return ArmorItems[static_cast<int32>(ArmorType)]; }

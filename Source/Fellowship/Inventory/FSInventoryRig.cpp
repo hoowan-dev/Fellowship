@@ -7,6 +7,7 @@
 #include "Components/PoseableMeshComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Engine/SkeletalMesh.h"
 #include "Engine/SkinnedAsset.h"
 #include "Engine/StaticMesh.h"
 #include "GameFramework/Character.h"
@@ -600,6 +601,7 @@ void AFSInventoryRig::ShowInventory(const UFSInventoryComponent& Inventory)
 	SetHoveredArmorSlot(INDEX_NONE);
 	SetDropBackpackButtonHovered(false);
 	ShownInventory = &Inventory;
+	RefreshArmsMesh();
 
 	bHasBackpack = Inventory.HasBackpack();
 	FitPackMesh(Inventory.GetBackpack());
@@ -896,17 +898,40 @@ void AFSInventoryRig::AttachToCharacter(ACharacter* Character)
 	SetActorLocationAndRotation(HeadLocation + FVector(0.0, 0.0, ViewHeightOffset), FRotator(0.0, Character->GetActorRotation().Yaw, 0.0));
 	AttachToActor(Character, FAttachmentTransformRules::KeepWorldTransform);
 
-	if (Mesh && Mesh->GetSkeletalMeshAsset())
-	{
-		if (Arms->GetSkinnedAsset() != Mesh->GetSkeletalMeshAsset())
-		{
-			Arms->SetSkinnedAssetAndUpdate(Mesh->GetSkeletalMeshAsset());
-			PoseArms();
-		}
+	AttachedCharacterMesh = Mesh;
+	RefreshArmsMesh();
+}
 
-		for (int32 MaterialIndex = 0; MaterialIndex < Mesh->GetNumMaterials(); ++MaterialIndex)
+void AFSInventoryRig::RefreshArmsMesh()
+{
+	const USkeletalMeshComponent* CharacterMesh = AttachedCharacterMesh.Get();
+	USkeletalMesh* CharacterAsset = CharacterMesh ? CharacterMesh->GetSkeletalMeshAsset() : nullptr;
+	if (!CharacterAsset)
+	{
+		return;
+	}
+
+	// The arms are the player's own, so they're in what the player wears on the body if that has arms to show
+	const UFSInventoryComponent* Inventory = ShownInventory.Get();
+	const UFSItemDefinition* BodyArmor = Inventory ? Inventory->GetArmorItem(EFSArmorType::Body).Definition.Get() : nullptr;
+	USkeletalMesh* ArmorAsset = BodyArmor && BodyArmor->ReplacesCharacterPart() && BodyArmor->bUsesSkeletalMesh ? BodyArmor->SkeletalMesh.Get() : nullptr;
+	USkeletalMesh* ArmsAsset = ArmorAsset ? ArmorAsset : CharacterAsset;
+
+	if (Arms->GetSkinnedAsset() != ArmsAsset)
+	{
+		// Through nothing, because a poseable mesh only sets up for a new mesh's bones if there's a different number of them
+		Arms->SetSkinnedAssetAndUpdate(nullptr);
+		Arms->SetSkinnedAssetAndUpdate(ArmsAsset);
+		PoseArms();
+	}
+
+	Arms->EmptyOverrideMaterials();
+
+	if (!ArmorAsset)
+	{
+		for (int32 MaterialIndex = 0; MaterialIndex < CharacterMesh->GetNumMaterials(); ++MaterialIndex)
 		{
-			Arms->SetMaterial(MaterialIndex, Mesh->GetMaterial(MaterialIndex));
+			Arms->SetMaterial(MaterialIndex, CharacterMesh->GetMaterial(MaterialIndex));
 		}
 	}
 }

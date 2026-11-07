@@ -2,11 +2,14 @@
 
 #include "Character/FSEquipmentComponent.h"
 #include "Character/FSCharacterMovementComponent.h"
+#include "Components/PoseableMeshComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/SkeletalMesh.h"
 #include "Engine/StaticMesh.h"
 #include "GameFramework/Character.h"
+#include "Inventory/FSItemDefinition.h"
+#include "ReferenceSkeleton.h"
 
 namespace
 {
@@ -19,6 +22,33 @@ namespace
 	// A little different for each mesh, so that they don't all swing as one
 	constexpr double HandSwingStiffnessScales[] = { 1.0, 0.88 };
 	constexpr double HungItemSwingStiffnessScales[] = { 1.06, 0.94 };
+
+	// Refreshes right away, because a poseable mesh's own tick comes before the character has been animated, which would leave it a frame behind
+	void CopyCharacterPose(UPoseableMeshComponent& Mesh, USkeletalMeshComponent& CharacterMesh)
+	{
+		Mesh.CopyPoseFromSkeletalComponent(&CharacterMesh);
+		Mesh.RefreshBoneTransforms();
+	}
+
+	// A bone's rotation relative to the mesh, in the pose the mesh was modeled in
+	FQuat GetBoneRefPoseRotation(const USkeletalMeshComponent& Mesh, FName Bone)
+	{
+		const USkeletalMesh* Asset = Mesh.GetSkeletalMeshAsset();
+		if (!Asset)
+		{
+			return FQuat::Identity;
+		}
+
+		const FReferenceSkeleton& Skeleton = Asset->GetRefSkeleton();
+		FQuat Rotation = FQuat::Identity;
+
+		for (int32 BoneIndex = Skeleton.FindBoneIndex(Bone); BoneIndex != INDEX_NONE; BoneIndex = Skeleton.GetParentIndex(BoneIndex))
+		{
+			Rotation = Skeleton.GetRefBonePose()[BoneIndex].GetRotation() * Rotation;
+		}
+
+		return Rotation;
+	}
 }
 
 UFSEquipmentComponent::UFSEquipmentComponent()
@@ -64,6 +94,17 @@ void UFSEquipmentComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 	{
 		const int32 Index = static_cast<int32>(QuickSlot);
 		UpdateSwing(HungItemSwings[Index], HungItemMeshes.Get(QuickSlot), DeltaTime, HungItemSwingStiffnessScales[Index]);
+	}
+
+	const ACharacter* Character = Cast<ACharacter>(GetOwner());
+	USkeletalMeshComponent* CharacterMesh = Character ? Character->GetMesh() : nullptr;
+
+	for (UPoseableMeshComponent* ArmorMesh : SkeletalArmorMeshes)
+	{
+		if (CharacterMesh && ArmorMesh && ArmorMesh->GetSkinnedAsset() && ArmorMesh->IsVisible())
+		{
+			CopyCharacterPose(*ArmorMesh, *CharacterMesh);
+		}
 	}
 }
 
@@ -114,6 +155,7 @@ void UFSEquipmentComponent::SetInventory(UFSInventoryComponent* NewInventory)
 		Inventory->OnHandItemsChanged.RemoveAll(this);
 		Inventory->OnBackpackChanged.RemoveAll(this);
 		Inventory->OnQuickSlotItemsChanged.RemoveAll(this);
+		Inventory->OnArmorChanged.RemoveAll(this);
 	}
 
 	Inventory = NewInventory;
@@ -123,6 +165,7 @@ void UFSEquipmentComponent::SetInventory(UFSInventoryComponent* NewInventory)
 		Inventory->OnHandItemsChanged.AddUObject(this, &UFSEquipmentComponent::HandleHandItemsChanged);
 		Inventory->OnBackpackChanged.AddUObject(this, &UFSEquipmentComponent::RefreshBackpackMesh);
 		Inventory->OnQuickSlotItemsChanged.AddUObject(this, &UFSEquipmentComponent::RefreshBackpackMesh);
+		Inventory->OnArmorChanged.AddUObject(this, &UFSEquipmentComponent::RefreshArmorMeshes);
 	}
 
 	HandleHandItemsChanged();
@@ -202,6 +245,158 @@ void UFSEquipmentComponent::RefreshMeshes()
 	RefreshMesh(EFSHand::Right);
 	RefreshMesh(EFSHand::Left);
 	RefreshBackpackMesh();
+	RefreshArmorMeshes();
+}
+
+void UFSEquipmentComponent::RefreshArmorMeshes()
+{
+	const ACharacter* Character = Cast<ACharacter>(GetOwner());
+	USkeletalMeshComponent* CharacterMesh = Character ? Character->GetMesh() : nullptr;
+	if (!CharacterMesh)
+	{
+		return;
+	}
+
+	for (const EFSArmorType ArmorType : { EFSArmorType::Head, EFSArmorType::Face, EFSArmorType::Body })
+	{
+		RefreshArmorMesh(ArmorType, *CharacterMesh);
+	}
+
+	RefreshHiddenBones(*CharacterMesh);
+}
+
+void UFSEquipmentComponent::RefreshArmorMesh(EFSArmorType ArmorType, USkeletalMeshComponent& CharacterMesh)
+{
+	const int32 Index = static_cast<int32>(ArmorType);
+	const UFSItemDefinition* Item = Inventory ? Inventory->GetArmorItem(ArmorType).Definition.Get() : nullptr;
+
+	// What replaces the head leaves no face to wear anything on
+	const bool bShown = Item && !(ArmorType == EFSArmorType::Face && IsArmorReplacingPart(EFSArmorType::Head));
+	const bool bVisible = !bMeshesHidden || ArmorType == EFSArmorType::Body;
+
+	UStaticMesh* StaticMesh = bShown && !Item->bUsesSkeletalMesh ? Item->Mesh.Get() : nullptr;
+	USkeletalMesh* SkeletalMesh = bShown && Item->bUsesSkeletalMesh ? Item->SkeletalMesh.Get() : nullptr;
+
+	TObjectPtr<UStaticMeshComponent>& ArmorMesh = ArmorMeshes[Index];
+
+	if (StaticMesh)
+	{
+		if (!ArmorMesh)
+		{
+			ArmorMesh = CreateAttachedMesh(&CharacterMesh);
+		}
+
+		const FName Bone = ArmorType == EFSArmorType::Body ? BodyArmorBone : HeadBone;
+
+		// A missing bone attaches to the mesh's root without complaint, leaving the armor at the character's feet
+		if (CharacterMesh.GetSkeletalMeshAsset() && !CharacterMesh.DoesSocketExist(Bone))
+		{
+			UE_LOG(LogTemp, Warning, TEXT("%s has no socket or bone called %s for armor to attach to"), *GetNameSafe(CharacterMesh.GetSkeletalMeshAsset()), *Bone.ToString());
+		}
+
+		ArmorMesh->SetStaticMesh(StaticMesh);
+		ArmorMesh->AttachToComponent(&CharacterMesh, FAttachmentTransformRules::SnapToTargetNotIncludingScale, Bone);
+
+		// Bones have axes of their own, whereas armor is modeled in the axes of the character's mesh
+		ArmorMesh->SetRelativeTransform(Item->WornTransform * FTransform(GetBoneRefPoseRotation(CharacterMesh, Bone).Inverse()));
+		ArmorMesh->SetVisibility(bVisible);
+	}
+	else if (ArmorMesh)
+	{
+		ArmorMesh->SetStaticMesh(nullptr);
+		ArmorMesh->SetVisibility(false);
+	}
+
+	TObjectPtr<UPoseableMeshComponent>& SkeletalArmorMesh = SkeletalArmorMeshes[Index];
+
+	if (SkeletalMesh)
+	{
+		if (!SkeletalArmorMesh)
+		{
+			SkeletalArmorMesh = NewObject<UPoseableMeshComponent>(GetOwner());
+			SkeletalArmorMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+			SkeletalArmorMesh->SetCanEverAffectNavigation(false);
+			SkeletalArmorMesh->SetupAttachment(&CharacterMesh);
+			SkeletalArmorMesh->RegisterComponent();
+		}
+
+		if (SkeletalArmorMesh->GetSkinnedAsset() != SkeletalMesh)
+		{
+			// Through nothing, because a poseable mesh only sets up for a new mesh's bones if there's a different number of them
+			SkeletalArmorMesh->SetSkinnedAssetAndUpdate(nullptr);
+			SkeletalArmorMesh->SetSkinnedAssetAndUpdate(SkeletalMesh);
+		}
+
+		// Now, because it would otherwise spend a frame in its reference pose
+		CopyCharacterPose(*SkeletalArmorMesh, CharacterMesh);
+		SkeletalArmorMesh->SetVisibility(bVisible);
+	}
+	else if (SkeletalArmorMesh)
+	{
+		SkeletalArmorMesh->SetSkinnedAssetAndUpdate(nullptr);
+		SkeletalArmorMesh->SetVisibility(false);
+	}
+}
+
+void UFSEquipmentComponent::RefreshHiddenBones(USkeletalMeshComponent& CharacterMesh)
+{
+	// Done every time because the inventory view shows this bone again as it closes, if it's set up to hide it. Bones keep their
+	// transforms while hidden, so the worn mesh still follows it.
+	CharacterMesh.HideBoneByName(BackpackBone, PBO_None);
+
+	const bool bReplaceHead = IsArmorReplacingPart(EFSArmorType::Head);
+	const bool bReplaceBody = IsArmorReplacingPart(EFSArmorType::Body);
+
+	if (bReplaceHead)
+	{
+		CharacterMesh.HideBoneByName(HeadBone, PBO_None);
+	}
+	else if (bHeadReplaced && !bMeshesHidden)
+	{
+		// While the meshes are hidden, the head is too until the inventory view shows it again
+		CharacterMesh.UnHideBoneByName(HeadBone);
+	}
+
+	if (bReplaceBody)
+	{
+		CharacterMesh.HideBoneByName(BodyBone, PBO_None);
+	}
+	else if (bBodyReplaced)
+	{
+		CharacterMesh.UnHideBoneByName(BodyBone);
+	}
+
+	bHeadReplaced = bReplaceHead;
+	bBodyReplaced = bReplaceBody;
+
+	const USkeletalMesh* Asset = CharacterMesh.GetSkeletalMeshAsset();
+	const int32 HeadBoneIndex = Asset ? Asset->GetRefSkeleton().FindBoneIndex(HeadBone) : INDEX_NONE;
+
+	if (!bReplaceBody || HeadBoneIndex == INDEX_NONE)
+	{
+		return;
+	}
+
+	// Hiding a bone hides everything below it, which would take the head with the body. Nothing rebuilds these states until the next time a bone is hidden or shown, which sets them again
+	// by coming through here, and the bones above the head stay hidden because some of the body is skinned to them. The head's vertices are only skinned to the head, so it isn't affected.
+	const FReferenceSkeleton& Skeleton = Asset->GetRefSkeleton();
+	TArray<uint8>& States = CharacterMesh.GetEditableBoneVisibilityStates();
+
+	for (int32 Bone = HeadBoneIndex; Bone < States.Num(); ++Bone)
+	{
+		const bool bBelowShownBone = Bone != HeadBoneIndex && Skeleton.BoneIsChildOf(Bone, HeadBoneIndex) && States[Skeleton.GetParentIndex(Bone)] == BVS_Visible;
+
+		if (States[Bone] == BVS_HiddenByParent && (Bone == HeadBoneIndex || bBelowShownBone))
+		{
+			States[Bone] = BVS_Visible;
+		}
+	}
+}
+
+bool UFSEquipmentComponent::IsArmorReplacingPart(EFSArmorType ArmorType) const
+{
+	const UFSItemDefinition* Item = Inventory ? Inventory->GetArmorItem(ArmorType).Definition.Get() : nullptr;
+	return Item && Item->ReplacesCharacterPart();
 }
 
 void UFSEquipmentComponent::RefreshBackpackMesh()
@@ -213,9 +408,7 @@ void UFSEquipmentComponent::RefreshBackpackMesh()
 		return;
 	}
 
-	// Done every time because the inventory view shows this bone again as it closes, if it's set up to hide it. Bones keep their
-	// transforms while hidden, so the worn mesh still follows it.
-	CharacterMesh->HideBoneByName(BackpackBone, PBO_None);
+	RefreshHiddenBones(*CharacterMesh);
 
 	const UFSItemDefinition* Backpack = Inventory ? Inventory->GetBackpack() : nullptr;
 	UStaticMesh* Mesh = Backpack ? Backpack->Mesh.Get() : nullptr;
