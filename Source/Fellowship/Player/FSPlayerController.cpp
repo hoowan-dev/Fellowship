@@ -3,6 +3,9 @@
 
 #include "FSPlayerController.h"
 #include "Character/FSCharacter.h"
+#include "Character/Enemies/FSEnemy.h"
+#include "Character/Enemies/FSEnemyRegistry.h"
+#include "Engine/DamageEvents.h"
 #include "Character/FSItemUseComponent.h"
 #include "Game/FSInteractionVolume.h"
 #include "Game/FSEventLog.h"
@@ -179,6 +182,29 @@ void AFSPlayerController::EnterCharacterEditor()
 {
 	UE_LOG(LogTemp, Log, TEXT("Entering character creator"));
 	UFSEventLog::Add(this, NSLOCTEXT("FSPlayerController", "EnteringCharacterEditor", "Entering character creator"));
+}
+
+void AFSPlayerController::DamageEnemies(float Amount, float Range)
+{
+	const UFSEnemyRegistry* Registry = GetWorld()->GetSubsystem<UFSEnemyRegistry>();
+	if (!Registry || !FSCharacter)
+	{
+		return;
+	}
+
+	Amount = Amount > 0.0f ? Amount : 10.0f;
+	Range = Range > 0.0f ? Range : 2000.0f;
+
+	// Copied, since an enemy that dies can leave the registry
+	const TArray<TWeakObjectPtr<AActor>> Enemies = Registry->GetEnemies();
+	for (const TWeakObjectPtr<AActor>& Entry : Enemies)
+	{
+		AFSEnemy* Enemy = Cast<AFSEnemy>(Entry.Get());
+		if (Enemy && FVector::Dist(Enemy->GetActorLocation(), FSCharacter->GetActorLocation()) <= Range)
+		{
+			Enemy->TakeDamage(Amount, FDamageEvent(), this, FSCharacter);
+		}
+	}
 }
 
 void AFSPlayerController::EnterStatsEditor()

@@ -39,6 +39,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Stats")
 	void Add(EFSStat Stat, float Amount);
 
+	// Gives a stat a new maximum and fills it, such as for an enemy whose stats come from its definition
+	UFUNCTION(BlueprintCallable, Category = "Stats")
+	void SetMaxAndFill(EFSStat Stat, float NewMax);
+
 protected:
 	virtual void InitializeComponent() override;
 

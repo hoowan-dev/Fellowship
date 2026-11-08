@@ -4,6 +4,8 @@
 #include "HUD/FSHUD.h"
 #include "CanvasItem.h"
 #include "Character/FSCharacter.h"
+#include "Character/Enemies/FSEnemy.h"
+#include "Character/Enemies/FSEnemyRegistry.h"
 #include "Character/FSStatsComponent.h"
 #include "Engine/Canvas.h"
 #include "Engine/Engine.h"
@@ -29,6 +31,12 @@ namespace
 
 	// How far a backdrop extends past its text
 	constexpr float BackdropPadding = 4.0f;
+
+	// The size of the health bar over an enemy, inside its dark outline
+	constexpr float EnemyHealthBarWidth = 64.0f;
+	constexpr float EnemyHealthBarHeight = 6.0f;
+	constexpr float EnemyHealthBarOutline = 2.0f;
+	const FLinearColor EnemyHealthBarColor(0.75f, 0.03f, 0.03f);
 
 	// Between the boxes behind an interactable's label and the interact prompt under it
 	constexpr float InteractionPromptGap = 4.0f;
@@ -150,6 +158,9 @@ void AFSHUD::DrawHUD()
 	UpdateUseGlow();
 	DrawEquipmentSlots();
 	DrawInventorySlotNames();
+
+	// Under the labels, so that a label over an enemy reads on top of its bar
+	DrawEnemyHealthBars();
 	DrawInteractionLabels();
 	DrawHoveredItemName();
 	DrawStatBars();
@@ -346,6 +357,64 @@ void AFSHUD::DrawShadedRing(const FVector2D& Centre, float Radius, const UFSItem
 	Canvas->DrawItem(Ring);
 }
 
+bool AFSHUD::IsOnScreen(const FVector& Location)
+{
+	const FVector ScreenLocation = Project(Location);
+	return ScreenLocation.Z > 0.0 && ScreenLocation.X >= 0.0 && ScreenLocation.X <= Canvas->SizeX && ScreenLocation.Y >= 0.0 && ScreenLocation.Y <= Canvas->SizeY;
+}
+
+void AFSHUD::DrawEnemyHealthBars()
+{
+	const AFSPlayerController* PlayerController = Cast<AFSPlayerController>(GetOwningPlayerController());
+	const AFSCharacter* Character = PlayerController ? PlayerController->GetFSCharacter() : nullptr;
+	const UFSEnemyRegistry* Registry = GetWorld()->GetSubsystem<UFSEnemyRegistry>();
+	if (!Character || !Registry || PlayerController->GetInventoryViewState() != EFSInventoryViewState::Closed)
+	{
+		return;
+	}
+
+	// The dead don't get a bar
+	const auto GetBarLocation = [](AActor& Actor, FVector& OutLocation)
+	{
+		const AFSEnemy* Enemy = Cast<AFSEnemy>(&Actor);
+		if (!Enemy || Enemy->IsDead())
+		{
+			return false;
+		}
+
+		OutLocation = Enemy->GetHealthBarLocation();
+		return true;
+	};
+
+	EnemyHealthBars.Update(Registry->GetEnemies(), Character->GetActorLocation(), EnemyHealthBarDistance, nullptr, GetBarLocation,
+		[this](const FVector& Location) { return IsOnScreen(Location); });
+
+	for (int32 Slot = 0; Slot < EnemyHealthBars.GetCapacity(); ++Slot)
+	{
+		const AFSEnemy* Enemy = Cast<AFSEnemy>(EnemyHealthBars.Get(Slot));
+		if (!Enemy || Enemy->IsDead())
+		{
+			continue;
+		}
+
+		// Z is not positive when the point is behind the camera
+		const FVector ScreenLocation = Project(Enemy->GetHealthBarLocation());
+		if (ScreenLocation.Z <= 0.0)
+		{
+			continue;
+		}
+
+		const float Fraction = Enemy->GetStats()->GetFraction(EFSStat::Health);
+		const float Left = ScreenLocation.X - EnemyHealthBarWidth * 0.5f;
+		const float Top = ScreenLocation.Y - EnemyHealthBarHeight * 0.5f;
+		const float FilledWidth = EnemyHealthBarWidth * Fraction;
+
+		DrawRect(BackdropColor, Left - EnemyHealthBarOutline, Top - EnemyHealthBarOutline, EnemyHealthBarWidth + EnemyHealthBarOutline * 2.0f, EnemyHealthBarHeight + EnemyHealthBarOutline * 2.0f);
+		DrawRect(EnemyHealthBarColor, Left, Top, FilledWidth, EnemyHealthBarHeight);
+		DrawRect(StatBarEmptyColor, Left + FilledWidth, Top, EnemyHealthBarWidth - FilledWidth, EnemyHealthBarHeight);
+	}
+}
+
 void AFSHUD::DrawInteractionLabels()
 {
 	const AFSPlayerController* PlayerController = Cast<AFSPlayerController>(GetOwningPlayerController());
@@ -358,18 +427,22 @@ void AFSHUD::DrawInteractionLabels()
 
 	AActor* Target = Character->GetInteractionTarget();
 
-	// Whether a point is in the camera's view: in front of it, and within the edges of the screen
-	const auto IsOnScreen = [this](const FVector& Location)
+	const auto GetLabelLocation = [](AActor& Actor, FVector& OutLocation)
 	{
-		const FVector ScreenLocation = Project(Location);
-		return ScreenLocation.Z > 0.0 && ScreenLocation.X >= 0.0 && ScreenLocation.X <= Canvas->SizeX && ScreenLocation.Y >= 0.0 && ScreenLocation.Y <= Canvas->SizeY;
+		const IFSInteractable* Interactable = Cast<IFSInteractable>(&Actor);
+		if (Interactable)
+		{
+			OutLocation = Interactable->GetInteractionLabelLocation();
+		}
+		return Interactable != nullptr;
 	};
 
-	InteractionLabels.Update(Registry->GetInteractables(), Character->GetActorLocation(), InteractionLabelDistance, Target, IsOnScreen);
+	InteractionLabels.Update(Registry->GetInteractables(), Character->GetActorLocation(), InteractionLabelDistance, Target, GetLabelLocation,
+		[this](const FVector& Location) { return IsOnScreen(Location); });
 
 	UFont* Font = GEngine->GetMediumFont();
 
-	for (int32 Slot = 0; Slot < FFSInteractionLabelPool::Size; ++Slot)
+	for (int32 Slot = 0; Slot < InteractionLabels.GetCapacity(); ++Slot)
 	{
 		AActor* Actor = InteractionLabels.Get(Slot);
 		const IFSInteractable* Interactable = Cast<IFSInteractable>(Actor);

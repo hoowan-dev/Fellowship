@@ -13,7 +13,7 @@ public class Fellowship : ModuleRules
 	
 		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "EnhancedInput" });
 
-		PrivateDependencyModuleNames.AddRange(new string[] { "IKRig", "PoseSearch", "RenderCore" });
+		PrivateDependencyModuleNames.AddRange(new string[] { "AIModule", "IKRig", "PoseSearch", "RenderCore" });
 
 		// Uncomment if you are using Slate UI
 		// PrivateDependencyModuleNames.AddRange(new string[] { "Slate", "SlateCore" });

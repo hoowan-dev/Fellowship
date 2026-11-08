@@ -40,6 +40,26 @@ float UFSStatsComponent::GetFraction(EFSStat Stat) const
 	return GetCurrent(Stat) / GetMax(Stat);
 }
 
+void UFSStatsComponent::SetMaxAndFill(EFSStat Stat, float NewMax)
+{
+	NewMax = FMath::Max(NewMax, 1.0f);
+
+	switch (Stat)
+	{
+	case EFSStat::Health:
+		MaxHealth = NewMax;
+		break;
+	case EFSStat::Magic:
+		MaxMagic = NewMax;
+		break;
+	default:
+		MaxStamina = NewMax;
+		break;
+	}
+
+	Current[static_cast<int32>(Stat)] = NewMax;
+}
+
 void UFSStatsComponent::Add(EFSStat Stat, float Amount)
 {
 	float& Value = Current[static_cast<int32>(Stat)];

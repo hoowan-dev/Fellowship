@@ -118,6 +118,11 @@ public:
 	UFUNCTION(Exec, BlueprintCallable, Category = "Character")
 	void EnterStatsEditor();
 
+	// Console command for testing until the player can attack: damages every enemy within the given distance of the character,
+	// or 10 damage within 20 m if either is left out
+	UFUNCTION(Exec)
+	void DamageEnemies(float Amount, float Range);
+
 	// Leaves the backpack on the floor with the grid and quick slots still inside it. The hands and the cursor keep what they hold.
 	void DropBackpack();
 

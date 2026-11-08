@@ -20,7 +20,7 @@
 namespace
 {
 	const FName HeadBoneName(TEXT("head"));
-	const FName RootBoneName(TEXT("root"));
+	const FName ArmsRootBoneName(TEXT("root"));
 	const FName LeftUpperArmBoneName(TEXT("upperarm_l"));
 	const FName LeftLowerArmBoneName(TEXT("lowerarm_l"));
 	const FName LeftHandBoneName(TEXT("hand_l"));
@@ -641,7 +641,7 @@ void AFSInventoryRig::PoseArms()
 	}
 
 	Arms->BoneSpaceTransforms = Mesh->GetRefSkeleton().GetRefBonePose();
-	Arms->SetBoneTransformByName(RootBoneName, FTransform(FQuat::Identity, HiddenBodyLocation - FVector(DisplayDepth, DisplaySlide, 0.0), FVector(HiddenBodyScale)), EBoneSpaces::ComponentSpace);
+	Arms->SetBoneTransformByName(ArmsRootBoneName, FTransform(FQuat::Identity, HiddenBodyLocation - FVector(DisplayDepth, DisplaySlide, 0.0), FVector(HiddenBodyScale)), EBoneSpaces::ComponentSpace);
 
 	PoseArm(true);
 	PoseArm(false);

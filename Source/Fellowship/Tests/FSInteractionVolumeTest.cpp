@@ -10,7 +10,8 @@
 #include "Game/FSInteractionVolume.h"
 #include "Game/FSEventLog.h"
 #include "Game/FSInteractableRegistry.h"
-#include "HUD/FSInteractionLabelPool.h"
+#include "Game/FSInteractable.h"
+#include "HUD/FSWorldLabelPool.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/WorldSettings.h"
 #include "Inventory/FSItemDefinition.h"
@@ -162,7 +163,7 @@ bool FFSInteractionLabelPoolTest::RunTest(const FString& Parameters)
 	FInteractionTestWorld Test;
 
 	// Two more than the pool holds in a line a metre apart, and one far away
-	constexpr int32 PoolSize = FFSInteractionLabelPool::Size;
+	constexpr int32 PoolSize = 16;
 	TArray<AFSInteractionVolume*> Volumes;
 	for (int32 Index = 0; Index < PoolSize + 2; ++Index)
 	{
@@ -172,54 +173,54 @@ bool FFSInteractionLabelPoolTest::RunTest(const FString& Parameters)
 	const double Range = 100.0 * (PoolSize + 2) + 500.0;
 
 	const TArray<TWeakObjectPtr<AActor>>& Interactables = Test.World->GetSubsystem<UFSInteractableRegistry>()->GetInteractables();
-	const auto IsChosen = [](const FFSInteractionLabelPool& Pool, const AActor* Actor)
+	const auto IsChosen = [](const FFSWorldLabelPool& Pool, const AActor* Actor) { return Pool.Contains(Actor); };
+
+	const auto GetLabelLocation = [](AActor& Actor, FVector& OutLocation)
 	{
-		for (int32 Slot = 0; Slot < FFSInteractionLabelPool::Size; ++Slot)
+		const IFSInteractable* Interactable = Cast<IFSInteractable>(&Actor);
+		if (Interactable)
 		{
-			if (Pool.Get(Slot) == Actor)
-			{
-				return true;
-			}
+			OutLocation = Interactable->GetInteractionLabelLocation();
 		}
-		return false;
+		return Interactable != nullptr;
 	};
 
 	const auto AllOnScreen = [](const FVector&) { return true; };
 
-	FFSInteractionLabelPool Pool;
-	Pool.Update(Interactables, FVector::ZeroVector, Range, nullptr, AllOnScreen);
+	FFSWorldLabelPool Pool(PoolSize);
+	Pool.Update(Interactables, FVector::ZeroVector, Range, nullptr, GetLabelLocation, AllOnScreen);
 	TestEqual(TEXT("The pool is full"), Pool.Num(), PoolSize);
 	TestTrue(TEXT("With the nearest"), IsChosen(Pool, Volumes[0]) && IsChosen(Pool, Volumes[PoolSize - 1]));
 	TestFalse(TEXT("Not the next one along"), IsChosen(Pool, Volumes[PoolSize]));
 	TestFalse(TEXT("Or one out of range"), IsChosen(Pool, Far));
 
 	int32 SecondSlot = INDEX_NONE;
-	for (int32 Slot = 0; Slot < FFSInteractionLabelPool::Size; ++Slot)
+	for (int32 Slot = 0; Slot < Pool.GetCapacity(); ++Slot)
 	{
 		SecondSlot = Pool.Get(Slot) == Volumes[1] ? Slot : SecondSlot;
 	}
 
-	Pool.Update(Interactables, FVector::ZeroVector, Range, Volumes[PoolSize + 1], AllOnScreen);
+	Pool.Update(Interactables, FVector::ZeroVector, Range, Volumes[PoolSize + 1], GetLabelLocation, AllOnScreen);
 	TestTrue(TEXT("What interact would act on is always shown"), IsChosen(Pool, Volumes[PoolSize + 1]));
 	TestFalse(TEXT("In place of the furthest"), IsChosen(Pool, Volumes[PoolSize - 1]));
 	TestEqual(TEXT("Still no more than the pool holds"), Pool.Num(), PoolSize);
 	TestTrue(TEXT("Labels that stay keep their slots"), SecondSlot != INDEX_NONE && Pool.Get(SecondSlot) == Volumes[1]);
 
-	Pool.Update(Interactables, FVector::ZeroVector, 300.0, nullptr, AllOnScreen);
+	Pool.Update(Interactables, FVector::ZeroVector, 300.0, nullptr, GetLabelLocation, AllOnScreen);
 	TestEqual(TEXT("A shorter distance shows fewer"), Pool.Num(), 2);
 
 	// Only the far end of the line is in view: those come first, and the nearer ones behind the camera only fill the slots left over
 	const double InViewFrom = 100.0 * 5;
 	const auto FarEndOnScreen = [InViewFrom](const FVector& Location) { return Location.X > InViewFrom; };
-	FFSInteractionLabelPool ViewPool;
-	ViewPool.Update(Interactables, FVector::ZeroVector, Range, nullptr, FarEndOnScreen);
+	FFSWorldLabelPool ViewPool(PoolSize);
+	ViewPool.Update(Interactables, FVector::ZeroVector, Range, nullptr, GetLabelLocation, FarEndOnScreen);
 	TestEqual(TEXT("Looking away still fills the pool"), ViewPool.Num(), PoolSize);
 	TestTrue(TEXT("With everything in view, even the furthest"), IsChosen(ViewPool, Volumes[PoolSize + 1]));
 	TestTrue(TEXT("And the nearest out of view after that"), IsChosen(ViewPool, Volumes[0]));
 	TestFalse(TEXT("Leaving out the furthest out of view"), IsChosen(ViewPool, Volumes[3]));
 
 	Volumes[0]->Destroy();
-	Pool.Update(Interactables, FVector::ZeroVector, 300.0, nullptr, AllOnScreen);
+	Pool.Update(Interactables, FVector::ZeroVector, 300.0, nullptr, GetLabelLocation, AllOnScreen);
 	TestEqual(TEXT("A destroyed one goes"), Pool.Num(), 1);
 
 	return true;

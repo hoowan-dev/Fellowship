@@ -5,7 +5,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/HUD.h"
 #include "Character/FSItemUseComponent.h"
-#include "HUD/FSInteractionLabelPool.h"
+#include "HUD/FSWorldLabelPool.h"
 #include "FSHUD.generated.h"
 
 struct FFSItemText;
@@ -27,6 +27,14 @@ public:
 	// How far from the character an interactable's label can be and still show
 	UPROPERTY(EditDefaultsOnly, Category = "Interaction", meta = (ClampMin = "0.0", Units = cm))
 	float InteractionLabelDistance = 1000.0f;
+
+	// How far from the character an enemy can be and still show its health bar
+	UPROPERTY(EditDefaultsOnly, Category = "Enemies", meta = (ClampMin = "0.0", Units = cm))
+	float EnemyHealthBarDistance = 2000.0f;
+
+	// How many labels and health bars can show at once
+	static constexpr int32 MaxInteractionLabels = 16;
+	static constexpr int32 MaxEnemyHealthBars = 16;
 
 protected:
 	virtual void BeginPlay() override;
@@ -56,6 +64,12 @@ private:
 	// Floats a label over each of the nearest interactables, the pooled ones, with the interact prompt under the label of what the button would act on
 	void DrawInteractionLabels();
 
+	// Floats a health bar over each of the nearest living enemies, the pooled ones
+	void DrawEnemyHealthBars();
+
+	// Whether a point is in the camera's view: in front of it, and within the edges of the screen
+	bool IsOnScreen(const FVector& Location);
+
 	// Draws the name of the item under the mouse above the cursor
 	void DrawHoveredItemName();
 
@@ -84,7 +98,8 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<AFSEquipmentDisplay> EquipmentDisplay;
 
-	FFSInteractionLabelPool InteractionLabels;
+	FFSWorldLabelPool InteractionLabels = FFSWorldLabelPool(MaxInteractionLabels);
+	FFSWorldLabelPool EnemyHealthBars = FFSWorldLabelPool(MaxEnemyHealthBars);
 
 	// By EFSItemUseSlot. Full while a slot's button is held, then fading, so that even a quick tap shows.
 	float UseGlow[static_cast<int32>(EFSItemUseSlot::Count)] = {};
