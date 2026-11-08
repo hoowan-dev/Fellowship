@@ -222,36 +222,124 @@ void AFSPlayerController::EnterStatsEditor()
 
 void AFSPlayerController::SelectAtInventoryCursor()
 {
-	if (InventoryViewState == EFSInventoryViewState::Open)
+	if (InventoryViewState != EFSInventoryViewState::Open)
 	{
-		UpdateHoveredInventoryCell();
+		return;
+	}
 
-		// Outside the grid means tossing the carried item, so the buttons and the slots have to be checked first
-		if (InventoryRig->GetHoveredButton() != INDEX_NONE)
+	UpdateHoveredInventoryCell();
+
+	// Outside the grid means tossing the carried item, so the buttons and the slots have to be checked first
+	FFSInventoryClick Click;
+	if (InventoryRig->GetHoveredButton() != INDEX_NONE)
+	{
+		Click.Place = EFSInventoryClickPlace::Button;
+		Click.Index = InventoryRig->GetHoveredButton();
+	}
+	else if (InventoryRig->GetHoveredHandSlot() != INDEX_NONE)
+	{
+		Click.Place = EFSInventoryClickPlace::Hand;
+		Click.Index = InventoryRig->GetHoveredHandSlot();
+	}
+	else if (InventoryRig->GetHoveredQuickSlot() != INDEX_NONE)
+	{
+		Click.Place = EFSInventoryClickPlace::QuickSlot;
+		Click.Index = InventoryRig->GetHoveredQuickSlot();
+	}
+	else if (InventoryRig->GetHoveredArmorSlot() != INDEX_NONE)
+	{
+		Click.Place = EFSInventoryClickPlace::ArmorSlot;
+		Click.Index = InventoryRig->GetHoveredArmorSlot();
+	}
+	else if (InventoryRig->GetHoveredOrganizeCell().X != INDEX_NONE)
+	{
+		Click.Place = EFSInventoryClickPlace::OrganizeGrid;
+		Click.Cell = InventoryRig->GetHoveredOrganizeCell();
+	}
+	else
+	{
+		Click.Cell = InventoryRig->GetHoveredCell();
+	}
+
+	ClickInventory(Click, GetWorld()->GetRealTimeSeconds());
+}
+
+void AFSPlayerController::ClickInventory(const FFSInventoryClick& Click, double Time)
+{
+	UFSInventoryComponent* Inventory = GetInventory();
+	if (!Inventory || InventoryViewState != EFSInventoryViewState::Open)
+	{
+		return;
+	}
+
+	const bool bFromGrid = Click.Place == EFSInventoryClickPlace::Grid || Click.Place == EFSInventoryClickPlace::OrganizeGrid;
+	const EFSItemGrid Grid = Click.Place == EFSInventoryClickPlace::OrganizeGrid ? EFSItemGrid::Organize : EFSItemGrid::Backpack;
+
+	// The second click of a double click lands on the item the first picked up, which is still on the cursor
+	const FInventoryPickup& Pickup = LastInventoryPickup;
+	const bool bSamePlace = Click.Place == Pickup.Click.Place && (bFromGrid
+		? Click.Cell.X >= Pickup.Cell.X && Click.Cell.Y >= Pickup.Cell.Y && Click.Cell.X < Pickup.Cell.X + Pickup.Footprint.X && Click.Cell.Y < Pickup.Cell.Y + Pickup.Footprint.Y
+		: Click.Index == Pickup.Click.Index);
+
+	if (bSamePlace && Time - Pickup.Time <= InventoryDoubleClickTime && Inventory->IsCarryingItem() && Inventory->GetCarriedItem().Id == Pickup.ItemId)
+	{
+		if (bFromGrid)
 		{
-			SelectInventoryButton(InventoryRig->GetHoveredButton());
-		}
-		else if (InventoryRig->GetHoveredHandSlot() != INDEX_NONE)
-		{
-			SelectInventoryHand(AFSInventoryRig::GetHandOfSlot(InventoryRig->GetHoveredHandSlot()));
-		}
-		else if (InventoryRig->GetHoveredQuickSlot() != INDEX_NONE)
-		{
-			SelectInventoryQuickSlot(AFSInventoryRig::GetQuickSlotOfIndex(InventoryRig->GetHoveredQuickSlot()));
-		}
-		else if (InventoryRig->GetHoveredArmorSlot() != INDEX_NONE)
-		{
-			SelectInventoryArmorSlot(AFSInventoryRig::GetArmorTypeOfSlot(InventoryRig->GetHoveredArmorSlot()));
-		}
-		else if (InventoryRig->GetHoveredOrganizeCell().X != INDEX_NONE)
-		{
-			SelectInventoryOrganizeCell(InventoryRig->GetHoveredOrganizeCell());
+			// Anything it can't be equipped as goes back where it was
+			if (!Inventory->QuickEquipCarriedItem(Grid, Pickup.Cell, Pickup.Rotation))
+			{
+				Inventory->PlaceCarriedItem(Pickup.Cell, Grid);
+			}
 		}
 		else
 		{
-			SelectInventoryCell(InventoryRig->GetHoveredCell());
+			Inventory->StowCarriedItem();
 		}
+
+		LastInventoryPickup = FInventoryPickup();
+		RefreshInventoryView();
+		return;
 	}
+
+	// Where the item about to be picked up lies, before it leaves the grid
+	FInventoryPickup NewPickup;
+	NewPickup.Click = Click;
+	NewPickup.Time = Time;
+	if (const FFSInventoryItem* Item = bFromGrid && !Inventory->IsCarryingItem() ? Inventory->FindItemAt(Click.Cell, Grid) : nullptr)
+	{
+		NewPickup.Cell = Item->Cell;
+		NewPickup.Rotation = Item->Rotation;
+		NewPickup.Footprint = FFSInventoryGrid::GetFootprint(Item->Definition->InventoryDimensions, Item->Rotation);
+	}
+
+	const bool bWasCarrying = Inventory->IsCarryingItem();
+
+	switch (Click.Place)
+	{
+	case EFSInventoryClickPlace::Button:
+		SelectInventoryButton(Click.Index);
+		break;
+	case EFSInventoryClickPlace::Hand:
+		SelectInventoryHand(AFSInventoryRig::GetHandOfSlot(Click.Index));
+		break;
+	case EFSInventoryClickPlace::QuickSlot:
+		SelectInventoryQuickSlot(AFSInventoryRig::GetQuickSlotOfIndex(Click.Index));
+		break;
+	case EFSInventoryClickPlace::ArmorSlot:
+		SelectInventoryArmorSlot(AFSInventoryRig::GetArmorTypeOfSlot(Click.Index));
+		break;
+	case EFSInventoryClickPlace::OrganizeGrid:
+		SelectInventoryOrganizeCell(Click.Cell);
+		break;
+	default:
+		SelectInventoryCell(Click.Cell);
+		break;
+	}
+
+	// Only a click that picks an item up with nothing on the cursor can start a double click
+	const bool bPickedUp = !bWasCarrying && Inventory->IsCarryingItem() && Click.Place != EFSInventoryClickPlace::Button;
+	NewPickup.ItemId = bPickedUp ? Inventory->GetCarriedItem().Id : INDEX_NONE;
+	LastInventoryPickup = bPickedUp ? NewPickup : FInventoryPickup();
 }
 
 void AFSPlayerController::SelectInventoryCell(const FIntPoint& Cell)

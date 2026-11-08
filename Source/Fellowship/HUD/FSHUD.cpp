@@ -52,7 +52,7 @@ namespace
 	// How far the stat bars and event log sit from the edges of the screen
 	constexpr float CornerMargin = 20.0f;
 
-	constexpr int32 EventLogVisibleLines = 8;
+	constexpr int32 EventLogVisibleLines = 12;
 
 	// The width inside the event log's border
 	constexpr float EventLogWidth = 320.0f;
@@ -638,9 +638,9 @@ void AFSHUD::DrawShadedBorder(float Left, float Top, float Width, float Height)
 
 void AFSHUD::DrawEventLog()
 {
-	const AFSPlayerController* PlayerController = Cast<AFSPlayerController>(GetOwningPlayerController());
+	// Shown with the inventory open too, where equipping and using items is logged
 	const UFSEventLog* EventLog = GetWorld()->GetSubsystem<UFSEventLog>();
-	if (!EventLog || !PlayerController || PlayerController->GetInventoryViewState() != EFSInventoryViewState::Closed)
+	if (!EventLog || !GetOwningPlayerController())
 	{
 		return;
 	}

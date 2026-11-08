@@ -455,7 +455,7 @@ void AFSInventoryRig::BuildArmorSlots()
 	ArmorSlots->ClearInstances();
 	ArmorSlots->SetNumCustomDataFloats(CellDataCount);
 
-	const FVector SlotScale(ArmorSlotSize / CellMeshSize);
+	const FVector SlotScale(GetArmorSlotSize() / CellMeshSize);
 
 	for (int32 ArmorSlot = 0; ArmorSlot < ArmorSlotCount; ++ArmorSlot)
 	{
@@ -531,14 +531,14 @@ void AFSInventoryRig::GetDisplayLayout(bool bForOrganizing, double& OutSlide, do
 {
 	const double HalfOrganizeGrid = UFSInventoryComponent::OrganizeGridSize * CellSize * 0.5;
 
-	const double Left = GetArmorSlotCentre(0).X - ArmorSlotSize * 0.5;
+	const double Left = GetArmorSlotCentre(0).X - GetArmorSlotSize() * 0.5;
 	// At rest, the edge of Organize Inventory
 	const double Right = bForOrganizing ? GetOrganizeGridOffset() + HalfOrganizeGrid : GetHandSlotCentre(RightHandSlot).X + SideSlotWidth * 0.5 + Spacing + ButtonHeight;
 
 	// Measured from the top of the highest name, over a quick slot or the top armor slot, or the button above the grid if that's higher
 	const double Top = FMath::Max3(
 		GetQuickSlotCentre(LeftQuickSlot).Y + SideSlotHeight * 0.5 + GetSlotLabelHeight(),
-		GetArmorSlotCentre(0).Y + ArmorSlotSize * 0.5 + GetSlotLabelHeight(),
+		GetArmorSlotCentre(0).Y + GetArmorSlotSize() * 0.5 + GetSlotLabelHeight(),
 		GetButtonCentre(DropBackpackButton).Y + ButtonHeight * 0.5);
 	const double Bottom = -GetButtonCentre(UseItemButton).Y + ButtonHeight * 0.5;
 	const double HalfHeight = FMath::Max3(Top, Bottom, bForOrganizing ? HalfOrganizeGrid : 0.0);
@@ -635,8 +635,8 @@ FVector2D AFSInventoryRig::GetArmorSlotCentre(int32 ArmorSlot) const
 {
 	// From the top: head, face and body, in the order of their types
 	return FVector2D(
-		GetHandSlotCentre(LeftHandSlot).X - SideSlotWidth * 0.5 - Spacing - ArmorSlotSize * 0.5,
-		ArmorSlotHeight + (1 - ArmorSlot) * (ArmorSlotSize + Spacing));
+		GetHandSlotCentre(LeftHandSlot).X - SideSlotWidth * 0.5 - Spacing - GetArmorSlotSize() * 0.5,
+		(1 - ArmorSlot) * (GetArmorSlotSize() + Spacing));
 }
 
 FVector2D AFSInventoryRig::GetQuickSlotCentre(int32 QuickSlot) const
@@ -658,7 +658,7 @@ FVector AFSInventoryRig::GetQuickSlotLabelLocation(int32 QuickSlot) const
 
 FVector AFSInventoryRig::GetArmorSlotLabelLocation(int32 ArmorSlot) const
 {
-	return GetSlotLabelLocation(GetArmorSlotCentre(ArmorSlot), ArmorSlotSize);
+	return GetSlotLabelLocation(GetArmorSlotCentre(ArmorSlot), GetArmorSlotSize());
 }
 
 FVector AFSInventoryRig::GetSlotLabelLocation(const FVector2D& SlotCentre, double SlotHeight) const
@@ -1067,7 +1067,7 @@ void AFSInventoryRig::ShowInventory(const UFSInventoryComponent& Inventory)
 
 		ArmorSlotItemMeshes[ArmorSlot]->SetStaticMesh(Item.Definition ? Item.Definition->Mesh.Get() : nullptr);
 		ArmorSlotItemRests[ArmorSlot] = GetArmorSlotItemTransform(Item, ArmorSlot);
-		AddSlotBorder(Item, GetArmorSlotCentre(ArmorSlot), FVector2D(ArmorSlotSize));
+		AddSlotBorder(Item, GetArmorSlotCentre(ArmorSlot), FVector2D(GetArmorSlotSize()));
 
 		ArmorSlots->SetCustomDataValue(ArmorSlot, CellTakenData, Item.Definition ? 1.0f : 0.0f, true);
 
@@ -1165,7 +1165,7 @@ FTransform AFSInventoryRig::GetQuickSlotItemTransform(const FFSInventoryItem& It
 
 FTransform AFSInventoryRig::GetArmorSlotItemTransform(const FFSInventoryItem& Item, int32 ArmorSlot) const
 {
-	return GetSlotItemTransform(Item, GetArmorSlotCentre(ArmorSlot), FVector2D(ArmorSlotSize));
+	return GetSlotItemTransform(Item, GetArmorSlotCentre(ArmorSlot), FVector2D(GetArmorSlotSize()));
 }
 
 FTransform AFSInventoryRig::GetSlotItemTransform(const FFSInventoryItem& Item, const FVector2D& SlotCentre, const FVector2D& SlotSize) const
@@ -1655,7 +1655,7 @@ bool AFSInventoryRig::GetArmorSlotFromWorldRay(const FVector& RayOrigin, const F
 
 	for (int32 ArmorSlot = 0; ArmorSlot < ArmorSlotCount; ++ArmorSlot)
 	{
-		if (IsPointInSlot(GridPoint, GetArmorSlotCentre(ArmorSlot), FVector2D(ArmorSlotSize)))
+		if (IsPointInSlot(GridPoint, GetArmorSlotCentre(ArmorSlot), FVector2D(GetArmorSlotSize())))
 		{
 			OutArmorSlot = ArmorSlot;
 			return true;

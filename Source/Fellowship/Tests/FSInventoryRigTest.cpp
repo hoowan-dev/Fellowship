@@ -236,7 +236,7 @@ bool FFSInventoryRigSpacingTest::RunTest(const FString& Parameters)
 	FInventoryRigTestWorld Test;
 	const AFSInventoryRig* Rig = Test.Rig;
 	const double HalfGrid = GridSize * CellSize * 0.5;
-	constexpr double ArmorSlotSize = 7.5;
+	const double ArmorSlotSize = Rig->GetArmorSlotSize();
 
 	// The gap between the grid and Use Item is the one everything else matches
 	const FVector2D UseCentre = Rig->GetButtonCentre(AFSInventoryRig::UseItemButton);
@@ -261,6 +261,8 @@ bool FFSInventoryRigSpacingTest::RunTest(const FString& Parameters)
 	{
 		TestEqual(TEXT("Armor slot to armor slot"), (Rig->GetArmorSlotCentre(ArmorSlot - 1).Y - ArmorSlotSize * 0.5) - (Rig->GetArmorSlotCentre(ArmorSlot).Y + ArmorSlotSize * 0.5), Spacing, 0.001);
 	}
+	TestEqual(TEXT("The armor column's top is level with the grid's"), Rig->GetArmorSlotCentre(0).Y + ArmorSlotSize * 0.5, HalfGrid, 0.001);
+	TestEqual(TEXT("And its bottom"), Rig->GetArmorSlotCentre(AFSInventoryRig::ArmorSlotCount - 1).Y - ArmorSlotSize * 0.5, -HalfGrid, 0.001);
 
 	const FVector2D OrganizeCentre = Rig->GetButtonCentre(AFSInventoryRig::OrganizeInventoryButton);
 	const double HalfOrganizeWidth = Rig->GetButtonSize(AFSInventoryRig::OrganizeInventoryButton).X * 0.5;
@@ -670,7 +672,6 @@ bool FFSInventoryRigOnScreenTest::RunTest(const FString& Parameters)
 
 	// Match the rig's defaults
 	const FVector2D SideSlotSize = Rig->GetSideSlotSize();
-	constexpr double ArmorSlotSize = 7.5;
 
 	// 90 degrees across a 16:9 screen, with the grid 40cm away
 	constexpr double HalfScreenWidth = 40.0;
@@ -710,7 +711,7 @@ bool FFSInventoryRigOnScreenTest::RunTest(const FString& Parameters)
 
 			for (int32 ArmorSlot = 0; ArmorSlot < AFSInventoryRig::ArmorSlotCount; ++ArmorSlot)
 			{
-				TestBoxOnScreen(Prefix + TEXT("armor slot"), Rig->GetArmorSlotCentre(ArmorSlot), ArmorSlotSize, ArmorSlotSize);
+				TestBoxOnScreen(Prefix + TEXT("armor slot"), Rig->GetArmorSlotCentre(ArmorSlot), Rig->GetArmorSlotSize(), Rig->GetArmorSlotSize());
 			}
 
 			for (int32 Button = 0; Button < AFSInventoryRig::ButtonCount; ++Button)

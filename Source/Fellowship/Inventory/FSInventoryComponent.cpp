@@ -357,6 +357,83 @@ bool UFSInventoryComponent::SwapCarriedItemWithArmorSlot(EFSArmorType ArmorType)
 	return true;
 }
 
+bool UFSInventoryComponent::QuickEquipCarriedItem(EFSItemGrid FromGrid, const FIntPoint& FromCell, uint8 FromRotation)
+{
+	if (!IsCarryingItem())
+	{
+		return false;
+	}
+
+	const UFSItemDefinition* Definition = CarriedItem.Definition;
+	switch (Definition->ItemType)
+	{
+	case EFSItemType::Consumable:
+		// Using items isn't in yet, so for now it's only used up
+		UFSEventLog::Add(this, FFSItemText::Format(LOCTEXT("UsedEvent", "Used {0}"), Definition));
+		ClearCarriedItem();
+		return true;
+
+	case EFSItemType::Armor:
+		SwapCarriedItemWithArmorSlot(Definition->ArmorType);
+		break;
+
+	case EFSItemType::Weapon:
+	{
+		const bool bRightEmpty = !GetHandItem(EFSHand::Right).Definition;
+		const bool bLeftEmpty = !GetHandItem(EFSHand::Left).Definition;
+		SwapCarriedItemWithHand(!bRightEmpty && bLeftEmpty ? EFSHand::Left : EFSHand::Right);
+		break;
+	}
+
+	default:
+		return false;
+	}
+
+	// What it replaced is now on the cursor. It takes the equipped item's place if it fits there, as one the same size always does.
+	if (IsCarryingItem())
+	{
+		CarriedItem.Rotation = FromRotation;
+		if (GetCarriedItemPlacement(FromCell, FromGrid) == EFSItemPlacement::Open)
+		{
+			PlaceCarriedItem(FromCell, FromGrid);
+		}
+		else
+		{
+			StowCarriedItem();
+		}
+	}
+
+	return true;
+}
+
+bool UFSInventoryComponent::StowCarriedItem()
+{
+	if (!IsCarryingItem())
+	{
+		return false;
+	}
+
+	const FIntPoint Dimensions = CarriedItem.Definition->InventoryDimensions;
+	FIntPoint Cell;
+	uint8 Rotation;
+
+	if (HasBackpack() && Grid.FindFirstFit(Dimensions, Cell, Rotation))
+	{
+		CarriedItem.Rotation = Rotation;
+		return PlaceCarriedItem(Cell);
+	}
+
+	// Left for the player to find room for, as a pickup that doesn't fit is
+	StartOrganizing();
+	if (OrganizeGrid.FindFirstFit(Dimensions, Cell, Rotation))
+	{
+		CarriedItem.Rotation = Rotation;
+		return PlaceCarriedItem(Cell, EFSItemGrid::Organize);
+	}
+
+	return false;
+}
+
 bool UFSInventoryComponent::SwapCarriedItemWith(FFSInventoryItem& HeldItem, const FText& SlotName)
 {
 	if (!IsCarryingItem() && !HeldItem.Definition)

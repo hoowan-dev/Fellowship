@@ -216,6 +216,16 @@ public:
 
 	FFSOnArmorChanged OnArmorChanged;
 
+	// What double clicking an item in a grid does, once the first click has put it on the cursor. FromGrid, FromCell and FromRotation are where it lay.
+	// Armor goes in its slot. A weapon goes in the right hand if that's empty, otherwise the left if that's empty, otherwise the right. Nothing goes in a quick slot.
+	// Whatever it replaces goes where it lay if there's room there, and otherwise wherever StowCarriedItem finds for it.
+	// A consumable is used up. Returns false, changing nothing, if nothing is carried or it's none of those.
+	bool QuickEquipCarriedItem(EFSItemGrid FromGrid, const FIntPoint& FromCell, uint8 FromRotation);
+
+	// Puts the carried item in the first open space in the backpack, or failing that in the organizing grid, which opens if it isn't already.
+	// Returns false, leaving it on the cursor, if neither has room or nothing is carried.
+	bool StowCarriedItem();
+
 	// What an armor slot holds. Its definition is null if the slot is empty.
 	FORCEINLINE const FFSInventoryItem& GetArmorItem(EFSArmorType ArmorType) const { return ArmorItems[static_cast<int32>(ArmorType)]; }
 

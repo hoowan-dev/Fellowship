@@ -217,6 +217,9 @@ public:
 	FORCEINLINE FVector2D GetSideSlotSize() const { return FVector2D(SideSlotWidth, SideSlotHeight); }
 	FORCEINLINE float GetSpacing() const { return Spacing; }
 
+	// Each armor slot is square, sized so the column of them, with the spacing between, is exactly as tall as the grid
+	FORCEINLINE double GetArmorSlotSize() const { return FMath::Max(GridHeight * CellSize - Spacing * (ArmorSlotCount - 1), 0.1) / ArmorSlotCount; }
+
 	// From the top of a slot's cell to the middle of its name, halfway across the gap above it
 	FORCEINLINE double GetSlotLabelHeight() const { return Spacing * 0.5; }
 
@@ -578,12 +581,6 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Hands")
 	FVector UpperArmDirection = FVector(0.55, -0.3, 0.75);
 
-	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Armor Slots", meta = (ClampMin = "0.1", Units = cm))
-	float ArmorSlotSize = 7.5f;
-
-	// How far the middle of the column of armor slots is above the middle of the grid
-	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Armor Slots", meta = (Units = cm))
-	float ArmorSlotHeight = 0.0f;
 
 	// How thick every button is: the height of Use Item below the grid and Drop Backpack above it, and the width of Organize Inventory standing on end beside the right column
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Buttons", meta = (ClampMin = "0.1", Units = cm))

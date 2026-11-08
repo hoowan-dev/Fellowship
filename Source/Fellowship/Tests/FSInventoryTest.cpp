@@ -2780,4 +2780,213 @@ bool FFSArmorSlotRigTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSQuickEquipTest, "Fellowship.Inventory.QuickEquip.EquipsUsesAndPutsAway", TestFlags)
+
+bool FFSQuickEquipTest::RunTest(const FString& Parameters)
+{
+	FInventoryTestWorld Test;
+	UFSInventoryComponent* Inventory = Test.Inventory;
+	const TArray<FFSItemText>& Events = Test.World->GetSubsystem<UFSEventLog>()->GetEvents();
+
+	const auto MakeNamed = [](const TCHAR* Name, const FIntPoint& Size, EFSItemType Type)
+	{
+		UFSItemDefinition* Item = MakeItem(Size);
+		Item->DisplayName = FText::FromString(Name);
+		Item->ItemType = Type;
+		return Item;
+	};
+
+	// Puts an item in the backpack at a cell, then picks it up as a double click's first click does
+	const auto PickUpFrom = [Inventory](UFSItemDefinition* Item, const FIntPoint& Cell)
+	{
+		Inventory->CarryNewItem(Item);
+		Inventory->PlaceCarriedItem(Cell);
+		Inventory->PickUpItemAt(Cell);
+	};
+
+	UFSItemDefinition* FirstSword = MakeNamed(TEXT("First Sword"), SwordSize, EFSItemType::Weapon);
+	UFSItemDefinition* SecondSword = MakeNamed(TEXT("Second Sword"), SwordSize, EFSItemType::Weapon);
+	UFSItemDefinition* ThirdSword = MakeNamed(TEXT("Third Sword"), SwordSize, EFSItemType::Weapon);
+	UFSItemDefinition* Dagger = MakeNamed(TEXT("Dagger"), FIntPoint(1, 2), EFSItemType::Weapon);
+
+	TestFalse(TEXT("Nothing carried, nothing to equip"), Inventory->QuickEquipCarriedItem(EFSItemGrid::Backpack, FIntPoint(0, 0), 0));
+
+	PickUpFrom(FirstSword, FIntPoint(0, 0));
+	TestTrue(TEXT("A weapon is equipped"), Inventory->QuickEquipCarriedItem(EFSItemGrid::Backpack, FIntPoint(0, 0), 0));
+	TestTrue(TEXT("In the right hand first"), Inventory->GetHandItem(EFSHand::Right).Definition == FirstSword);
+	TestFalse(TEXT("Off the cursor"), Inventory->IsCarryingItem());
+	TestTrue(TEXT("And out of the grid"), Inventory->GetItems().IsEmpty());
+
+	PickUpFrom(SecondSword, FIntPoint(0, 0));
+	Inventory->QuickEquipCarriedItem(EFSItemGrid::Backpack, FIntPoint(0, 0), 0);
+	TestTrue(TEXT("Then the left, with the right full"), Inventory->GetHandItem(EFSHand::Left).Definition == SecondSword);
+
+	PickUpFrom(ThirdSword, FIntPoint(4, 1));
+	Inventory->QuickEquipCarriedItem(EFSItemGrid::Backpack, FIntPoint(4, 1), 0);
+	TestTrue(TEXT("With both full, the right is replaced"), Inventory->GetHandItem(EFSHand::Right).Definition == ThirdSword);
+	const FFSInventoryItem* Replaced = Inventory->FindItemAt(FIntPoint(4, 1));
+	TestTrue(TEXT("What it replaced takes its place"), Replaced && Replaced->Definition == FirstSword && Replaced->Cell == FIntPoint(4, 1));
+	TestFalse(TEXT("Leaving nothing on the cursor"), Inventory->IsCarryingItem());
+
+	// A sword can't stand where a dagger in the bottom right corner was, since it would hang off the grid
+	PickUpFrom(Dagger, FIntPoint(InventoryWidth - 1, InventoryHeight - 2));
+	Inventory->QuickEquipCarriedItem(EFSItemGrid::Backpack, FIntPoint(InventoryWidth - 1, InventoryHeight - 2), 0);
+	TestTrue(TEXT("A smaller weapon replaces the right hand's too"), Inventory->GetHandItem(EFSHand::Right).Definition == Dagger);
+	const FFSInventoryItem* Moved = Inventory->FindItemAt(FIntPoint(0, 0));
+	TestTrue(TEXT("What it replaced goes in the first open space instead"), Moved && Moved->Definition == ThirdSword && Moved->Cell == FIntPoint(0, 0));
+
+	UFSItemDefinition* Helmet = MakeNamed(TEXT("Helmet"), FIntPoint(2, 2), EFSItemType::Armor);
+	UFSItemDefinition* Hood = MakeNamed(TEXT("Hood"), FIntPoint(2, 2), EFSItemType::Armor);
+	UFSItemDefinition* Mail = MakeNamed(TEXT("Mail"), FIntPoint(2, 2), EFSItemType::Armor);
+	Mail->ArmorType = EFSArmorType::Body;
+
+	PickUpFrom(Helmet, FIntPoint(8, 0));
+	Inventory->QuickEquipCarriedItem(EFSItemGrid::Backpack, FIntPoint(8, 0), 0);
+	TestTrue(TEXT("Armor goes in its own slot"), Inventory->GetArmorItem(EFSArmorType::Head).Definition == Helmet);
+	PickUpFrom(Mail, FIntPoint(8, 0));
+	Inventory->QuickEquipCarriedItem(EFSItemGrid::Backpack, FIntPoint(8, 0), 0);
+	TestTrue(TEXT("Whatever its type"), Inventory->GetArmorItem(EFSArmorType::Body).Definition == Mail);
+	TestTrue(TEXT("Leaving the others alone"), Inventory->GetArmorItem(EFSArmorType::Head).Definition == Helmet);
+	PickUpFrom(Hood, FIntPoint(8, 0));
+	Inventory->QuickEquipCarriedItem(EFSItemGrid::Backpack, FIntPoint(8, 0), 0);
+	TestTrue(TEXT("And replaces what's there"), Inventory->GetArmorItem(EFSArmorType::Head).Definition == Hood);
+	const FFSInventoryItem* OldHelmet = Inventory->FindItemAt(FIntPoint(8, 0));
+	TestTrue(TEXT("Which takes its place"), OldHelmet && OldHelmet->Definition == Helmet);
+	TestTrue(TEXT("Nothing goes in a quick slot"), !Inventory->GetQuickSlotItem(EFSQuickSlot::Left).Definition && !Inventory->GetQuickSlotItem(EFSQuickSlot::Right).Definition);
+
+	UFSItemDefinition* Apple = MakeNamed(TEXT("Apple"), FIntPoint(1, 1), EFSItemType::Consumable);
+	const int32 ItemsBefore = Inventory->GetItems().Num();
+	PickUpFrom(Apple, FIntPoint(10, 0));
+	TestTrue(TEXT("A consumable is used"), Inventory->QuickEquipCarriedItem(EFSItemGrid::Backpack, FIntPoint(10, 0), 0));
+	TestFalse(TEXT("And is gone"), Inventory->IsCarryingItem());
+	TestEqual(TEXT("Not back in the grid"), Inventory->GetItems().Num(), ItemsBefore);
+	TestEqual(TEXT("Which is logged"), Events.IsEmpty() ? FString() : Events.Last().ToString(), FString(TEXT("Used Apple")));
+
+	// Putting an equipped item away
+	Inventory->SwapCarriedItemWithHand(EFSHand::Left);
+	TestTrue(TEXT("An equipped item is put away"), Inventory->StowCarriedItem());
+	TestFalse(TEXT("Leaving its hand empty"), Inventory->GetHandItem(EFSHand::Left).Definition != nullptr || Inventory->IsCarryingItem());
+	TestTrue(TEXT("In the backpack"), Inventory->GetItems().ContainsByPredicate([SecondSword](const FFSInventoryItem& Item) { return Item.Definition == SecondSword; }));
+	TestFalse(TEXT("Without organizing"), Inventory->IsOrganizing());
+	TestFalse(TEXT("Nothing carried, nothing to put away"), Inventory->StowCarriedItem());
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSQuickEquipOrganizeTest, "Fellowship.Inventory.QuickEquip.UsesTheOrganizingGridWithoutRoom", TestFlags)
+
+bool FFSQuickEquipOrganizeTest::RunTest(const FString& Parameters)
+{
+	FInventoryTestWorld Test(false);
+	UFSInventoryComponent* Inventory = Test.Inventory;
+
+	UFSItemDefinition* Sword = MakeItem(SwordSize);
+	UFSItemDefinition* Mace = MakeItem(SwordSize);
+	UFSItemDefinition* Dagger = MakeItem(FIntPoint(1, 1));
+	UFSItemDefinition* Pebble = MakeItem(FIntPoint(1, 1));
+	Pebble->ItemType = EFSItemType::Consumable;
+
+	// Without a backpack there's nowhere but the organizing grid
+	Inventory->CarryNewItem(Sword);
+	TestTrue(TEXT("Without a backpack an item is still put away"), Inventory->StowCarriedItem());
+	TestTrue(TEXT("By organizing"), Inventory->IsOrganizing());
+	const FFSInventoryItem* Organized = Inventory->FindItemAt(FIntPoint(0, 0), EFSItemGrid::Organize);
+	TestTrue(TEXT("In the organizing grid's first open space"), Organized && Organized->Definition == Sword);
+	TArray<FFSInventoryItem> Dropped;
+	Inventory->StopOrganizing(Dropped);
+
+	// A backpack only as big as a sword, with a pebble in a corner a sword would need
+	Inventory->EquipBackpack(MakeBackpack(nullptr, SwordSize));
+	Inventory->CarryNewItem(Sword);
+	Inventory->SwapCarriedItemWithHand(EFSHand::Right);
+	Inventory->CarryNewItem(Mace);
+	Inventory->SwapCarriedItemWithHand(EFSHand::Left);
+	Inventory->CarryNewItem(Pebble);
+	Inventory->PlaceCarriedItem(FIntPoint(1, 5));
+	Inventory->CarryNewItem(Dagger);
+	Inventory->PlaceCarriedItem(FIntPoint(0, 0));
+	Inventory->PickUpItemAt(FIntPoint(0, 0));
+
+	Inventory->QuickEquipCarriedItem(EFSItemGrid::Backpack, FIntPoint(0, 0), 0);
+	TestTrue(TEXT("The dagger replaces the right hand's sword"), Inventory->GetHandItem(EFSHand::Right).Definition == Dagger);
+	TestTrue(TEXT("Which has no room in the backpack, so organizing starts"), Inventory->IsOrganizing());
+	Organized = Inventory->FindItemAt(FIntPoint(0, 0), EFSItemGrid::Organize);
+	TestTrue(TEXT("With the sword in the organizing grid"), Organized && Organized->Definition == Sword);
+	TestFalse(TEXT("Not on the cursor"), Inventory->IsCarryingItem());
+
+	// Double clicking an item in the organizing grid puts what it replaces back where it lay
+	Inventory->PickUpItemAt(FIntPoint(0, 0), EFSItemGrid::Organize);
+	Inventory->QuickEquipCarriedItem(EFSItemGrid::Organize, FIntPoint(0, 0), 0);
+	TestTrue(TEXT("The sword goes back in the right hand"), Inventory->GetHandItem(EFSHand::Right).Definition == Sword);
+	Organized = Inventory->FindItemAt(FIntPoint(0, 0), EFSItemGrid::Organize);
+	TestTrue(TEXT("And the dagger where the sword lay"), Organized && Organized->Definition == Dagger);
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSQuickEquipClickTest, "Fellowship.Inventory.Controller.DoubleClickingEquipsAndPutsAway", TestFlags)
+
+bool FFSQuickEquipClickTest::RunTest(const FString& Parameters)
+{
+	FInventoryPlayerTestWorld Test;
+	AFSPlayerController* Controller = Test.Controller;
+	UFSInventoryComponent* Inventory = Test.Inventory;
+
+	Test.OpenInventory();
+	if (!TestTrue(TEXT("The inventory opens"), Controller->GetInventoryViewState() == EFSInventoryViewState::Open))
+	{
+		return false;
+	}
+
+	FFSInventoryClick Click;
+	Click.Place = EFSInventoryClickPlace::Grid;
+
+	UFSItemDefinition* Sword = MakeItem(SwordSize);
+	Inventory->AddItem(Sword);
+
+	// Anywhere on the item counts as the same place
+	Click.Cell = FIntPoint(0, 0);
+	Controller->ClickInventory(Click, 10.0);
+	TestTrue(TEXT("The first click picks it up"), Inventory->IsCarryingItem());
+	Click.Cell = FIntPoint(1, 3);
+	Controller->ClickInventory(Click, 10.2);
+	TestTrue(TEXT("A quick second click equips it"), Inventory->GetHandItem(EFSHand::Right).Definition == Sword);
+	TestFalse(TEXT("Off the cursor"), Inventory->IsCarryingItem());
+
+	UFSItemDefinition* Mace = MakeItem(SwordSize);
+	Inventory->AddItem(Mace);
+	Click.Cell = FIntPoint(0, 0);
+	Controller->ClickInventory(Click, 20.0);
+	Controller->ClickInventory(Click, 21.0);
+	TestFalse(TEXT("A slow second click only puts it down"), Inventory->GetHandItem(EFSHand::Left).Definition != nullptr || Inventory->IsCarryingItem());
+	const FFSInventoryItem* PutDown = Inventory->FindItemAt(FIntPoint(0, 0));
+	TestTrue(TEXT("Where it was"), PutDown && PutDown->Definition == Mace);
+
+	Controller->ClickInventory(Click, 30.0);
+	Click.Cell = FIntPoint(6, 0);
+	Controller->ClickInventory(Click, 30.1);
+	TestFalse(TEXT("A quick click somewhere else only puts it down"), Inventory->GetHandItem(EFSHand::Left).Definition != nullptr || Inventory->IsCarryingItem());
+	PutDown = Inventory->FindItemAt(FIntPoint(6, 0));
+	TestTrue(TEXT("There"), PutDown && PutDown->Definition == Mace);
+
+	// Three quick clicks are a double click and then a fresh first click
+	Controller->ClickInventory(Click, 40.0);
+	Controller->ClickInventory(Click, 40.1);
+	TestTrue(TEXT("The second weapon goes in the left hand"), Inventory->GetHandItem(EFSHand::Left).Definition == Mace);
+	Controller->ClickInventory(Click, 40.2);
+	TestFalse(TEXT("And a third click on the empty cell does nothing"), Inventory->IsCarryingItem());
+
+	FFSInventoryClick HandClick;
+	HandClick.Place = EFSInventoryClickPlace::Hand;
+	HandClick.Index = AFSInventoryRig::RightHandSlot;
+	Controller->ClickInventory(HandClick, 50.0);
+	TestTrue(TEXT("Clicking a hand picks up what it holds"), Inventory->IsCarryingItem());
+	Controller->ClickInventory(HandClick, 50.1);
+	TestTrue(TEXT("Double clicking it empties the hand"), Inventory->GetHandItem(EFSHand::Right).Definition == nullptr);
+	TestFalse(TEXT("Off the cursor"), Inventory->IsCarryingItem());
+	TestTrue(TEXT("Into the backpack"), Inventory->GetItems().ContainsByPredicate([Sword](const FFSInventoryItem& Item) { return Item.Definition == Sword; }));
+
+	return true;
+}
+
 #endif

@@ -26,6 +26,30 @@ enum class EFSInventoryViewState : uint8
 	Closing
 };
 
+// What kind of place in the open inventory a click lands on
+enum class EFSInventoryClickPlace : uint8
+{
+	// The backpack's grid, or outside everything, which tosses the carried item
+	Grid,
+	OrganizeGrid,
+	Hand,
+	QuickSlot,
+	ArmorSlot,
+	Button
+};
+
+// Where a click in the open inventory lands
+struct FFSInventoryClick
+{
+	EFSInventoryClickPlace Place = EFSInventoryClickPlace::Grid;
+
+	// The cell in a grid. INDEX_NONE in the backpack's grid means outside it.
+	FIntPoint Cell = FIntPoint(INDEX_NONE, INDEX_NONE);
+
+	// Which hand slot, quick slot, armor slot or button, as AFSInventoryRig numbers them
+	int32 Index = INDEX_NONE;
+};
+
 /**
  *
  */
@@ -80,6 +104,24 @@ class FELLOWSHIP_API AFSPlayerController : public APlayerController
 	// Spawned the first time the inventory opens and kept for reuse
 	UPROPERTY(Transient)
 	TObjectPtr<AFSInventoryRig> InventoryRig;
+
+	// How soon a second click on an item has to follow the first to count as a double click, which equips it, uses it or puts it away
+	UPROPERTY(EditDefaultsOnly, Category = "Inventory", meta = (ClampMin = "0.05", Units = s))
+	float InventoryDoubleClickTime = 0.3f;
+
+	// The last click that picked an item up onto the cursor, and where the item was, so that a second click there can finish a double click
+	struct FInventoryPickup
+	{
+		FFSInventoryClick Click;
+		int32 ItemId = INDEX_NONE;
+		double Time = 0.0;
+
+		// The cells it covered, in a grid
+		FIntPoint Cell = FIntPoint::ZeroValue;
+		FIntPoint Footprint = FIntPoint::ZeroValue;
+		uint8 Rotation = 0;
+	};
+	FInventoryPickup LastInventoryPickup;
 
 	EFSInventoryViewState InventoryViewState = EFSInventoryViewState::Closed;
 	FTimerHandle InventoryMidpointTimer;
@@ -150,6 +192,11 @@ public:
 
 	// Turns the carried item a quarter turn clockwise, if the inventory is open and an item is carried
 	void RotateCarriedInventoryItem();
+
+	// What a click does in the open inventory, at Time in seconds. Usually the same as selecting that place, but a second click on an item that the first just picked up,
+	// within InventoryDoubleClickTime, is a double click instead. An item from a grid is then equipped or used, as UFSInventoryComponent::QuickEquipCarriedItem does,
+	// and one from a hand, quick slot or armor slot is put away, as UFSInventoryComponent::StowCarriedItem does.
+	void ClickInventory(const FFSInventoryClick& Click, double Time);
 
 protected:
 	virtual void BeginPlay() override;
