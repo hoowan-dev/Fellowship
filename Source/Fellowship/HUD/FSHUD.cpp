@@ -317,23 +317,8 @@ void AFSHUD::DrawInventorySlotNames()
 
 	DrawSlotName(LOCTEXT("UseItemButton", "Use Item"), Rig->GetButtonLabelLocation(AFSInventoryRig::UseItemButton));
 
-	// Standing on end beside the organizing grid, its label runs down it. Otherwise it lies flat, a word to a line.
-	const bool bOrganizing = Rig->IsOrganizing();
-	const FVector OrganizeLabel = Rig->GetButtonLabelLocation(AFSInventoryRig::OrganizeInventoryButton);
-	if (Rig->IsButtonUpright(AFSInventoryRig::OrganizeInventoryButton))
-	{
-		DrawSidewaysSlotName(bOrganizing ? LOCTEXT("StopOrganizingButton", "Stop Organizing") : LOCTEXT("OrganizeInventoryButton", "Organize Inventory"), OrganizeLabel);
-	}
-	else
-	{
-		const FVector ScreenLocation = Project(OrganizeLabel);
-		if (ScreenLocation.Z > 0.0)
-		{
-			const float LineHeight = GEngine->GetMediumFont()->GetMaxCharHeight();
-			DrawCentredText((bOrganizing ? LOCTEXT("StopOrganizingFirstLine", "Stop") : LOCTEXT("OrganizeInventoryFirstLine", "Organize")).ToString(), FVector2D(ScreenLocation.X, ScreenLocation.Y - LineHeight * 0.5f));
-			DrawCentredText((bOrganizing ? LOCTEXT("StopOrganizingSecondLine", "Organizing") : LOCTEXT("OrganizeInventorySecondLine", "Inventory")).ToString(), FVector2D(ScreenLocation.X, ScreenLocation.Y + LineHeight * 0.5f));
-		}
-	}
+	// Standing on end beside the right column, its label runs down it
+	DrawSidewaysSlotName(Rig->IsOrganizing() ? LOCTEXT("StopOrganizingButton", "Stop Organizing") : LOCTEXT("OrganizeInventoryButton", "Organize Inventory"), Rig->GetButtonLabelLocation(AFSInventoryRig::OrganizeInventoryButton));
 
 	if (!Rig->HasBackpack())
 	{

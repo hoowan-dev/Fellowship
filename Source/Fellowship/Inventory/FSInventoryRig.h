@@ -215,6 +215,10 @@ public:
 
 	// The size of a hand's or quick slot's cell: X across and Y up
 	FORCEINLINE FVector2D GetSideSlotSize() const { return FVector2D(SideSlotWidth, SideSlotHeight); }
+	FORCEINLINE float GetSpacing() const { return Spacing; }
+
+	// From the top of a slot's cell to the middle of its name, halfway across the gap above it
+	FORCEINLINE double GetSlotLabelHeight() const { return Spacing * 0.5; }
 
 	// The meshes of what's in the quick slots, hanging off the displayed backpack
 	FORCEINLINE const FFSHungItemMeshes& GetPackHungItems() const { return PackHungItems; }
@@ -263,11 +267,8 @@ public:
 	// Whether a button is there to see and press. Drop Backpack needs a backpack, and the others are always there.
 	FORCEINLINE bool IsButtonShown(int32 Button) const { return bHasBackpack || Button != DropBackpackButton; }
 
-	// How far the display has slid over to organize, eased, from 0 at rest to 1 with the organizing grid on the screen
-	FORCEINLINE float GetOrganizeBlend() const { return FMath::SmoothStep(0.0f, 1.0f, SlideAmount); }
-
-	// Whether a button stands on end, with its label running down it. Organize Inventory does once the organizing grid is mostly on the screen, as it narrows to make room.
-	FORCEINLINE bool IsButtonUpright(int32 Button) const { return Button == OrganizeInventoryButton && GetOrganizeBlend() >= 0.5f; }
+	// Whether a button stands on end, with its label running down it. Organize Inventory does, beside the right column.
+	FORCEINLINE bool IsButtonUpright(int32 Button) const { return Button == OrganizeInventoryButton; }
 
 	// The point in the world to centre a button's label on
 	FVector GetButtonLabelLocation(int32 Button) const;
@@ -542,16 +543,9 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Side Slots", meta = (ClampMin = "0.1", Units = cm))
 	float SideSlotWidth = 6.0f;
 
+	// With the defaults the column, two of these and the spacing between them, is as tall as an 8 cell grid
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Side Slots", meta = (ClampMin = "0.1", Units = cm))
-	float SideSlotHeight = 10.75f;
-
-	// Between a quick slot's cell and the hand's below it, which has to leave room for the hand's name. With the defaults the column is as tall as an 8 cell grid.
-	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Side Slots", meta = (ClampMin = "0.0", Units = cm))
-	float SideSlotSpacing = 2.5f;
-
-	// Between the side of the grid and the column. The hands follow their cells, so they stay clear of the grid whatever its size.
-	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Side Slots", meta = (ClampMin = "0.0", Units = cm))
-	float SideSlotGap = 3.0f;
+	float SideSlotHeight = 11.5f;
 
 	// From the camera to the palms, which sit behind the grid
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Hands", meta = (ClampMin = "1.0", Units = cm))
@@ -587,33 +581,19 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Armor Slots", meta = (ClampMin = "0.1", Units = cm))
 	float ArmorSlotSize = 7.5f;
 
-	// Between the left column's cells and the armor slots' cells
-	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Armor Slots", meta = (ClampMin = "0.0", Units = cm))
-	float ArmorSlotGap = 1.5f;
-
-	// Between one armor slot's cell and the next, which has to leave room for the name above each
-	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Armor Slots", meta = (ClampMin = "0.0", Units = cm))
-	float ArmorSlotSpacing = 2.5f;
-
 	// How far the middle of the column of armor slots is above the middle of the grid
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Armor Slots", meta = (Units = cm))
 	float ArmorSlotHeight = 0.0f;
 
-	// How thick the buttons are: the height of Drop Backpack above the grid, and the width of Organize Inventory while it stands beside the organizing grid
+	// How thick every button is: the height of Use Item below the grid and Drop Backpack above it, and the width of Organize Inventory standing on end beside the right column
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Buttons", meta = (ClampMin = "0.1", Units = cm))
-	float ButtonHeight = 2.5f;
+	float ButtonHeight = 5.0f;
 
-	// The height of Use Item below the grid
-	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Buttons", meta = (ClampMin = "0.1", Units = cm))
-	float UseItemButtonHeight = 5.0f;
-
-	// The width of Organize Inventory while not organizing, room for its label to lie flat. It narrows to Button Height as the organizing grid slides in.
-	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Buttons", meta = (ClampMin = "0.1", Units = cm))
-	float OrganizeButtonWidth = 10.0f;
-
-	// Between the grid and the buttons above and below it, and between the right column and the button beside it
-	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Buttons", meta = (ClampMin = "0.0", Units = cm))
-	float ButtonGap = 1.0f;
+	// Between every pair of neighbours, across and up and down: the grid and the buttons above and below it, the grid and the columns either side,
+	// a quick slot and the hand below it, the left column and the armor slots, one armor slot and the next, the right column and Organize Inventory,
+	// and Organize Inventory and the organizing grid. The names over the cells sit in the middle of the gap above them.
+	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Layout", meta = (ClampMin = "0.0", Units = cm))
+	float Spacing = 1.0f;
 
 	// How far across from the middle of the screen the boxes can go, at the grid's usual distance. 90 degrees across makes the edge of the screen 40cm away.
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Layout", meta = (ClampMin = "1.0", Units = cm))
@@ -622,10 +602,6 @@ protected:
 	// How far up and down from the middle of the screen they can go. A 16:9 screen's edge is 22.5cm away.
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Layout", meta = (ClampMin = "1.0", Units = cm))
 	float ScreenHalfHeight = 22.0f;
-
-	// Between the Organize Inventory button and the organizing grid
-	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Organizing", meta = (ClampMin = "0.0", Units = cm))
-	float OrganizeGridGap = 1.0f;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Organizing", meta = (ClampMin = "0.01", Units = s))
 	float OrganizeSlideTime = 0.35f;

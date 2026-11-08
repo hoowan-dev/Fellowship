@@ -229,6 +229,47 @@ bool FFSInventoryRigQuickSlotsTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSInventoryRigSpacingTest, "Fellowship.Inventory.Rig.SpacesEverythingEvenly", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FFSInventoryRigSpacingTest::RunTest(const FString& Parameters)
+{
+	FInventoryRigTestWorld Test;
+	const AFSInventoryRig* Rig = Test.Rig;
+	const double HalfGrid = GridSize * CellSize * 0.5;
+	constexpr double ArmorSlotSize = 7.5;
+
+	// The gap between the grid and Use Item is the one everything else matches
+	const FVector2D UseCentre = Rig->GetButtonCentre(AFSInventoryRig::UseItemButton);
+	const double Spacing = -HalfGrid - (UseCentre.Y + Rig->GetButtonSize(AFSInventoryRig::UseItemButton).Y * 0.5);
+	TestEqual(TEXT("It's the rig's spacing"), Spacing, static_cast<double>(Rig->GetSpacing()), 0.001);
+
+	const FVector2D DropCentre = Rig->GetButtonCentre(AFSInventoryRig::DropBackpackButton);
+	TestEqual(TEXT("Grid to Drop Backpack"), DropCentre.Y - Rig->GetButtonSize(AFSInventoryRig::DropBackpackButton).Y * 0.5 - HalfGrid, Spacing, 0.001);
+
+	const FVector2D SlotSize = Rig->GetSideSlotSize();
+	const FVector2D LeftHand = Rig->GetHandSlotCentre(AFSInventoryRig::LeftHandSlot);
+	const FVector2D RightHand = Rig->GetHandSlotCentre(AFSInventoryRig::RightHandSlot);
+	const FVector2D LeftQuick = Rig->GetQuickSlotCentre(AFSInventoryRig::LeftQuickSlot);
+	TestEqual(TEXT("Left column to grid"), -HalfGrid - (LeftHand.X + SlotSize.X * 0.5), Spacing, 0.001);
+	TestEqual(TEXT("Grid to right column"), RightHand.X - SlotSize.X * 0.5 - HalfGrid, Spacing, 0.001);
+	TestEqual(TEXT("Hand to quick slot"), (LeftQuick.Y - SlotSize.Y * 0.5) - (LeftHand.Y + SlotSize.Y * 0.5), Spacing, 0.001);
+	TestEqual(TEXT("The column's top is level with the grid's"), LeftQuick.Y + SlotSize.Y * 0.5, HalfGrid, 0.001);
+	TestEqual(TEXT("And its bottom"), LeftHand.Y - SlotSize.Y * 0.5, -HalfGrid, 0.001);
+
+	TestEqual(TEXT("Armor slots to left column"), (LeftHand.X - SlotSize.X * 0.5) - (Rig->GetArmorSlotCentre(0).X + ArmorSlotSize * 0.5), Spacing, 0.001);
+	for (int32 ArmorSlot = 1; ArmorSlot < AFSInventoryRig::ArmorSlotCount; ++ArmorSlot)
+	{
+		TestEqual(TEXT("Armor slot to armor slot"), (Rig->GetArmorSlotCentre(ArmorSlot - 1).Y - ArmorSlotSize * 0.5) - (Rig->GetArmorSlotCentre(ArmorSlot).Y + ArmorSlotSize * 0.5), Spacing, 0.001);
+	}
+
+	const FVector2D OrganizeCentre = Rig->GetButtonCentre(AFSInventoryRig::OrganizeInventoryButton);
+	const double HalfOrganizeWidth = Rig->GetButtonSize(AFSInventoryRig::OrganizeInventoryButton).X * 0.5;
+	TestEqual(TEXT("Right column to Organize Inventory"), OrganizeCentre.X - HalfOrganizeWidth - (RightHand.X + SlotSize.X * 0.5), Spacing, 0.001);
+	TestEqual(TEXT("Organize Inventory to the organizing grid"), Rig->GetOrganizeGridOffset() - UFSInventoryComponent::OrganizeGridSize * CellSize * 0.5 - (OrganizeCentre.X + HalfOrganizeWidth), Spacing, 0.001);
+
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSInventoryRigButtonsTest, "Fellowship.Inventory.Rig.PutsTheButtonsAroundTheGrid", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FFSInventoryRigButtonsTest::RunTest(const FString& Parameters)
@@ -256,7 +297,7 @@ bool FFSInventoryRigButtonsTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("So is Drop Backpack"), Drop.GetLocation().Y, 0.0);
 	TestEqual(TEXT("Use Item is as wide as the grid"), HalfSize(Use).X, HalfGrid, 0.001);
 	TestEqual(TEXT("So is Drop Backpack"), HalfSize(Drop).X, HalfGrid, 0.001);
-	TestEqual(TEXT("Use Item is twice as tall as Drop Backpack"), HalfSize(Use).Y, HalfSize(Drop).Y * 2.0, 0.001);
+	TestEqual(TEXT("Use Item is as tall as Drop Backpack"), HalfSize(Use).Y, HalfSize(Drop).Y, 0.001);
 
 	const FVector2D SlotSize = Test.Rig->GetSideSlotSize();
 	const FVector2D QuickSlot = Test.Rig->GetQuickSlotCentre(AFSInventoryRig::RightQuickSlot);
@@ -264,9 +305,10 @@ bool FFSInventoryRigButtonsTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Organize Inventory is right of the right column"), Organize.GetLocation().Y - HalfSize(Organize).X > Hand.X + SlotSize.X * 0.5);
 	TestEqual(TEXT("Its top is level with the quick slot's"), Organize.GetLocation().Z + HalfSize(Organize).Y, QuickSlot.Y + SlotSize.Y * 0.5, 0.001);
 	TestEqual(TEXT("And its bottom with the hand's"), Organize.GetLocation().Z - HalfSize(Organize).Y, Hand.Y - SlotSize.Y * 0.5, 0.001);
-	TestEqual(TEXT("Not organizing, it's four times as wide as Drop Backpack is tall"), HalfSize(Organize).X, HalfSize(Drop).Y * 4.0, 0.001);
-	TestFalse(TEXT("With its label lying flat"), Test.Rig->IsButtonUpright(AFSInventoryRig::OrganizeInventoryButton));
-	TestFalse(TEXT("Like the others'"), Test.Rig->IsButtonUpright(AFSInventoryRig::UseItemButton) || Test.Rig->IsButtonUpright(AFSInventoryRig::DropBackpackButton));
+	TestEqual(TEXT("It's as wide as Use Item is tall, standing on end"), HalfSize(Organize).X, HalfSize(Use).Y, 0.001);
+	TestEqual(TEXT("And as long as Use Item is wide"), HalfSize(Organize).Y, HalfSize(Use).X, 0.001);
+	TestTrue(TEXT("With its label running down it"), Test.Rig->IsButtonUpright(AFSInventoryRig::OrganizeInventoryButton));
+	TestFalse(TEXT("Unlike the others'"), Test.Rig->IsButtonUpright(AFSInventoryRig::UseItemButton) || Test.Rig->IsButtonUpright(AFSInventoryRig::DropBackpackButton));
 
 	// 90 degrees across a 16:9 screen, with the grid 40cm away
 	constexpr double HalfScreenWidth = 40.0;
@@ -339,7 +381,7 @@ bool FFSInventoryRigSlotLabelsTest::RunTest(const FString& Parameters)
 	const auto TestLabel = [this, &Test](const TCHAR* Name, const FVector& Location, const FVector2D& SlotCentre, double SlotHeight)
 	{
 		const FVector Seen = (Location - Test.Rig->GetActorLocation()).GetSafeNormal();
-		const FVector2D Above = SlotCentre + FVector2D(0.0, SlotHeight * 0.5 + 0.75);
+		const FVector2D Above = SlotCentre + FVector2D(0.0, SlotHeight * 0.5 + Test.Rig->GetSlotLabelHeight());
 
 		TestTrue(FString::Printf(TEXT("%s: centred just above its cell"), Name), Seen.Equals(Test.DirectionToGridPoint(Above.X, Above.Y), 0.001));
 	};
@@ -351,7 +393,7 @@ bool FFSInventoryRigSlotLabelsTest::RunTest(const FString& Parameters)
 
 	// 90 degrees across a 16:9 screen, with the grid 40cm away
 	constexpr double HalfScreenHeight = 22.5;
-	const double LabelUp = Test.Rig->GetQuickSlotCentre(AFSInventoryRig::LeftQuickSlot).Y + SlotHeight * 0.5 + 0.75;
+	const double LabelUp = Test.Rig->GetQuickSlotCentre(AFSInventoryRig::LeftQuickSlot).Y + SlotHeight * 0.5 + Test.Rig->GetSlotLabelHeight();
 	TestTrue(TEXT("A quick slot's name is on a 16:9 screen"), LabelUp < HalfScreenHeight);
 
 	return true;
@@ -559,8 +601,7 @@ bool FFSInventoryRigOrganizeTest::RunTest(const FString& Parameters)
 	int32 Button = INDEX_NONE;
 	TestTrue(TEXT("And the button to stop"), Rig->GetButtonFromWorldRay(Origin, RayTo(Rig->GetButtonCentre(AFSInventoryRig::OrganizeInventoryButton)), Button));
 	TestEqual(TEXT("Which is that button"), Button, AFSInventoryRig::OrganizeInventoryButton);
-	TestEqual(TEXT("Which has narrowed to stand beside the organizing grid"), Rig->GetButtonSize(AFSInventoryRig::OrganizeInventoryButton).X, Rig->GetButtonSize(AFSInventoryRig::DropBackpackButton).Y, 0.001);
-	TestTrue(TEXT("With its label running down it"), Rig->IsButtonUpright(AFSInventoryRig::OrganizeInventoryButton));
+	TestEqual(TEXT("Which keeps its size beside the organizing grid"), Rig->GetButtonSize(AFSInventoryRig::OrganizeInventoryButton).X, Rig->GetButtonSize(AFSInventoryRig::UseItemButton).Y, 0.001);
 
 	// Further away than the grid, so sliding the same distance alone would leave them behind it
 	TestTrue(TEXT("The pack goes as far on screen as the grid does"), (OnScreen(Rig->GetPack()->Bounds.Origin) - ToScreenPoint(PackAtRest)).Size() < 0.01);

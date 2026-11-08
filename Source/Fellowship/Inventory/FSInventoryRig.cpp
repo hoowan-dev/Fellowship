@@ -70,9 +70,6 @@ namespace
 	// A carried item is never pulled closer to the camera than this fraction of the way
 	constexpr double MinCarriedItemPull = 0.2;
 
-	// From the top of a slot's cell to the middle of its name
-	constexpr double SlotLabelHeight = 0.75;
-
 	// How far a carried item turns its front towards where it's going, as a fraction of how far it leans
 	constexpr double SwayTiltFraction = 0.5;
 
@@ -527,7 +524,7 @@ double AFSInventoryRig::GetOrganizeGridOffset() const
 {
 	// Beside Organize Inventory as it stands once the grid has slid in
 	const double RightColumnEdge = GetHandSlotCentre(RightHandSlot).X + SideSlotWidth * 0.5;
-	return RightColumnEdge + ButtonGap + ButtonHeight + OrganizeGridGap + UFSInventoryComponent::OrganizeGridSize * CellSize * 0.5;
+	return RightColumnEdge + Spacing + ButtonHeight + Spacing + UFSInventoryComponent::OrganizeGridSize * CellSize * 0.5;
 }
 
 void AFSInventoryRig::GetDisplayLayout(bool bForOrganizing, double& OutSlide, double& OutScale) const
@@ -535,15 +532,15 @@ void AFSInventoryRig::GetDisplayLayout(bool bForOrganizing, double& OutSlide, do
 	const double HalfOrganizeGrid = UFSInventoryComponent::OrganizeGridSize * CellSize * 0.5;
 
 	const double Left = GetArmorSlotCentre(0).X - ArmorSlotSize * 0.5;
-	// At rest, the edge of Organize Inventory at its widest
-	const double Right = bForOrganizing ? GetOrganizeGridOffset() + HalfOrganizeGrid : GetHandSlotCentre(RightHandSlot).X + SideSlotWidth * 0.5 + ButtonGap + OrganizeButtonWidth;
+	// At rest, the edge of Organize Inventory
+	const double Right = bForOrganizing ? GetOrganizeGridOffset() + HalfOrganizeGrid : GetHandSlotCentre(RightHandSlot).X + SideSlotWidth * 0.5 + Spacing + ButtonHeight;
 
 	// Measured from the top of the highest name, over a quick slot or the top armor slot, or the button above the grid if that's higher
 	const double Top = FMath::Max3(
-		GetQuickSlotCentre(LeftQuickSlot).Y + SideSlotHeight * 0.5 + SlotLabelHeight,
-		GetArmorSlotCentre(0).Y + ArmorSlotSize * 0.5 + SlotLabelHeight,
+		GetQuickSlotCentre(LeftQuickSlot).Y + SideSlotHeight * 0.5 + GetSlotLabelHeight(),
+		GetArmorSlotCentre(0).Y + ArmorSlotSize * 0.5 + GetSlotLabelHeight(),
 		GetButtonCentre(DropBackpackButton).Y + ButtonHeight * 0.5);
-	const double Bottom = -GetButtonCentre(UseItemButton).Y + UseItemButtonHeight * 0.5;
+	const double Bottom = -GetButtonCentre(UseItemButton).Y + ButtonHeight * 0.5;
 	const double HalfHeight = FMath::Max3(Top, Bottom, bForOrganizing ? HalfOrganizeGrid : 0.0);
 
 	// At rest the grid stays in the middle of the screen, however lopsided the boxes around it are
@@ -581,10 +578,6 @@ void AFSInventoryRig::ApplySlide()
 
 	UpdateDisplayPlacement();
 	UpdatePackTransform();
-
-	// Organize Inventory narrows as the organizing grid comes in
-	BuildButtons();
-
 	PoseArms();
 	UpdateSlotItemRests();
 	UpdateSlotItemSway();
@@ -624,8 +617,8 @@ EFSHand AFSInventoryRig::GetHandOfSlot(int32 HandSlot)
 FVector2D AFSInventoryRig::GetHandSlotCentre(int32 HandSlot) const
 {
 	// The bottom of the column on its side of the grid, which is centred on the grid's middle
-	const double DistanceFromCentre = GridWidth * CellSize * 0.5 + SideSlotGap + SideSlotWidth * 0.5;
-	return FVector2D(HandSlot == LeftHandSlot ? -DistanceFromCentre : DistanceFromCentre, -(SideSlotHeight + SideSlotSpacing) * 0.5);
+	const double DistanceFromCentre = GridWidth * CellSize * 0.5 + Spacing + SideSlotWidth * 0.5;
+	return FVector2D(HandSlot == LeftHandSlot ? -DistanceFromCentre : DistanceFromCentre, -(SideSlotHeight + Spacing) * 0.5);
 }
 
 EFSQuickSlot AFSInventoryRig::GetQuickSlotOfIndex(int32 QuickSlotIndex)
@@ -642,8 +635,8 @@ FVector2D AFSInventoryRig::GetArmorSlotCentre(int32 ArmorSlot) const
 {
 	// From the top: head, face and body, in the order of their types
 	return FVector2D(
-		GetHandSlotCentre(LeftHandSlot).X - SideSlotWidth * 0.5 - ArmorSlotGap - ArmorSlotSize * 0.5,
-		ArmorSlotHeight + (1 - ArmorSlot) * (ArmorSlotSize + ArmorSlotSpacing));
+		GetHandSlotCentre(LeftHandSlot).X - SideSlotWidth * 0.5 - Spacing - ArmorSlotSize * 0.5,
+		ArmorSlotHeight + (1 - ArmorSlot) * (ArmorSlotSize + Spacing));
 }
 
 FVector2D AFSInventoryRig::GetQuickSlotCentre(int32 QuickSlot) const
@@ -670,7 +663,7 @@ FVector AFSInventoryRig::GetArmorSlotLabelLocation(int32 ArmorSlot) const
 
 FVector AFSInventoryRig::GetSlotLabelLocation(const FVector2D& SlotCentre, double SlotHeight) const
 {
-	return GetLocationOnGrid(FVector2D(SlotCentre.X, SlotCentre.Y + SlotHeight * 0.5 + SlotLabelHeight));
+	return GetLocationOnGrid(FVector2D(SlotCentre.X, SlotCentre.Y + SlotHeight * 0.5 + GetSlotLabelHeight()));
 }
 
 FVector2D AFSInventoryRig::GetButtonCentre(int32 Button) const
@@ -681,10 +674,10 @@ FVector2D AFSInventoryRig::GetButtonCentre(int32 Button) const
 	{
 		// Beside the right column, which is centred on the grid's middle
 		const double RightColumnEdge = GetHandSlotCentre(RightHandSlot).X + SideSlotWidth * 0.5;
-		return FVector2D(RightColumnEdge + ButtonGap + Size.X * 0.5, 0.0);
+		return FVector2D(RightColumnEdge + Spacing + Size.X * 0.5, 0.0);
 	}
 
-	const double FromMiddle = GridHeight * CellSize * 0.5 + ButtonGap + Size.Y * 0.5;
+	const double FromMiddle = GridHeight * CellSize * 0.5 + Spacing + Size.Y * 0.5;
 	return FVector2D(0.0, Button == DropBackpackButton ? FromMiddle : -FromMiddle);
 }
 
@@ -692,11 +685,11 @@ FVector2D AFSInventoryRig::GetButtonSize(int32 Button) const
 {
 	if (Button == OrganizeInventoryButton)
 	{
-		// From the top of the quick slot to the bottom of the hand, narrowing as the organizing grid comes in
-		return FVector2D(FMath::Lerp<double>(OrganizeButtonWidth, ButtonHeight, GetOrganizeBlend()), SideSlotHeight * 2.0 + SideSlotSpacing);
+		// Standing on end, from the top of the quick slot to the bottom of the hand
+		return FVector2D(ButtonHeight, SideSlotHeight * 2.0 + Spacing);
 	}
 
-	return FVector2D(GridWidth * CellSize, Button == UseItemButton ? UseItemButtonHeight : ButtonHeight);
+	return FVector2D(GridWidth * CellSize, ButtonHeight);
 }
 
 FVector AFSInventoryRig::GetButtonLabelLocation(int32 Button) const
