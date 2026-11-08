@@ -6,8 +6,10 @@
 
 #include "Character/FSCharacter.h"
 #include "Character/FSCharacterMovementComponent.h"
+#include "Animation/FSClimbIKComponent.h"
 #include "Components/BoxComponent.h"
 #include "Components/CapsuleComponent.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "GameFramework/WorldSettings.h"
@@ -40,6 +42,9 @@ namespace
 			Character = World->SpawnActor<AFSCharacter>(FVector(0.0f, 0.0f, StandingHalfHeight + 1.0f), FRotator::ZeroRotator, SpawnParameters);
 			Movement = Character->GetCharacterMovement<UFSCharacterMovementComponent>();
 
+			// The distances and times in these tests are written for this speed, whatever the character's tuned to
+			Movement->ClimbSpeed = 150.0f;
+
 			// Runs the same input path as a possessed character without needing a controller
 			Movement->bRunPhysicsWithNoController = true;
 			Movement->SetMovementMode(MOVE_Walking);
@@ -71,11 +76,24 @@ namespace
 			return AddBox(FVector(200.0f, 0.0f, Height * 0.5f), FVector(100.0f, 2000.0f, Height * 0.5f), FRotator::ZeroRotator, Mobility);
 		}
 
+		UFSClimbIKComponent* ClimbIK() const
+		{
+			return Character->FindComponentByClass<UFSClimbIKComponent>();
+		}
+
+		TMap<FName, FIKRigGoal> IKGoals() const
+		{
+			TMap<FName, FIKRigGoal> Goals;
+			ClimbIK()->AddIKGoals_Implementation(Goals);
+			return Goals;
+		}
+
 		// World->Tick doesn't dispatch tick functions in this bare world, so it only advances time and the movement component is ticked directly
 		void Tick()
 		{
 			World->Tick(LEVELTICK_TimeOnly, TickTime);
 			Movement->TickComponent(TickTime, LEVELTICK_All, &Movement->PrimaryComponentTick);
+			ClimbIK()->TickComponent(TickTime, LEVELTICK_All, &ClimbIK()->PrimaryComponentTick);
 		}
 
 		void Step(float Seconds, const FVector& Input)
@@ -97,13 +115,31 @@ namespace
 			}
 		}
 
-		// Walks up to whatever is ahead, then jumps into it
+		// Walks up to whatever is ahead, jumps into it and keeps pressing jump in the air to grab it
 		void JumpForward(float WalkSeconds = 2.0f)
 		{
 			Step(WalkSeconds, FVector::ForwardVector);
-			Character->Jump();
-			Step(0.5f, FVector::ForwardVector);
+			Character->JumpOrClimb();
+
+			for (float Elapsed = 0.0f; Elapsed < 0.5f; Elapsed += TickTime)
+			{
+				Step(TickTime, FVector::ForwardVector);
+
+				if (Movement->IsFalling())
+				{
+					Character->JumpOrClimb();
+				}
+			}
+
 			Character->StopJumping();
+		}
+
+		// Puts the character in the air, a little way from the wall that AddWall makes and high enough not to land for a while
+		void HangInTheAirByWall()
+		{
+			Character->SetActorLocation(FVector(50.0f, 0.0f, 800.0f));
+			Movement->Velocity = FVector::ZeroVector;
+			Movement->SetMovementMode(MOVE_Falling);
 		}
 
 		// Climbs until the character starts onto a ledge or stops climbing
@@ -138,6 +174,610 @@ bool FFSClimbingAttachTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSClimbingPressTest, "Fellowship.Climbing.OnlyGrabsWhenJumpIsPressedInTheAir", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FFSClimbingPressTest::RunTest(const FString& Parameters)
+{
+	FClimbingTestWorld Test;
+	Test.AddWall();
+	Test.Step(2.0f, FVector::ForwardVector);
+
+	FHitResult Grab;
+	TestFalse(TEXT("On the ground, there's nothing to grab"), Test.Movement->FindClimbGrab(Grab));
+
+	Test.Character->JumpOrClimb();
+	Test.Step(0.05f, FVector::ForwardVector);
+	TestTrue(TEXT("On the ground, pressing jumps"), Test.Movement->IsFalling());
+	TestFalse(TEXT("Rather than grabbing the wall"), Test.Movement->IsClimbing());
+	Test.Character->StopJumping();
+
+	Test.Step(0.2f, FVector::ForwardVector);
+	TestFalse(TEXT("Pushing into the wall in the air doesn't grab it"), Test.Movement->IsClimbing());
+
+	TestTrue(TEXT("Though there's something to grab"), Test.Movement->FindClimbGrab(Grab));
+	TestNearlyEqual(TEXT("On the wall's face"), Grab.ImpactPoint.X, 100.0, 0.1);
+
+	// Without pressing, it comes back down
+	Test.Step(1.5f, FVector::ForwardVector);
+	TestTrue(TEXT("Not pressing lands back on the ground"), Test.Movement->IsMovingOnGround());
+	TestFalse(TEXT("Never having grabbed it"), Test.Movement->IsClimbing());
+
+	Test.HangInTheAirByWall();
+	Test.Step(0.05f, FVector::ForwardVector);
+	TestFalse(TEXT("Falling past it doesn't grab it either"), Test.Movement->IsClimbing());
+	TestTrue(TEXT("There's something to grab while falling"), Test.Movement->FindClimbGrab(Grab));
+
+	Test.Step(0.05f, FVector::BackwardVector);
+	TestFalse(TEXT("But not when pushing away from it"), Test.Movement->FindClimbGrab(Grab));
+	Test.Character->JumpOrClimb();
+	TestFalse(TEXT("So pressing doesn't grab"), Test.Movement->IsClimbing());
+	Test.Character->StopJumping();
+	Test.Step(Test.Movement->ClimbGrabBufferTime, FVector::BackwardVector);
+
+	Test.Step(0.05f, FVector::ForwardVector);
+	TestTrue(TEXT("Pushing towards it again finds it"), Test.Movement->FindClimbGrab(Grab));
+	Test.Character->JumpOrClimb();
+	TestTrue(TEXT("And pressing grabs it"), Test.Movement->IsClimbing());
+	TestTrue(TEXT("Facing out of the surface that was found"), Test.Movement->GetClimbSurfaceNormal().Equals(Grab.ImpactNormal, 0.01f));
+
+	// Pressing again lets go, and it can't grab straight back on
+	Test.Character->JumpOrClimb();
+	TestFalse(TEXT("Pressing while climbing lets go"), Test.Movement->IsClimbing());
+	Test.Character->StopJumping();
+	Test.Step(0.05f, FVector::ForwardVector);
+	TestFalse(TEXT("Having just let go, there's nothing to grab"), Test.Movement->FindClimbGrab(Grab));
+	Test.Character->JumpOrClimb();
+	TestFalse(TEXT("And pressing doesn't grab"), Test.Movement->IsClimbing());
+	Test.Character->StopJumping();
+
+	Test.Step(Test.Movement->ClimbReattachDelay, FVector::ForwardVector);
+	TestFalse(TEXT("It doesn't grab by itself after the delay"), Test.Movement->IsClimbing());
+	Test.Character->JumpOrClimb();
+	TestTrue(TEXT("Pressing after the delay does"), Test.Movement->IsClimbing());
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSClimbingFacingTest, "Fellowship.Climbing.GrabsWhatItsFacingWithNoInput", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FFSClimbingFacingTest::RunTest(const FString& Parameters)
+{
+	FClimbingTestWorld Test;
+	Test.AddWall();
+
+	// Close enough for the wall to be in reach at an angle
+	const auto FaceWithNoInput = [&Test](double Yaw)
+	{
+		// Lets any earlier press stop trying to grab
+		Test.Step(Test.Movement->ClimbGrabBufferTime, FVector::ZeroVector);
+
+		Test.HangInTheAirByWall();
+		Test.Character->SetActorLocation(FVector(70.0, 0.0, 800.0));
+		Test.Character->SetActorRotation(FRotator(0.0, Yaw, 0.0));
+		Test.Step(0.05f, FVector::ZeroVector);
+	};
+
+	FHitResult Grab;
+
+	FaceWithNoInput(0.0);
+	TestTrue(TEXT("Facing the wall, there's something to grab"), Test.Movement->FindClimbGrab(Grab));
+	TestNearlyEqual(TEXT("On the wall's face"), Grab.ImpactPoint.X, 100.0, 0.1);
+	TestFalse(TEXT("It doesn't grab by itself"), Test.Movement->IsClimbing());
+
+	FaceWithNoInput(45.0);
+	TestTrue(TEXT("Facing it at an angle does too"), Test.Movement->FindClimbGrab(Grab));
+
+	FaceWithNoInput(90.0);
+	TestFalse(TEXT("Facing along it doesn't"), Test.Movement->FindClimbGrab(Grab));
+	Test.Character->JumpOrClimb();
+	TestFalse(TEXT("So pressing doesn't grab"), Test.Movement->IsClimbing());
+	Test.Character->StopJumping();
+
+	FaceWithNoInput(180.0);
+	TestFalse(TEXT("Facing away doesn't"), Test.Movement->FindClimbGrab(Grab));
+	Test.Character->JumpOrClimb();
+	TestFalse(TEXT("So pressing doesn't grab"), Test.Movement->IsClimbing());
+	Test.Character->StopJumping();
+
+	FaceWithNoInput(0.0);
+	Test.Character->JumpOrClimb();
+	TestTrue(TEXT("Facing it, pressing grabs it"), Test.Movement->IsClimbing());
+	TestTrue(TEXT("Facing out of the surface that was found"), Test.Movement->GetClimbSurfaceNormal().Equals(-FVector::ForwardVector, 0.01f));
+	Test.Character->StopJumping();
+
+	// Input decides over facing
+	Test.Movement->StopClimbing();
+	Test.Step(Test.Movement->ClimbReattachDelay, FVector::ZeroVector);
+	FaceWithNoInput(180.0);
+	Test.Step(0.05f, FVector::ForwardVector);
+	TestTrue(TEXT("Pushing towards it finds it, whichever way the character faces"), Test.Movement->FindClimbGrab(Grab));
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSClimbingHoldTest, "Fellowship.Climbing.HoldingJumpGripsWalls", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FFSClimbingHoldTest::RunTest(const FString& Parameters)
+{
+	FClimbingTestWorld Test;
+	Test.AddWall();
+
+	// Holding from out of reach
+	Test.Character->SetActorLocation(FVector(-500.0f, 0.0f, 800.0f));
+	Test.Movement->SetMovementMode(MOVE_Falling);
+	Test.Character->JumpOrClimb();
+	Test.Step(Test.Movement->ClimbGripHoldDelay + 0.1f, FVector::ZeroVector);
+	TestFalse(TEXT("Holding with nothing in reach grabs nothing"), Test.Movement->IsClimbing());
+
+	Test.HangInTheAirByWall();
+	Test.Step(0.05f, FVector::ForwardVector);
+	TestTrue(TEXT("Still holding, it grips once something's in reach"), Test.Movement->IsClimbing());
+
+	Test.Character->StopJumping();
+	Test.Step(0.5f, FVector::ZeroVector);
+	TestTrue(TEXT("Releasing doesn't let go"), Test.Movement->IsClimbing());
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSClimbingLetGoPressTest, "Fellowship.Climbing.PressThatLetsGoDoesntGrabAgain", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FFSClimbingLetGoPressTest::RunTest(const FString& Parameters)
+{
+	FClimbingTestWorld Test;
+	Test.AddWall();
+
+	Test.HangInTheAirByWall();
+	Test.Step(0.05f, FVector::ForwardVector);
+	Test.Character->JumpOrClimb();
+	Test.Character->StopJumping();
+	if (!TestTrue(TEXT("Climbing"), Test.Movement->IsClimbing()))
+	{
+		return false;
+	}
+
+	FHitResult Grab;
+
+	Test.Character->JumpOrClimb();
+	TestFalse(TEXT("Pressing lets go"), Test.Movement->IsClimbing());
+
+	// Keeps the press held well past the delay, in reach of the wall the whole time
+	for (float Elapsed = 0.0f; Elapsed < Test.Movement->ClimbReattachDelay + 0.5f; Elapsed += 0.1f)
+	{
+		Test.HangInTheAirByWall();
+		Test.Step(0.1f, FVector::ForwardVector);
+	}
+	TestTrue(TEXT("There's something to grab"), Test.Movement->FindClimbGrab(Grab));
+	TestFalse(TEXT("But keeping that press held doesn't grab it"), Test.Movement->IsClimbing());
+
+	Test.Character->StopJumping();
+	TestFalse(TEXT("Nor does releasing it"), Test.Movement->FindClimbGrab(Grab));
+	Test.Step(Test.Movement->ClimbGripReleaseBuffer * 0.5f, FVector::ForwardVector);
+	TestFalse(TEXT("Which buffers grabbing for a moment"), Test.Movement->FindClimbGrab(Grab));
+	TestFalse(TEXT("Without having grabbed"), Test.Movement->IsClimbing());
+
+	Test.Step(Test.Movement->ClimbGripReleaseBuffer, FVector::ZeroVector);
+	Test.HangInTheAirByWall();
+	Test.Step(0.05f, FVector::ForwardVector);
+	TestFalse(TEXT("And after the buffer nothing grabs without pressing"), Test.Movement->IsClimbing());
+	Test.Character->JumpOrClimb();
+	TestTrue(TEXT("A new press does"), Test.Movement->IsClimbing());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSClimbingBufferTest, "Fellowship.Climbing.BuffersPressJustBeforeGrabbing", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FFSClimbingBufferTest::RunTest(const FString& Parameters)
+{
+	FClimbingTestWorld Test;
+	Test.AddWall();
+
+	const auto TapOutOfReach = [&Test]()
+	{
+		Test.Character->SetActorLocation(FVector(-500.0f, 0.0f, 800.0f));
+		Test.Movement->Velocity = FVector::ZeroVector;
+		Test.Movement->SetMovementMode(MOVE_Falling);
+		Test.Character->JumpOrClimb();
+		Test.Character->StopJumping();
+	};
+
+	// Too long before
+	TapOutOfReach();
+	Test.Step(Test.Movement->ClimbGrabBufferTime + 0.05f, FVector::ZeroVector);
+	Test.HangInTheAirByWall();
+	Test.Step(0.05f, FVector::ForwardVector);
+	FHitResult Grab;
+	TestTrue(TEXT("There's something to grab"), Test.Movement->FindClimbGrab(Grab));
+	TestFalse(TEXT("But a press that long ago doesn't grab it"), Test.Movement->IsClimbing());
+
+	// Just before
+	TapOutOfReach();
+	Test.Step(Test.Movement->ClimbGrabBufferTime * 0.5f, FVector::ZeroVector);
+	TestFalse(TEXT("With nothing in reach, a press grabs nothing"), Test.Movement->IsClimbing());
+	Test.HangInTheAirByWall();
+	Test.Step(0.05f, FVector::ForwardVector);
+	TestTrue(TEXT("A press just before something's in reach grabs it"), Test.Movement->IsClimbing());
+
+	// Just before the wait after letting go ends
+	Test.Character->JumpOrClimb();
+	Test.Character->StopJumping();
+	TestFalse(TEXT("Lets go"), Test.Movement->IsClimbing());
+	Test.Step(Test.Movement->ClimbReattachDelay - Test.Movement->ClimbGrabBufferTime * 0.5f, FVector::ZeroVector);
+	Test.HangInTheAirByWall();
+	Test.Character->JumpOrClimb();
+	Test.Character->StopJumping();
+	TestFalse(TEXT("A press just before it can grab again doesn't grab yet"), Test.Movement->IsClimbing());
+	Test.Step(Test.Movement->ClimbGrabBufferTime, FVector::ForwardVector);
+	TestTrue(TEXT("But grabs as soon as it can"), Test.Movement->IsClimbing());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSClimbingTapTest, "Fellowship.Climbing.TapJumpsAndHoldGripsNextToWall", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FFSClimbingTapTest::RunTest(const FString& Parameters)
+{
+	FClimbingTestWorld Test;
+	Test.AddWall();
+	Test.Step(2.0f, FVector::ForwardVector);
+	const double GroundZ = Test.Location().Z;
+
+	Test.Character->JumpOrClimb();
+	Test.Step(Test.Movement->ClimbGripHoldDelay * 0.5f, FVector::ForwardVector);
+	Test.Character->StopJumping();
+	Test.Step(0.2f, FVector::ForwardVector);
+	TestTrue(TEXT("A tap next to the wall jumps"), Test.Movement->IsFalling());
+	TestFalse(TEXT("Without grabbing it"), Test.Movement->IsClimbing());
+
+	Test.Step(1.5f, FVector::ForwardVector);
+	TestTrue(TEXT("And lands"), Test.Movement->IsMovingOnGround());
+
+	Test.Character->JumpOrClimb();
+	Test.Step(Test.Movement->ClimbGripHoldDelay + 0.05f, FVector::ForwardVector);
+	TestTrue(TEXT("Holding grips it"), Test.Movement->IsClimbing());
+	TestTrue(TEXT("After getting off the ground"), Test.Location().Z > GroundZ + 20.0);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSClimbIKPlantTest, "Fellowship.Climbing.IK.PlantsLimbsOnTheSurface", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FFSClimbIKPlantTest::RunTest(const FString& Parameters)
+{
+	FClimbingTestWorld Test;
+	Test.AddWall();
+
+	TestEqual(TEXT("Doesn't apply before climbing"), Test.ClimbIK()->GetAlpha(), 0.0f);
+
+	Test.HangInTheAirByWall();
+	Test.Step(0.05f, FVector::ForwardVector);
+	Test.Character->JumpOrClimb();
+	Test.Character->StopJumping();
+	Test.Step(1.0f, FVector::ZeroVector);
+	if (!TestTrue(TEXT("Climbing"), Test.Movement->IsClimbing()))
+	{
+		return false;
+	}
+
+	TestEqual(TEXT("Applies fully while climbing"), Test.ClimbIK()->GetAlpha(), 1.0f);
+
+	const TMap<FName, FIKRigGoal> Goals = Test.IKGoals();
+	for (const FFSClimbLimb& Limb : Test.ClimbIK()->Limbs)
+	{
+		TestTrue(TEXT("All four limbs have goals"), Goals.Contains(Limb.GoalName));
+	}
+	TestEqual(TEXT("The spine doesn't bend on the way up the surface"), Test.ClimbIK()->GetLedgeBendAlpha(), 0.0f);
+
+	for (const FFSClimbLimb& Limb : Test.ClimbIK()->Limbs)
+	{
+		const FIKRigGoal* Goal = Goals.Find(Limb.GoalName);
+		if (TestNotNull(TEXT("Limb has a goal"), Goal))
+		{
+			TestEqual(TEXT("In world space"), Goal->PositionSpace, EIKRigGoalSpace::World);
+			TestEqual(TEXT("Fully applied"), Goal->PositionAlpha, 1.0f);
+			TestNearlyEqual(TEXT("On the wall's face"), Goal->Position.X, 100.0 - Limb.SurfaceOffset, 0.5);
+		}
+	}
+
+	const FVector Center = Test.Location();
+	TestTrue(TEXT("Left hand is left of the body"), Goals[TEXT("hand_l_Goal")].Position.Y < Center.Y);
+	TestTrue(TEXT("Right hand is right of the body"), Goals[TEXT("hand_r_Goal")].Position.Y > Center.Y);
+	TestTrue(TEXT("Left foot is left of the body"), Goals[TEXT("foot_l_Goal")].Position.Y < Center.Y);
+	TestTrue(TEXT("Right foot is right of the body"), Goals[TEXT("foot_r_Goal")].Position.Y > Center.Y);
+	TestTrue(TEXT("Hands are above feet"), Goals[TEXT("hand_l_Goal")].Position.Z > Goals[TEXT("foot_r_Goal")].Position.Z + 30.0);
+
+	Test.Character->JumpOrClimb();
+	Test.Character->StopJumping();
+	Test.Step(0.5f, FVector::ZeroVector);
+	TestEqual(TEXT("Stops applying after letting go"), Test.ClimbIK()->GetAlpha(), 0.0f);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSClimbIKStepTest, "Fellowship.Climbing.IK.LimbsStayPlantedThenStep", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FFSClimbIKStepTest::RunTest(const FString& Parameters)
+{
+	FClimbingTestWorld Test;
+	Test.AddWall(2000.0f);
+	Test.HangInTheAirByWall();
+	Test.Step(0.05f, FVector::ForwardVector);
+	Test.Character->JumpOrClimb();
+	Test.Character->StopJumping();
+	Test.Step(1.0f, FVector::ZeroVector);
+	if (!TestTrue(TEXT("Climbing"), Test.Movement->IsClimbing()))
+	{
+		return false;
+	}
+
+	const FName Hand(TEXT("hand_l_Goal"));
+	const FVector Resting = Test.IKGoals()[Hand].Position;
+	Test.Step(1.0f, FVector::ZeroVector);
+	TestTrue(TEXT("Stays put while the body does"), Test.IKGoals()[Hand].Position.Equals(Resting, 0.01));
+
+	// Going up, a planted limb doesn't move, so each frame it either holds still or is stepping
+	const UFSClimbIKComponent* ClimbIK = Test.ClimbIK();
+	int32 StillFrames = 0;
+	int32 MovingFrames = 0;
+	bool bBothDiagonalsStepped = false;
+	double FurthestFromBody = 0.0;
+	FVector Previous = Resting;
+
+	for (int32 Frame = 0; Frame < 180 && Test.Movement->IsClimbing(); ++Frame)
+	{
+		Test.Climb(TickTime, 0.0f, 1.0f);
+
+		const FVector Now = Test.IKGoals()[Hand].Position;
+		(Now.Equals(Previous, 0.01) ? StillFrames : MovingFrames)++;
+		Previous = Now;
+
+		FurthestFromBody = FMath::Max(FurthestFromBody, FVector::Dist(Now, Test.Location()));
+
+		bool bGroupStepping[2] = { false, false };
+		for (const FFSClimbLimb& Limb : ClimbIK->Limbs)
+		{
+			bGroupStepping[Limb.StepGroup] |= Limb.bStepping;
+			if (!Limb.bStepping)
+			{
+				TestNearlyEqual(TEXT("A planted limb is on the wall"), Limb.Position.X, 100.0 - Limb.SurfaceOffset, 1.0);
+			}
+		}
+		bBothDiagonalsStepped |= bGroupStepping[0] && bGroupStepping[1];
+	}
+
+	TestTrue(TEXT("Limbs stay planted for part of the climb"), StillFrames > 20);
+	TestTrue(TEXT("And step for part of it"), MovingFrames > 20);
+	TestFalse(TEXT("Diagonal pairs step in turn"), bBothDiagonalsStepped);
+	TestTrue(TEXT("The hand has come up with the body"), Test.IKGoals()[Hand].Position.Z > Resting.Z + 200.0);
+	TestTrue(TEXT("And kept up with it"), FurthestFromBody < Test.ClimbIK()->MaxReach + 20.0);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSClimbIKClosestTest, "Fellowship.Climbing.IK.GrabsClosestSurface", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FFSClimbIKClosestTest::RunTest(const FString& Parameters)
+{
+	FClimbingTestWorld Test;
+	Test.AddWall();
+
+	// A second wall close on the character's left, with its face at Y = -30
+	Test.AddBox(FVector(0.0f, -130.0f, 500.0f), FVector(2000.0f, 100.0f, 500.0f));
+
+	Test.HangInTheAirByWall();
+	Test.Step(0.05f, FVector::ForwardVector);
+	Test.Character->JumpOrClimb();
+	Test.Character->StopJumping();
+	Test.Step(1.0f, FVector::ZeroVector);
+	if (!TestTrue(TEXT("Climbing"), Test.Movement->IsClimbing()))
+	{
+		return false;
+	}
+
+	const TMap<FName, FIKRigGoal> Goals = Test.IKGoals();
+	for (const FFSClimbLimb& Limb : Test.ClimbIK()->Limbs)
+	{
+		const FVector Position = Goals[Limb.GoalName].Position;
+		if (Limb.RestOffset.Y < 0.0)
+		{
+			TestNearlyEqual(TEXT("The left limbs are on the closer wall on the left"), Position.Y, -30.0 + Limb.SurfaceOffset, 1.0);
+		}
+		else
+		{
+			TestNearlyEqual(TEXT("The right limbs are on the wall ahead"), Position.X, 100.0 - Limb.SurfaceOffset, 1.0);
+		}
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSClimbIKGiveUpTest, "Fellowship.Climbing.IK.PlaysAnimationForLimbsThatCantSettle", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FFSClimbIKGiveUpTest::RunTest(const FString& Parameters)
+{
+	// A wall ending just left of the character, past where its left limbs rest, so the closest thing they can find is always too far along to stay on
+	FClimbingTestWorld Test;
+	Test.AddBox(FVector(200.0f, 2000.0f, 1000.0f), FVector(100.0f, 2005.0f, 1000.0f));
+
+	Test.HangInTheAirByWall();
+	Test.Step(0.05f, FVector::ForwardVector);
+	Test.Character->JumpOrClimb();
+	Test.Character->StopJumping();
+	if (!TestTrue(TEXT("Climbing"), Test.Movement->IsClimbing()))
+	{
+		return false;
+	}
+
+	const auto LimbNamed = [&Test](const TCHAR* Name) -> const FFSClimbLimb&
+	{
+		return *Test.ClimbIK()->Limbs.FindByPredicate([Name](const FFSClimbLimb& Limb) { return Limb.BoneName == Name; });
+	};
+
+	Test.Step(0.1f, FVector::ZeroVector);
+	TestTrue(TEXT("A limb that can't settle isn't given up on straight away"), LimbNamed(TEXT("hand_l")).Weight > 0.0f);
+
+	Test.Step(1.0f, FVector::ZeroVector);
+	TestEqual(TEXT("But it plays the animation after a moment"), Test.IKGoals()[TEXT("hand_l_Goal")].PositionAlpha, 0.0f);
+	TestEqual(TEXT("And so does the other one"), Test.IKGoals()[TEXT("foot_l_Goal")].PositionAlpha, 0.0f);
+	TestEqual(TEXT("The limbs that are settled carry on"), Test.IKGoals()[TEXT("hand_r_Goal")].PositionAlpha, 1.0f);
+	TestEqual(TEXT("Both of them"), Test.IKGoals()[TEXT("foot_r_Goal")].PositionAlpha, 1.0f);
+	TestEqual(TEXT("The rest of the IK still applies"), Test.ClimbIK()->GetAlpha(), 1.0f);
+
+	// Moving along until the whole body is in front of the wall gives them something to settle on
+	Test.Climb(1.0f, 1.0f, 0.0f);
+	Test.Step(1.0f, FVector::ZeroVector);
+	TestEqual(TEXT("It goes back to the surface once it can settle"), Test.IKGoals()[TEXT("hand_l_Goal")].PositionAlpha, 1.0f);
+	TestEqual(TEXT("As does the other one"), Test.IKGoals()[TEXT("foot_l_Goal")].PositionAlpha, 1.0f);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSClimbIKNormalStepsTest, "Fellowship.Climbing.IK.OrdinaryClimbingDoesntGiveUp", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FFSClimbIKNormalStepsTest::RunTest(const FString& Parameters)
+{
+	for (const float Speed : { GetDefault<UFSCharacterMovementComponent>()->ClimbSpeed, 150.0f })
+	{
+		FClimbingTestWorld Test;
+		Test.Movement->ClimbSpeed = Speed;
+		Test.AddWall(4000.0f);
+		Test.HangInTheAirByWall();
+		Test.Step(0.05f, FVector::ForwardVector);
+		Test.Character->JumpOrClimb();
+		Test.Character->StopJumping();
+		Test.Step(0.5f, FVector::ZeroVector);
+
+		for (int32 Frame = 0; Frame < 240 && Test.Movement->IsClimbing(); ++Frame)
+		{
+			Test.Climb(TickTime, 0.0f, 1.0f);
+
+			for (const FFSClimbLimb& Limb : Test.ClimbIK()->Limbs)
+			{
+				if (Limb.UnsettledTime > Test.ClimbIK()->MaxUnsettledTime)
+				{
+					AddError(FString::Printf(TEXT("%s gave up at %.0f cm/s after %d frames"), *Limb.BoneName.ToString(), Speed, Frame));
+					return false;
+				}
+			}
+		}
+		TestTrue(TEXT("Still climbing"), Test.Movement->IsClimbing());
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSClimbIKLedgeTest, "Fellowship.Climbing.IK.CarriesLimbsOverLedges", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FFSClimbIKLedgeTest::RunTest(const FString& Parameters)
+{
+	// The top of this wall is at Z = 300, with its near face at X = 100
+	constexpr double Top = 300.0;
+	FClimbingTestWorld Test;
+	Test.AddWall(Top);
+	Test.JumpForward();
+	Test.ClimbUntilOffSurface(1.0f);
+	if (!TestTrue(TEXT("Starts onto the ledge"), Test.Movement->IsClimbingOntoLedge()))
+	{
+		return false;
+	}
+
+	Test.Step(Test.ClimbIK()->StepDuration + TickTime, FVector::ZeroVector);
+	TestEqual(TEXT("Still applies"), Test.ClimbIK()->GetAlpha(), 1.0f);
+
+	const TMap<FName, FIKRigGoal> Goals = Test.IKGoals();
+	for (const FFSClimbLimb& Limb : Test.ClimbIK()->Limbs)
+	{
+		if (Limb.bGripsLedge)
+		{
+			const FVector Hand = Goals[Limb.GoalName].Position;
+			TestNearlyEqual(TEXT("The hand is on top of the ledge"), Hand.Z, Top + Limb.SurfaceOffset, 0.5);
+			TestNearlyEqual(TEXT("A little way in from its edge"), Hand.X, 100.0 + Test.ClimbIK()->LedgeHandInset, 2.0);
+			TestTrue(TEXT("Holding on"), Goals[Limb.GoalName].PositionAlpha > 0.1f);
+			TestTrue(TEXT("On the same side as it was"), FMath::Sign(Hand.Y) == FMath::Sign(Limb.RestOffset.Y));
+		}
+	}
+
+	TestEqual(TEXT("The spine bends once getting over the ledge"), Test.ClimbIK()->GetLedgeBendAlpha(), 1.0f);
+
+	bool bFootReachedTop = false;
+	bool bHandsHeldLedge = false;
+	bool bHandsReachedSides = false;
+	bool bBentForward = false;
+	double PreviousAngle = -1.0;
+	for (int32 Frame = 0; Frame < 300 && Test.Movement->IsClimbing(); ++Frame)
+	{
+		Test.Step(TickTime, FVector::ZeroVector);
+
+		if (Test.Movement->IsClimbingOntoLedge())
+		{
+			const FVector Pivot = Test.Character->GetActorTransform().TransformPosition(Test.ClimbIK()->LedgeBendPivot);
+			const FVector Bend = Test.IKGoals()[Test.ClimbIK()->LedgeBendGoalName].Position - Pivot;
+			const double Angle = FMath::RadiansToDegrees(FMath::Atan2(Bend.X, Bend.Z));
+			TestTrue(TEXT("The spine never bends backwards"), Angle > -1.0);
+			TestTrue(TEXT("Or further than it's allowed to"), Angle < Test.ClimbIK()->LedgeMaxBendAngle + 1.0);
+			TestNearlyEqual(TEXT("It's only bent, not stretched"), Bend.Size(), static_cast<double>(Test.ClimbIK()->LedgeBendLength), 0.5);
+			bBentForward |= Angle > Test.ClimbIK()->LedgeMaxBendAngle - 1.0;
+
+			if (PreviousAngle >= 0.0)
+			{
+				TestTrue(TEXT("The bend doesn't jump"), FMath::Abs(Angle - PreviousAngle) < 15.0);
+			}
+			PreviousAngle = Angle;
+
+			// The chest turns as far as the spine bends, tipping the head and upper body forward
+			const FIKRigGoal BendGoal = Test.IKGoals()[Test.ClimbIK()->LedgeBendGoalName];
+			const USkeletalMeshComponent* Mesh = Test.Character->GetMesh();
+			const FVector MeshUp = Mesh->GetComponentTransform().InverseTransformVectorNoScale(FVector::UpVector);
+			const FVector Tipped = Mesh->GetComponentTransform().TransformVectorNoScale(BendGoal.Rotation.Quaternion().RotateVector(MeshUp));
+			TestEqual(TEXT("The chest's rotation is relative to the animation"), BendGoal.RotationSpace, EIKRigGoalSpace::Additive);
+			TestEqual(TEXT("And applies fully"), BendGoal.RotationAlpha, 1.0f);
+			TestNearlyEqual(TEXT("The chest tips forward as far as the spine bends"), FMath::RadiansToDegrees(FMath::Atan2(Tipped.X, Tipped.Z)), Angle, 1.0);
+
+			// Still bent while moving out past the top of the wall, until it starts letting go
+			if (Test.Location().X > 100.0 && Test.Movement->GetClimbLedgeProgress() < Test.ClimbIK()->LedgeStraightenStart)
+			{
+				TestNearlyEqual(TEXT("It hangs over the ledge"), Angle, static_cast<double>(Test.ClimbIK()->LedgeMaxBendAngle), 1.0);
+			}
+
+			for (const FFSClimbLimb& Limb : Test.ClimbIK()->Limbs)
+			{
+				if (Limb.bGripsLedge)
+				{
+					TestEqual(TEXT("The hands stay under the IK for the whole move"), Limb.Weight, 1.0f);
+
+					if (!Limb.bStepping && Test.Movement->GetClimbLedgeProgress() < Test.ClimbIK()->LedgeArmsToSidesStart)
+					{
+						TestNearlyEqual(TEXT("In the first half they hold the top of the ledge"), Limb.Position.Z, Top + Limb.SurfaceOffset, 0.5);
+						bHandsHeldLedge = true;
+					}
+
+					if (Test.Movement->GetClimbLedgeProgress() >= Test.ClimbIK()->LedgeArmsToSidesEnd)
+					{
+						const FVector Offset = Test.Character->GetActorTransform().InverseTransformPosition(Limb.Position);
+						TestNearlyEqual(TEXT("In the second half they're level with the character"), Offset.X, Test.ClimbIK()->LedgeArmsSideOffset.X, 2.0);
+						TestNearlyEqual(TEXT("At its side"), FMath::Abs(Offset.Y), FMath::Abs(Test.ClimbIK()->LedgeArmsSideOffset.Y), 2.0);
+						TestTrue(TEXT("The side they started on"), FMath::Sign(Offset.Y) == FMath::Sign(Limb.RestOffset.Y));
+						TestNearlyEqual(TEXT("And at the height of its hips"), Offset.Z, Test.ClimbIK()->LedgeArmsSideOffset.Z, 2.0);
+						bHandsReachedSides = true;
+					}
+				}
+			}
+
+			if (Test.Movement->GetClimbLedgeProgress() < Test.ClimbIK()->LedgeStraightenStart)
+			{
+				TestEqual(TEXT("And the spine stays bent"), Test.ClimbIK()->GetLedgeBendAlpha(), 1.0f);
+			}
+		}
+
+		for (const FFSClimbLimb& Limb : Test.ClimbIK()->Limbs)
+		{
+			if (Limb.bHolding && !Limb.bStepping)
+			{
+				TestFalse(TEXT("No limb is planted inside the wall"), Limb.Position.X > 101.0 && Limb.Position.Z < Top - 1.0);
+			}
+
+			if (!Limb.bGripsLedge && Limb.bHolding && !Limb.bStepping && Limb.Position.X > 100.0)
+			{
+				bFootReachedTop = true;
+				TestNearlyEqual(TEXT("A foot past the edge is on top of the ledge"), Limb.Position.Z, Top + Limb.SurfaceOffset, 1.0);
+			}
+		}
+	}
+
+	TestTrue(TEXT("Gets onto the ledge"), Test.Movement->IsMovingOnGround());
+	TestTrue(TEXT("The feet get onto the ledge"), bFootReachedTop);
+	TestTrue(TEXT("The spine bends as far as it can to reach the hands"), bBentForward);
+	TestEqual(TEXT("The spine has straightened by the time it's standing"), Test.ClimbIK()->GetLedgeBendAlpha(), 0.0f, 0.2f);
+	TestTrue(TEXT("The hands held the ledge"), bHandsHeldLedge);
+	TestTrue(TEXT("Then went to the character's sides"), bHandsReachedSides);
+
+	Test.Step(0.5f, FVector::ZeroVector);
+	TestEqual(TEXT("Stops applying once on top"), Test.ClimbIK()->GetAlpha(), 0.0f);
+	TestEqual(TEXT("Stops bending once on top"), Test.ClimbIK()->GetLedgeBendAlpha(), 0.0f);
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSClimbingMoveTest, "Fellowship.Climbing.MovesAlongWall", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FFSClimbingMoveTest::RunTest(const FString& Parameters)
 {
@@ -155,6 +795,7 @@ bool FFSClimbingMoveTest::RunTest(const FString& Parameters)
 
 	const FVector Rested = Test.Location();
 	TestTrue(TEXT("Faces the wall"), FMath::IsNearlyZero(FRotator::NormalizeAxis(Test.Character->GetActorRotation().Yaw), 1.0f));
+	TestTrue(TEXT("Stays upright on a vertical wall"), FMath::IsNearlyZero(Test.Character->GetActorRotation().Pitch, 0.1));
 	const double ExpectedX = 100.0 - Test.Character->GetCapsuleComponent()->GetScaledCapsuleRadius() - Test.Movement->ClimbSurfaceGap;
 	TestNearlyEqual(TEXT("Holds the gap from the wall"), Rested.X, ExpectedX, 0.5);
 
@@ -194,10 +835,14 @@ bool FFSClimbingLetGoTest::RunTest(const FString& Parameters)
 	TestNearlyEqual(TEXT("Capsule restored"), Test.Character->GetCapsuleComponent()->GetUnscaledCapsuleHalfHeight(), StandingHalfHeight, 0.01f);
 
 	Test.Step(0.1f, FVector::ForwardVector);
+	Test.Character->JumpOrClimb();
 	TestFalse(TEXT("Can't grab again straight away"), Test.Movement->IsClimbing());
+	Test.Character->StopJumping();
 
-	Test.Step(1.0f, FVector::ForwardVector);
+	Test.Step(Test.Movement->ClimbReattachDelay, FVector::ForwardVector);
+	Test.Character->JumpOrClimb();
 	TestTrue(TEXT("Can grab again after the delay"), Test.Movement->IsClimbing());
+	Test.Character->StopJumping();
 
 	Test.Movement->StopClimbing();
 	Test.Step(3.0f, FVector::ZeroVector);
@@ -244,7 +889,7 @@ bool FFSClimbingLedgeTest::RunTest(const FString& Parameters)
 		Test.JumpForward();
 		Test.ClimbUntilOffSurface(1.0f);
 		TestTrue(TEXT("Starts onto a thin wall"), Test.Movement->IsClimbingOntoLedge());
-		Test.Step(1.0f, FVector::ZeroVector);
+		Test.Step(2.0f, FVector::ZeroVector);
 		TestFalse(TEXT("No longer climbing after a thin wall"), Test.Movement->IsClimbing());
 		TestTrue(TEXT("Past the near face of a thin wall"), Test.Location().X > 100.0);
 	}
@@ -296,6 +941,7 @@ bool FFSClimbingBottomHalfTest::RunTest(const FString& Parameters)
 	Test.Character->SetActorLocation(FVector(40.0f, 0.0f, 600.0f));
 	Test.Movement->SetMovementMode(MOVE_Falling);
 	Test.Step(0.3f, FVector::ForwardVector);
+	Test.Character->JumpOrClimb();
 	if (TestTrue(TEXT("Grabbed in mid air"), Test.Movement->IsClimbing()))
 	{
 		Test.ClimbUntilOffSurface(-1.0f);
@@ -391,11 +1037,57 @@ bool FFSClimbingSlopeTest::RunTest(const FString& Parameters)
 
 		TestNearlyEqual(FString::Printf(TEXT("%s: normal matches the surface"), Case.Name), static_cast<float>(Test.Movement->GetClimbSurfaceNormal().Z), Case.ExpectedNormalZ, 0.02f);
 
+		const FRotator SurfaceRotation(Case.Pitch, 0.0f, 0.0f);
+		const FVector SurfaceNormal = SurfaceRotation.RotateVector(-FVector::ForwardVector);
+		const FVector SurfacePoint = FVector(350.0f, 0.0f, 0.0f) + SurfaceNormal * 100.0;
+		const double ExpectedDistance = Test.Character->GetCapsuleComponent()->GetScaledCapsuleRadius() + Test.Movement->ClimbSurfaceGap;
+
+		TestNearlyEqual(FString::Printf(TEXT("%s: tilts to match the surface"), Case.Name), static_cast<double>(Test.Character->GetActorRotation().Pitch), static_cast<double>(Case.Pitch), 1.0);
+		TestNearlyEqual(FString::Printf(TEXT("%s: lies along the surface"), Case.Name), FVector::DotProduct(Test.Location() - SurfacePoint, SurfaceNormal), ExpectedDistance, 1.0);
+
 		const FVector Before = Test.Location();
 		Test.Climb(2.0f, 0.0f, 1.0f);
 		TestTrue(FString::Printf(TEXT("%s: still climbing after going up"), Case.Name), Test.Movement->IsClimbing());
 		TestTrue(FString::Printf(TEXT("%s: gains height"), Case.Name), Test.Location().Z > Before.Z + 150.0f);
+		TestNearlyEqual(FString::Printf(TEXT("%s: stays tilted going up"), Case.Name), static_cast<double>(Test.Character->GetActorRotation().Pitch), static_cast<double>(Case.Pitch), 1.0);
+
+		Test.Character->JumpOrClimb();
+		TestFalse(FString::Printf(TEXT("%s: lets go"), Case.Name), Test.Movement->IsClimbing());
+		TestTrue(FString::Printf(TEXT("%s: stands back up on letting go"), Case.Name), FMath::IsNearlyZero(Test.Character->GetActorRotation().Pitch, 0.1));
+		TestEqual(FString::Printf(TEXT("%s: with room to"), Case.Name), Test.Character->GetCapsuleComponent()->GetUnscaledCapsuleHalfHeight(), StandingHalfHeight);
+
+		const FVector LetGo = Test.Location();
+		Test.Step(0.6f, FVector::ZeroVector);
+		TestTrue(FString::Printf(TEXT("%s: falls clear of the surface"), Case.Name), Test.Location().Z < LetGo.Z - 5.0);
 	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSClimbingSlantedLedgeTest, "Fellowship.Climbing.StandsUpClimbingOntoSlantedLedge", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FFSClimbingSlantedLedgeTest::RunTest(const FString& Parameters)
+{
+	// A wall sloping away at 70 degrees, whose walkable top slopes down at 20 degrees from an edge about 320 high
+	FClimbingTestWorld Test;
+	Test.AddBox(FVector(350.0f, 0.0f, 100.0f), FVector(100.0f, 2000.0f, 200.0f), FRotator(-20.0f, 0.0f, 0.0f));
+	Test.JumpForward(3.0f);
+	if (!TestTrue(TEXT("Climbing"), Test.Movement->IsClimbing()))
+	{
+		return false;
+	}
+
+	Test.Step(1.0f, FVector::ZeroVector);
+	TestNearlyEqual(TEXT("Tilts to match the surface"), static_cast<double>(Test.Character->GetActorRotation().Pitch), -20.0, 1.0);
+
+	Test.ClimbUntilOffSurface(1.0f);
+	if (!TestTrue(TEXT("Starts onto the ledge"), Test.Movement->IsClimbingOntoLedge()))
+	{
+		return false;
+	}
+
+	Test.Step(3.0f, FVector::ZeroVector);
+	TestTrue(TEXT("Ends up walking"), Test.Movement->IsMovingOnGround());
+	TestTrue(TEXT("Standing upright"), FMath::IsNearlyZero(Test.Character->GetActorRotation().Pitch, 0.1));
+	TestTrue(TEXT("On top of the ledge"), Test.Location().X > 324.0 && Test.Location().Z > 300.0);
 	return true;
 }
 
@@ -551,6 +1243,7 @@ bool FFSClimbingDismountTest::RunTest(const FString& Parameters)
 		Test.Character->SetActorLocation(FVector(40.0f, 0.0f, 400.0f));
 		Test.Movement->SetMovementMode(MOVE_Falling);
 		Test.Step(0.3f, FVector::ForwardVector);
+		Test.Character->JumpOrClimb();
 		if (TestTrue(TEXT("Grabbed in mid air"), Test.Movement->IsClimbing()))
 		{
 			Test.Climb(4.0f, 0.0f, -1.0f);

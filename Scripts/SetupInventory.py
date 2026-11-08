@@ -49,14 +49,14 @@ CAN_PLACE_COLOR = unreal.LinearColor(0.01, 0.9, 0.04, 1.0)
 CANNOT_PLACE_COLOR = unreal.LinearColor(0.9, 0.005, 0.005, 1.0)
 CAN_SWAP_COLOR = unreal.LinearColor(0.95, 0.75, 0.005, 1.0)
 OPEN_COLOR = unreal.LinearColor(0.015, 0.015, 0.02, 1.0)
-TAKEN_COLOR = unreal.LinearColor(0.14, 0.1, 0.045, 1.0)
-BORDER_COLOR = unreal.LinearColor(1.0, 0.75, 0.3, 1.0)
+# How bright the background of an item's cells is, as a fraction of the colour of its rarity
+ITEM_BACKGROUND_BRIGHTNESS = 0.35
 # The hand has to show through its cell. The cell is 4 times the size of a grid cell, and has no neighbour
 # doubling its lines as a grid cell does, so a line half as thick for its size matches the grid's.
 HAND_SLOT_OPEN_OPACITY = 0.25
 HAND_SLOT_LINE_THICKNESS = LINE_THICKNESS / 2.0
 OPEN_OPACITY = 0.85
-TAKEN_OPACITY = 0.95
+ITEM_BACKGROUND_OPACITY = 0.6
 HOVER_OPACITY = 0.97
 PREVIEW_OPACITY = 0.9
 
@@ -116,7 +116,7 @@ def setup_input():
 
     default_context = assets.load_asset(DEFAULT_MAPPING_CONTEXT_PATH)
     map_keys(default_context, action, ["Tab"])
-    map_keys(default_context, interact_action, ["E", "Gamepad_FaceButton_Left"])
+    map_keys(default_context, interact_action, ["F", "Gamepad_FaceButton_Left"])
 
     select_action = load_or_create(SELECT_ACTION_NAME, INPUT_FOLDER, unreal.InputAction, unreal.InputAction_Factory())
     select_action.set_editor_property("value_type", unreal.InputActionValueType.BOOLEAN)
@@ -189,10 +189,13 @@ def connect_steady_color(material, color):
 
 
 def build_border_material():
-    material, saved_values = start_material(BORDER_MATERIAL_NAME)
-    material.set_editor_property("blend_mode", unreal.BlendMode.BLEND_OPAQUE)
+    material, _ = start_material(BORDER_MATERIAL_NAME)
 
-    color = add_color(material, saved_values, "BorderColor", BORDER_COLOR, -400, 0)
+    # Translucent because PP_CelShade outlines anything that writes depth, and an outline eats into a bar this thin, differently each frame
+    material.set_editor_property("blend_mode", unreal.BlendMode.BLEND_TRANSLUCENT)
+
+    # This matches AFSInventoryRig's BorderDataCount: each bar is given the colour of its item's rarity
+    color = add_expression(material, unreal.MaterialExpressionPerInstanceCustomData3Vector, -400, 0, data_index=0)
     connect_steady_color(material, color)
 
     library.recompile_material(material)
@@ -220,15 +223,17 @@ def build_grid_material():
     sharpened = add_expression(material, unreal.MaterialExpressionMultiply, -400, 0, const_b=1000.0)
     on_line = add_expression(material, unreal.MaterialExpressionSaturate, -200, 0)
 
-    # These match AFSInventoryRig's CellHoveredData, CellTakenData, CellCanPlaceData, CellCannotPlaceData and CellCanSwapData
+    # These match AFSInventoryRig's CellHoveredData, CellTakenData, CellCanPlaceData, CellCannotPlaceData, CellCanSwapData and CellItemColorData
     hovered = add_expression(material, unreal.MaterialExpressionPerInstanceCustomData, -400, 200, data_index=0)
     taken = add_expression(material, unreal.MaterialExpressionPerInstanceCustomData, -400, 300, data_index=1)
     can_place = add_expression(material, unreal.MaterialExpressionPerInstanceCustomData, -400, 350, data_index=2)
     cannot_place = add_expression(material, unreal.MaterialExpressionPerInstanceCustomData, -400, 400, data_index=3)
     can_swap = add_expression(material, unreal.MaterialExpressionPerInstanceCustomData, -400, 425, data_index=4)
+    item_color = add_expression(material, unreal.MaterialExpressionPerInstanceCustomData3Vector, -600, -650, data_index=5)
 
     open_color = add_color(material, saved_values, "OpenColor", OPEN_COLOR, -400, -800)
-    taken_color = add_color(material, saved_values, "TakenColor", TAKEN_COLOR, -400, -650)
+    item_background_brightness = add_scalar(material, saved_values, "ItemBackgroundBrightness", ITEM_BACKGROUND_BRIGHTNESS, -600, -550)
+    taken_color = add_expression(material, unreal.MaterialExpressionMultiply, -400, -650)
     hover_color = add_color(material, saved_values, "HoverColor", HOVER_COLOR, -400, -500)
     line_color = add_color(material, saved_values, "LineColor", LINE_COLOR, -400, -350)
     can_place_color = add_color(material, saved_values, "CanPlaceColor", CAN_PLACE_COLOR, -400, -1100)
@@ -242,7 +247,7 @@ def build_grid_material():
     color = add_expression(material, unreal.MaterialExpressionLinearInterpolate, 300, -500)
 
     open_opacity = add_scalar(material, saved_values, "OpenOpacity", OPEN_OPACITY, -400, 450)
-    taken_opacity = add_scalar(material, saved_values, "TakenOpacity", TAKEN_OPACITY, -400, 550)
+    taken_opacity = add_scalar(material, saved_values, "ItemBackgroundOpacity", ITEM_BACKGROUND_OPACITY, -400, 550)
     hover_opacity = add_scalar(material, saved_values, "HoverOpacity", HOVER_OPACITY, -400, 650)
     preview_opacity_value = add_scalar(material, saved_values, "PreviewOpacity", PREVIEW_OPACITY, -400, 750)
     placing_or_blocked = add_expression(material, unreal.MaterialExpressionAdd, -100, 800)
@@ -266,6 +271,8 @@ def build_grid_material():
     connect(past_line_start, "", sharpened, "A")
     connect(sharpened, "", on_line, "")
 
+    connect(item_color, "", taken_color, "A")
+    connect(item_background_brightness, "", taken_color, "B")
     connect(open_color, "", cell_color, "A")
     connect(taken_color, "", cell_color, "B")
     connect(taken, "", cell_color, "Alpha")

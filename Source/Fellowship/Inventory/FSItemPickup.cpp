@@ -1,12 +1,14 @@
 // Copyright HoowanDev 2026 all rights reserved.
 
 #include "FSItemPickup.h"
+#include "Game/FSInteractableRegistry.h"
 #include "Character/FSCharacter.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SphereComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
+#include "Game/FSEventLog.h"
 #include "GameFramework/Character.h"
 #include "Inventory/FSInventoryComponent.h"
 #include "Inventory/FSItemDefinition.h"
@@ -17,6 +19,12 @@ namespace
 {
 	// How far below a character to look for a floor. With none in reach, the item is left at the character's feet.
 	constexpr double MaxFloorDistance = 10000.0;
+
+	// Mesh pivots are wherever suited the character holding them, so the mesh is centred on the actor by its bounds, and turned about its middle
+	FTransform GetDiscardedMeshTransform(const UFSItemDefinition& Item, const UStaticMesh& Mesh)
+	{
+		return FTransform(-Mesh.GetBounds().Origin) * Item.DiscardedTransform;
+	}
 }
 
 AFSItemPickup::AFSItemPickup()
@@ -41,10 +49,10 @@ AFSItemPickup::AFSItemPickup()
 	Mesh->SetCanEverAffectNavigation(false);
 }
 
-AFSItemPickup* AFSItemPickup::DropAtFeet(TSubclassOf<AFSItemPickup> PickupClass, UFSItemDefinition* DroppedItem, const ACharacter& Character)
+AFSItemPickup* AFSItemPickup::DropAtFeet(TSubclassOf<AFSItemPickup> PickupClass, UFSItemDefinition* DroppedItem, const ACharacter& Character, const FVector2D& Spread)
 {
 	UWorld* World = Character.GetWorld();
-	const FVector CharacterLocation = Character.GetActorLocation();
+	const FVector CharacterLocation = Character.GetActorLocation() + FVector(Spread.X, Spread.Y, 0.0);
 	FVector Feet = CharacterLocation - FVector(0.0, 0.0, Character.GetCapsuleComponent()->GetScaledCapsuleHalfHeight());
 
 	// The character is in the air if they were knocked off a ledge while the inventory was open
@@ -55,9 +63,19 @@ AFSItemPickup* AFSItemPickup::DropAtFeet(TSubclassOf<AFSItemPickup> PickupClass,
 		Feet = Floor.ImpactPoint;
 	}
 
-	// The mesh is centred on the actor, so the actor sits half the mesh's height off the floor
+	// The actor sits as far off the floor as the mesh reaches below it. The offset's own location moves it from there, so it's left out.
+	double FloorClearance = 0.0;
 	const UStaticMesh* DroppedMesh = DroppedItem ? DroppedItem->Mesh : nullptr;
-	const FVector Location = Feet + FVector(0.0, 0.0, DroppedMesh ? DroppedMesh->GetBounds().BoxExtent.Z : 0.0);
+	if (DroppedMesh)
+	{
+		FTransform Resting = GetDiscardedMeshTransform(*DroppedItem, *DroppedMesh);
+		Resting.AddToTranslation(-DroppedItem->DiscardedTransform.GetTranslation());
+
+		const FBoxSphereBounds Bounds = DroppedMesh->GetBounds();
+		FloorClearance = -FBox(Bounds.Origin - Bounds.BoxExtent, Bounds.Origin + Bounds.BoxExtent).TransformBy(Resting).Min.Z;
+	}
+
+	const FVector Location = Feet + FVector(0.0, 0.0, FloorClearance);
 
 	FActorSpawnParameters SpawnParameters;
 	SpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
@@ -66,6 +84,11 @@ AFSItemPickup* AFSItemPickup::DropAtFeet(TSubclassOf<AFSItemPickup> PickupClass,
 	if (Pickup)
 	{
 		Pickup->SetItem(DroppedItem);
+
+		if (DroppedItem)
+		{
+			UFSEventLog::Add(World, FFSItemText::Format(LOCTEXT("DroppedEvent", "Dropped {0}"), DroppedItem));
+		}
 	}
 
 	return Pickup;
@@ -85,17 +108,30 @@ void AFSItemPickup::SetItem(UFSItemDefinition* NewItem)
 	UStaticMesh* ItemMesh = Item ? Item->Mesh : nullptr;
 	Mesh->SetStaticMesh(ItemMesh);
 
-	// Mesh pivots are wherever suited the character holding them, so the mesh is centred on the actor by its bounds
-	Mesh->SetRelativeLocation(ItemMesh ? -ItemMesh->GetBounds().Origin : FVector::ZeroVector);
+	Mesh->SetRelativeTransform(ItemMesh ? GetDiscardedMeshTransform(*Item, *ItemMesh) : FTransform::Identity);
+}
+
+bool AFSItemPickup::IsBackpack() const
+{
+	return Item && Item->ItemType == EFSItemType::Backpack;
+}
+
+void AFSItemPickup::SetBackpackContents(const FFSBackpackContents& Contents)
+{
+	BackpackContents = Contents;
+
+	HungItemMeshes.Show(*Mesh, Item, Contents.QuickSlotItems[static_cast<int32>(EFSQuickSlot::Left)].Definition, Contents.QuickSlotItems[static_cast<int32>(EFSQuickSlot::Right)].Definition);
 }
 
 bool AFSItemPickup::TryPickUp(UFSInventoryComponent* Inventory)
 {
-	if (!Inventory || !Inventory->AddItem(Item))
+	const bool bPickedUp = Inventory && (IsBackpack() ? Inventory->EquipBackpack(Item, BackpackContents) : Inventory->AddItem(Item));
+	if (!bPickedUp)
 	{
 		return false;
 	}
 
+	LogPickedUp();
 	Destroy();
 	return true;
 }
@@ -107,23 +143,46 @@ bool AFSItemPickup::TryCarry(UFSInventoryComponent* Inventory)
 		return false;
 	}
 
+	LogPickedUp();
 	Destroy();
 	return true;
 }
 
-FText AFSItemPickup::GetPromptText(const UFSInventoryComponent* Inventory) const
+void AFSItemPickup::LogPickedUp() const
 {
-	const FText ItemName = Item ? Item->DisplayName : FText::GetEmpty();
-
-	if (Inventory && Inventory->CanAddItem(Item))
-	{
-		return FText::Format(LOCTEXT("PickUpPrompt", "[E / X] Pick up {0}"), ItemName);
-	}
-
-	return FText::Format(LOCTEXT("MakeRoomPrompt", "[E / X] Make room for {0}"), ItemName);
+	UFSEventLog::Add(this, FFSItemText::Format(LOCTEXT("PickedUpEvent", "Picked up {0}"), Item));
 }
 
-FVector AFSItemPickup::GetPromptLocation() const
+FFSItemText AFSItemPickup::GetInteractionLabel() const
+{
+	return Item ? FFSItemText::FromItem(*Item) : FFSItemText();
+}
+
+FText AFSItemPickup::GetInteractionVerb(const UFSInventoryComponent* Inventory) const
+{
+	if (IsBackpack())
+	{
+		return Inventory && Inventory->HasBackpack() ? LOCTEXT("SwapBackpackVerb", "Swap backpack") : LOCTEXT("PickUpBackpackVerb", "Pick up");
+	}
+
+	return Inventory && Inventory->CanAddItem(Item) ? LOCTEXT("PickUpVerb", "Pick up") : LOCTEXT("MakeRoomVerb", "Make room");
+}
+
+void AFSItemPickup::BeginPlay()
+{
+	Super::BeginPlay();
+
+	UFSInteractableRegistry::Register(this);
+}
+
+void AFSItemPickup::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	UFSInteractableRegistry::Unregister(this);
+
+	Super::EndPlay(EndPlayReason);
+}
+
+FVector AFSItemPickup::GetInteractionLabelLocation() const
 {
 	const FBoxSphereBounds& Bounds = Mesh->Bounds;
 	return Bounds.Origin + FVector(0.0, 0.0, Bounds.BoxExtent.Z + PromptHeight);

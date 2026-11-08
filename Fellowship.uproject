@@ -11,6 +11,15 @@
 			"AdditionalDependencies": [
 				"Engine"
 			]
+		},
+		{
+			"Name": "FellowshipEditor",
+			"Type": "Editor",
+			"LoadingPhase": "Default",
+			"AdditionalDependencies": [
+				"Engine",
+				"UnrealEd"
+			]
 		}
 	],
 	"Plugins": [
@@ -30,6 +39,10 @@
 		},
 		{
 			"Name": "PoseSearch",
+			"Enabled": true
+		},
+		{
+			"Name": "IKRig",
 			"Enabled": true
 		}
 	]

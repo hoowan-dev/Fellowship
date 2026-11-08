@@ -11,5 +11,6 @@ public class FellowshipEditorTarget : TargetRules
 		DefaultBuildSettings = BuildSettingsVersion.V6;
 		IncludeOrderVersion = EngineIncludeOrderVersion.Unreal5_7;
 		ExtraModuleNames.Add("Fellowship");
+		ExtraModuleNames.Add("FellowshipEditor");
 	}
 }
