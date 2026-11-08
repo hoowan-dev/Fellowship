@@ -4,11 +4,11 @@
 
 #if WITH_DEV_AUTOMATION_TESTS
 
-#include "Character/Enemies/FSEnemy.h"
-#include "Character/Enemies/FSEnemyDefinition.h"
-#include "Character/Enemies/FSEnemyRegistry.h"
-#include "Character/Enemies/FSEnemySpawner.h"
-#include "Character/Enemies/FSPrickBehavior.h"
+#include "Enemies/FSEnemy.h"
+#include "Enemies/FSEnemyDefinition.h"
+#include "Enemies/FSEnemyRegistry.h"
+#include "Enemies/FSEnemySpawner.h"
+#include "Enemies/FSPrickBehavior.h"
 #include "Character/FSStatsComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Engine/DamageEvents.h"

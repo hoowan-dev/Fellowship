@@ -3,8 +3,8 @@
 
 #include "FSPlayerController.h"
 #include "Character/FSCharacter.h"
-#include "Character/Enemies/FSEnemy.h"
-#include "Character/Enemies/FSEnemyRegistry.h"
+#include "Enemies/FSEnemy.h"
+#include "Enemies/FSEnemyRegistry.h"
 #include "Engine/DamageEvents.h"
 #include "Character/FSItemUseComponent.h"
 #include "Game/FSInteractionVolume.h"

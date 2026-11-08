@@ -1,8 +1,8 @@
 // Copyright HoowanDev 2026 all rights reserved.
 
 
-#include "Character/Enemies/FSPrickBehavior.h"
-#include "Character/Enemies/FSEnemy.h"
+#include "Enemies/FSPrickBehavior.h"
+#include "Enemies/FSEnemy.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogFSPrick, Log, All);
 

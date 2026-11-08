@@ -79,6 +79,12 @@ private:
 	// Floats a health bar over each of the nearest living enemies, the pooled ones
 	void DrawEnemyHealthBars();
 
+	// Marks the enemy the character is locked on to with a dot
+	void DrawLockOnDot();
+
+	// Draws a filled circle
+	void DrawDisc(const FVector2D& Centre, float Radius, const FLinearColor& Color);
+
 	// Whether a point is in the camera's view: in front of it, and within the edges of the screen
 	bool IsOnScreen(const FVector& Location);
 

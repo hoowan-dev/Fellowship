@@ -4,8 +4,8 @@
 #include "HUD/FSHUD.h"
 #include "CanvasItem.h"
 #include "Character/FSCharacter.h"
-#include "Character/Enemies/FSEnemy.h"
-#include "Character/Enemies/FSEnemyRegistry.h"
+#include "Enemies/FSEnemy.h"
+#include "Enemies/FSEnemyRegistry.h"
 #include "Character/FSStatsComponent.h"
 #include "Engine/Canvas.h"
 #include "Engine/Engine.h"
@@ -31,6 +31,12 @@ namespace
 
 	// How far a backdrop extends past its text
 	constexpr float BackdropPadding = 4.0f;
+
+	// The dot on the enemy that's locked on to, and the dark ring round it that keeps it visible against bright scenery
+	constexpr float LockOnDotRadius = 5.0f;
+	constexpr float LockOnDotOutline = 2.0f;
+	const FLinearColor LockOnDotColor(1.0f, 0.82f, 0.2f);
+	const FLinearColor LockOnDotOutlineColor(0.0f, 0.0f, 0.0f, 0.8f);
 
 	// The size of the health bar over an enemy, inside its dark outline
 	constexpr float EnemyHealthBarWidth = 64.0f;
@@ -163,6 +169,7 @@ void AFSHUD::DrawHUD()
 
 	// Under the labels, so that a label over an enemy reads on top of its bar
 	DrawEnemyHealthBars();
+	DrawLockOnDot();
 	DrawInteractionLabels();
 	DrawHoveredItemName();
 	DrawStatBars();
@@ -432,6 +439,55 @@ void AFSHUD::DrawEnemyHealthBars()
 		DrawRect(EnemyHealthBarColor, Left, Top, FilledWidth, EnemyHealthBarHeight);
 		DrawRect(StatBarEmptyColor, Left + FilledWidth, Top, EnemyHealthBarWidth - FilledWidth, EnemyHealthBarHeight);
 	}
+}
+
+void AFSHUD::DrawLockOnDot()
+{
+	const AFSPlayerController* PlayerController = Cast<AFSPlayerController>(GetOwningPlayerController());
+	const AFSCharacter* Character = PlayerController ? PlayerController->GetFSCharacter() : nullptr;
+	const AFSEnemy* Enemy = Character ? Character->GetLockedEnemy() : nullptr;
+	if (!Enemy)
+	{
+		return;
+	}
+
+	// Z is not positive when the point is behind the camera
+	const FVector ScreenLocation = Project(Enemy->GetActorLocation());
+	if (ScreenLocation.Z <= 0.0)
+	{
+		return;
+	}
+
+	const FVector2D Centre(ScreenLocation.X, ScreenLocation.Y);
+	DrawDisc(Centre, LockOnDotRadius + LockOnDotOutline, LockOnDotOutlineColor);
+	DrawDisc(Centre, LockOnDotRadius, LockOnDotColor);
+}
+
+void AFSHUD::DrawDisc(const FVector2D& Centre, float Radius, const FLinearColor& Color)
+{
+	constexpr int32 Sides = 24;
+
+	TArray<FCanvasUVTri> Triangles;
+	Triangles.Reserve(Sides);
+
+	for (int32 Side = 0; Side < Sides; ++Side)
+	{
+		const double AngleA = UE_DOUBLE_TWO_PI * Side / Sides;
+		const double AngleB = UE_DOUBLE_TWO_PI * (Side + 1) / Sides;
+
+		FCanvasUVTri& Triangle = Triangles.AddDefaulted_GetRef();
+		Triangle.V0_Pos = Centre;
+		Triangle.V1_Pos = Centre + FVector2D(FMath::Cos(AngleA), FMath::Sin(AngleA)) * Radius;
+		Triangle.V2_Pos = Centre + FVector2D(FMath::Cos(AngleB), FMath::Sin(AngleB)) * Radius;
+		Triangle.V0_Color = Color;
+		Triangle.V1_Color = Color;
+		Triangle.V2_Color = Color;
+	}
+
+	// Canvas items are opaque unless told otherwise
+	FCanvasTriangleItem Disc(Triangles, GWhiteTexture);
+	Disc.BlendMode = SE_BLEND_Translucent;
+	Canvas->DrawItem(Disc);
 }
 
 void AFSHUD::DrawInteractionLabels()

@@ -1,8 +1,8 @@
 // Copyright HoowanDev 2026 all rights reserved.
 
 
-#include "Character/Enemies/FSEnemyBehavior.h"
-#include "Character/Enemies/FSEnemy.h"
+#include "Enemies/FSEnemyBehavior.h"
+#include "Enemies/FSEnemy.h"
 
 void UFSEnemyBehavior::Begin(AFSEnemy& InEnemy)
 {

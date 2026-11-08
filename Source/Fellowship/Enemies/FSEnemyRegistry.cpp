@@ -1,8 +1,8 @@
 // Copyright HoowanDev 2026 all rights reserved.
 
 
-#include "Character/Enemies/FSEnemyRegistry.h"
-#include "Character/Enemies/FSEnemy.h"
+#include "Enemies/FSEnemyRegistry.h"
+#include "Enemies/FSEnemy.h"
 #include "Engine/World.h"
 
 void UFSEnemyRegistry::Register(AFSEnemy* Enemy)

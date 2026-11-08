@@ -1,9 +1,9 @@
 // Copyright HoowanDev 2026 all rights reserved.
 
 
-#include "Character/Enemies/FSEnemySpawner.h"
-#include "Character/Enemies/FSEnemy.h"
-#include "Character/Enemies/FSEnemyDefinition.h"
+#include "Enemies/FSEnemySpawner.h"
+#include "Enemies/FSEnemy.h"
+#include "Enemies/FSEnemyDefinition.h"
 #include "Components/ArrowComponent.h"
 #include "Components/BillboardComponent.h"
 #include "Engine/World.h"

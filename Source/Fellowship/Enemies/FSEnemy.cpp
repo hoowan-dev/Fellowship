@@ -1,12 +1,12 @@
 // Copyright HoowanDev 2026 all rights reserved.
 
 
-#include "Character/Enemies/FSEnemy.h"
+#include "Enemies/FSEnemy.h"
 #include "AIController.h"
 #include "Animation/AnimSequence.h"
-#include "Character/Enemies/FSEnemyBehavior.h"
-#include "Character/Enemies/FSEnemyDefinition.h"
-#include "Character/Enemies/FSEnemyRegistry.h"
+#include "Enemies/FSEnemyBehavior.h"
+#include "Enemies/FSEnemyDefinition.h"
+#include "Enemies/FSEnemyRegistry.h"
 #include "Character/FSStatsComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"

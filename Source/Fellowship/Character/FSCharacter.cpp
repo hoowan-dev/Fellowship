@@ -9,6 +9,9 @@
 #include "Character/FSEquipmentComponent.h"
 #include "Character/FSItemUseComponent.h"
 #include "Game/FSInteractionVolume.h"
+#include "Enemies/FSEnemy.h"
+#include "Enemies/FSEnemyRegistry.h"
+#include "Engine/World.h"
 #include "Character/FSStatsComponent.h"
 #include "Inventory/FSItemPickup.h"
 #include "Player/FSPlayerController.h"
@@ -58,6 +61,10 @@ void AFSCharacter::BeginPlay()
 	Super::BeginPlay();
 
 	DefaultArmLength = CameraBoom->TargetArmLength;
+	DefaultCameraRotation = FollowCamera->GetRelativeRotation().Quaternion();
+
+	// Tick sets where the camera points, so the boom has to follow it in the same frame. A frame behind, the lock on's aim would be off by a frame's turn.
+	CameraBoom->PrimaryComponentTick.AddPrerequisite(this, PrimaryActorTick);
 
 }
 
@@ -66,18 +73,45 @@ void AFSCharacter::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 
-	// The camera swings round behind the character, then stays there at the tilt it had when targeting started
+	// An enemy that dies or goes away lets go of the lock
+	if (bLockedOn && (!LockedEnemy.IsValid() || LockedEnemy->IsDead()))
+	{
+		StopTargeting();
+	}
+
+	const AFSEnemy* Enemy = GetLockedEnemy();
+
+	// Locked on, the character keeps facing the enemy, and strafing is relative to the way to it, which takes the character round it
+	if (Enemy)
+	{
+		const FVector ToEnemy = Enemy->GetActorLocation() - GetActorLocation();
+		if (ToEnemy.SizeSquared2D() > FMath::Square(1.0))
+		{
+			TargetYaw = ToEnemy.Rotation().Yaw;
+		}
+
+		const FRotator Facing(0.0, TargetYaw, 0.0);
+		SetActorRotation(LockOnTurnSpeed > 0.0f ? FMath::RInterpTo(GetActorRotation(), Facing, DeltaTime, LockOnTurnSpeed) : Facing);
+	}
+
+	// The camera swings round behind the character, then stays there at the tilt it had when targeting started.
+	// Locked on, it stays behind the character on the way to the enemy, and high enough to see the enemy past the character.
 	if (bTargeting && Controller)
 	{
 		FRotator ControlRotation = Controller->GetControlRotation();
-		const FRotator Behind(TargetPitch, TargetYaw, ControlRotation.Roll);
-		ControlRotation = TargetingCameraSwingSpeed > 0.0f ? FMath::RInterpTo(ControlRotation, Behind, DeltaTime, TargetingCameraSwingSpeed) : Behind;
+		const double Pitch = Enemy ? FMath::Min(FRotator::NormalizeAxis(TargetPitch), static_cast<double>(LockOnMaxBoomPitch)) : TargetPitch;
+		const FRotator Behind(Pitch, TargetYaw, ControlRotation.Roll);
+		const float Speed = Enemy ? LockOnCameraFollowSpeed : TargetingCameraSwingSpeed;
+		ControlRotation = Speed > 0.0f ? FMath::RInterpTo(ControlRotation, Behind, DeltaTime, Speed) : Behind;
 		Controller->SetControlRotation(ControlRotation);
 	}
 
-	// Zooms in while targeting and back out after
-	const float WantedArmLength = DefaultArmLength * (bTargeting ? TargetingArmLengthScale : 1.0f);
+	// Zooms in while targeting, or pulls back while locked on, and goes back after
+	const float ArmLengthScale = Enemy ? LockOnArmLengthScale : (bTargeting ? TargetingArmLengthScale : 1.0f);
+	const float WantedArmLength = DefaultArmLength * ArmLengthScale;
 	CameraBoom->TargetArmLength = TargetingZoomSpeed > 0.0f ? FMath::FInterpTo(CameraBoom->TargetArmLength, WantedArmLength, DeltaTime, TargetingZoomSpeed) : WantedArmLength;
+
+	UpdateLockOnCamera(Enemy, DeltaTime);
 
 }
 
@@ -333,12 +367,195 @@ void AFSCharacter::StopUsingItem(EFSItemUseSlot Slot)
 
 void AFSCharacter::HandleTargetPressed()
 {
+	// A lock on stays until the button is pressed again
+	if (bLockedOn)
+	{
+		StopTargeting();
+		return;
+	}
+
 	StartTargeting();
 }
 
 void AFSCharacter::HandleTargetReleased()
 {
-	StopTargeting();
+	// Targeting without an enemy only lasts while the button is held
+	if (!bLockedOn)
+	{
+		StopTargeting();
+	}
+}
+
+AFSEnemy* AFSCharacter::GetLockedEnemy() const
+{
+	AFSEnemy* Enemy = bLockedOn ? LockedEnemy.Get() : nullptr;
+	return Enemy && !Enemy->IsDead() ? Enemy : nullptr;
+}
+
+AFSEnemy* AFSCharacter::FindLockOnTarget() const
+{
+	const UFSEnemyRegistry* Registry = GetWorld()->GetSubsystem<UFSEnemyRegistry>();
+	if (!Registry)
+	{
+		return nullptr;
+	}
+
+	const FVector Location = GetActorLocation();
+
+	// The living enemies in range
+	TArray<AFSEnemy*, TInlineAllocator<16>> InRange;
+	for (const TWeakObjectPtr<AActor>& Entry : Registry->GetEnemies())
+	{
+		AFSEnemy* Enemy = Cast<AFSEnemy>(Entry.Get());
+		if (Enemy && !Enemy->IsDead() && FVector::Dist(Enemy->GetActorLocation(), Location) <= LockOnRange)
+		{
+			InRange.Add(Enemy);
+		}
+	}
+
+	const auto IsInSight = [this](const FVector& From, const AFSEnemy& Enemy)
+	{
+		FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(FSLockOnSight), false, this);
+		QueryParams.AddIgnoredActor(&Enemy);
+		return !GetWorld()->LineTraceTestByChannel(From, Enemy.GetActorLocation(), ECC_Visibility, QueryParams);
+	};
+
+	// Whichever scores lowest, where how far off the middle it is counts for as much as how far away it is, each over its whole range
+	const auto Choose = [this, &InRange, &Location](TFunctionRef<bool(const AFSEnemy&, double& OutOffMiddle)> Consider)
+	{
+		AFSEnemy* Best = nullptr;
+		double BestScore = TNumericLimits<double>::Max();
+
+		for (AFSEnemy* Enemy : InRange)
+		{
+			double OffMiddle = 0.0;
+			if (!Consider(*Enemy, OffMiddle))
+			{
+				continue;
+			}
+
+			const double Score = OffMiddle + (LockOnRange > 0.0f ? FVector::Dist(Enemy->GetActorLocation(), Location) / LockOnRange : 0.0);
+			if (Score < BestScore)
+			{
+				Best = Enemy;
+				BestScore = Score;
+			}
+		}
+
+		return Best;
+	};
+
+	// First, what the camera can see: in its view and not hidden from it. How far off the middle of the screen counts, from 0 there to 1 at the nearest edge.
+	FVector CameraLocation;
+	FRotator CameraRotation;
+	double TanHalfWidth = 0.0;
+	double TanHalfHeight = 0.0;
+	if (GetLockOnView(CameraLocation, CameraRotation, TanHalfWidth, TanHalfHeight))
+	{
+		const FRotationMatrix CameraAxes(CameraRotation);
+		const FVector CameraForward = CameraAxes.GetUnitAxis(EAxis::X);
+		const FVector CameraRight = CameraAxes.GetUnitAxis(EAxis::Y);
+		const FVector CameraUp = CameraAxes.GetUnitAxis(EAxis::Z);
+
+		AFSEnemy* Seen = Choose([&](const AFSEnemy& Enemy, double& OutOffMiddle)
+		{
+			const FVector ToEnemy = Enemy.GetActorLocation() - CameraLocation;
+			const double Depth = FVector::DotProduct(ToEnemy, CameraForward);
+			if (Depth <= 0.0)
+			{
+				return false;
+			}
+
+			const double Across = FVector::DotProduct(ToEnemy, CameraRight) / (Depth * TanHalfWidth);
+			const double Up = FVector::DotProduct(ToEnemy, CameraUp) / (Depth * TanHalfHeight);
+			if (FMath::Abs(Across) > 1.0 || FMath::Abs(Up) > 1.0 || !IsInSight(CameraLocation, Enemy))
+			{
+				return false;
+			}
+
+			OutOffMiddle = FMath::Max(FMath::Abs(Across), FMath::Abs(Up));
+			return true;
+		});
+
+		if (Seen)
+		{
+			return Seen;
+		}
+	}
+
+	// Otherwise, whatever is ahead of the character. How far to the side counts, from 0 straight ahead to 1 at Lock On Max Angle.
+	const FVector Forward = GetActorForwardVector().GetSafeNormal2D();
+	const double MinDot = FMath::Cos(FMath::DegreesToRadians(LockOnMaxAngle));
+
+	// From the character's eyes, so that a low wall between it and an enemy doesn't block the view
+	const FVector Eyes = Location + FVector(0.0, 0.0, BaseEyeHeight);
+
+	return Choose([&](const AFSEnemy& Enemy, double& OutOffMiddle)
+	{
+		const double Dot = FVector::DotProduct(Forward, (Enemy.GetActorLocation() - Location).GetSafeNormal2D());
+		if (Dot < MinDot || !IsInSight(Eyes, Enemy))
+		{
+			return false;
+		}
+
+		const double Angle = FMath::RadiansToDegrees(FMath::Acos(FMath::Clamp(Dot, -1.0, 1.0)));
+		OutOffMiddle = LockOnMaxAngle > 0.0f ? Angle / LockOnMaxAngle : 0.0;
+		return true;
+	});
+}
+
+bool AFSCharacter::GetLockOnView(FVector& OutLocation, FRotator& OutRotation, double& OutTanHalfWidth, double& OutTanHalfHeight) const
+{
+	const APlayerController* PlayerController = GetController<APlayerController>();
+	const APlayerCameraManager* Camera = PlayerController ? PlayerController->PlayerCameraManager.Get() : nullptr;
+	if (!Camera)
+	{
+		return false;
+	}
+
+	const FMinimalViewInfo& View = Camera->GetCameraCacheView();
+	if (View.FOV <= 0.0f)
+	{
+		return false;
+	}
+
+	// The field of view is across the screen, and the screen's shape gives the height from it
+	int32 ViewportWidth = 0;
+	int32 ViewportHeight = 0;
+	PlayerController->GetViewportSize(ViewportWidth, ViewportHeight);
+	const double AspectRatio = ViewportWidth > 0 && ViewportHeight > 0 ? static_cast<double>(ViewportWidth) / ViewportHeight : (View.AspectRatio > 0.0f ? View.AspectRatio : 16.0 / 9.0);
+
+	OutLocation = View.Location;
+	OutRotation = View.Rotation;
+	OutTanHalfWidth = FMath::Tan(FMath::DegreesToRadians(View.FOV * 0.5));
+	OutTanHalfHeight = OutTanHalfWidth / AspectRatio;
+	return true;
+}
+
+void AFSCharacter::UpdateLockOnCamera(const AFSEnemy* Enemy, float DeltaTime)
+{
+	const float Step = DeltaTime / LockOnCameraBlendTime;
+	LockOnCameraBlend = FMath::Clamp(LockOnCameraBlend + (Enemy ? Step : -Step), 0.0f, 1.0f);
+
+	if (LockOnCameraBlend <= 0.0f || !Controller)
+	{
+		FollowCamera->SetRelativeRotation(DefaultCameraRotation);
+		return;
+	}
+
+	// Where the camera is on the end of the boom, which points along the control rotation. Close enough even when the boom is pushed in by a wall.
+	const FRotator BoomRotation = Controller->GetControlRotation();
+	const FVector CameraLocation = CameraBoom->GetComponentLocation() - BoomRotation.Vector() * CameraBoom->TargetArmLength;
+
+	// While the enemy is around, the aim follows it, trailing behind a little. After, it stays where it last was as the camera turns back.
+	if (Enemy)
+	{
+		const FRotator ExactAim = (Enemy->GetActorLocation() - CameraLocation).Rotation();
+		LockOnCameraAim = LockOnCameraFollowSpeed > 0.0f ? FMath::RInterpTo(LockOnCameraAim, ExactAim, DeltaTime, LockOnCameraFollowSpeed) : ExactAim;
+	}
+
+	const FQuat AimRelativeToBoom = BoomRotation.Quaternion().Inverse() * LockOnCameraAim.Quaternion();
+	FollowCamera->SetRelativeRotation(FQuat::Slerp(DefaultCameraRotation, AimRelativeToBoom, FMath::SmoothStep(0.0f, 1.0f, LockOnCameraBlend)));
 }
 
 void AFSCharacter::StartTargeting()
@@ -353,6 +570,14 @@ void AFSCharacter::StartTargeting()
 	TargetYaw = GetActorRotation().Yaw;
 	TargetPitch = Controller ? Controller->GetControlRotation().Pitch : 0.0f;
 
+	LockedEnemy = FindLockOnTarget();
+	bLockedOn = LockedEnemy.IsValid();
+	if (bLockedOn)
+	{
+		// The aim starts where the camera is looking now, and follows the enemy from there
+		LockOnCameraAim = FollowCamera->GetComponentRotation();
+	}
+
 	// Keeps facing the target yaw, so that moving sideways or back strafes
 	GetCharacterMovement()->bOrientRotationToMovement = false;
 }
@@ -365,6 +590,8 @@ void AFSCharacter::StopTargeting()
 	}
 
 	bTargeting = false;
+	bLockedOn = false;
+	LockedEnemy.Reset();
 	GetCharacterMovement()->bOrientRotationToMovement = true;
 }
 

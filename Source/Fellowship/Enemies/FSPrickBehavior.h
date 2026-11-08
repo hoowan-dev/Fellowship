@@ -3,7 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Character/Enemies/FSEnemyBehavior.h"
+#include "Enemies/FSEnemyBehavior.h"
 #include "FSPrickBehavior.generated.h"
 
 /**
