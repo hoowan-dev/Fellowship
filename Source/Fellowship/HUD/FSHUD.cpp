@@ -155,6 +155,8 @@ void AFSHUD::DrawHUD()
 {
 	Super::DrawHUD();
 
+	DrawLetterbox();
+
 	UpdateUseGlow();
 	DrawEquipmentSlots();
 	DrawInventorySlotNames();
@@ -190,6 +192,23 @@ void AFSHUD::DrawEquipmentSlots()
 	DrawEquipmentSlot(AFSEquipmentDisplay::GetSlotCentre(ViewportSize, EFSEquipmentSlot::Backpack), Inventory->GetBackpack(), LOCTEXT("BackpackSlot", "Backpack"));
 
 	DrawEquipmentSlot(AFSEquipmentDisplay::GetSlotCentre(ViewportSize, EFSEquipmentSlot::RightHand), Inventory->GetHandItem(EFSHand::Right).Definition, UFSInventoryComponent::GetHandSlotName(EFSHand::Right), GetUseGlow(EFSEquipmentSlot::RightHand));
+}
+
+void AFSHUD::DrawLetterbox()
+{
+	const AFSPlayerController* PlayerController = Cast<AFSPlayerController>(GetOwningPlayerController());
+	const AFSCharacter* Character = PlayerController ? PlayerController->GetFSCharacter() : nullptr;
+	const bool bTargeting = Character && Character->IsTargeting();
+
+	const float Step = RenderDelta / LetterboxBlendTime;
+	LetterboxAmount = FMath::Clamp(LetterboxAmount + (bTargeting ? Step : -Step), 0.0f, 1.0f);
+
+	// The bars are part of the scene rather than drawn here, so that the equipment display's meshes, which float in front of the camera, stay in front of them.
+	// Eased, so the bars slow as they settle.
+	if (EquipmentDisplay)
+	{
+		EquipmentDisplay->SetLetterboxHeight(LetterboxHeight * FMath::SmoothStep(0.0f, 1.0f, LetterboxAmount));
+	}
 }
 
 void AFSHUD::UpdateUseGlow()

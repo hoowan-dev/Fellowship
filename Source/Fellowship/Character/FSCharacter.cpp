@@ -57,12 +57,27 @@ void AFSCharacter::BeginPlay()
 {
 	Super::BeginPlay();
 
+	DefaultArmLength = CameraBoom->TargetArmLength;
+
 }
 
 // Called every frame
 void AFSCharacter::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
+
+	// The camera swings round behind the character, then stays there at the tilt it had when targeting started
+	if (bTargeting && Controller)
+	{
+		FRotator ControlRotation = Controller->GetControlRotation();
+		const FRotator Behind(TargetPitch, TargetYaw, ControlRotation.Roll);
+		ControlRotation = TargetingCameraSwingSpeed > 0.0f ? FMath::RInterpTo(ControlRotation, Behind, DeltaTime, TargetingCameraSwingSpeed) : Behind;
+		Controller->SetControlRotation(ControlRotation);
+	}
+
+	// Zooms in while targeting and back out after
+	const float WantedArmLength = DefaultArmLength * (bTargeting ? TargetingArmLengthScale : 1.0f);
+	CameraBoom->TargetArmLength = TargetingZoomSpeed > 0.0f ? FMath::FInterpTo(CameraBoom->TargetArmLength, WantedArmLength, DeltaTime, TargetingZoomSpeed) : WantedArmLength;
 
 }
 
@@ -186,6 +201,7 @@ void AFSCharacter::OnMovementModeChanged(EMovementMode PrevMovementMode, uint8 P
 	{
 		Equipment->Sheathe();
 		ItemUse->StopUsingItems();
+		StopTargeting();
 	}
 }
 
@@ -232,6 +248,13 @@ void AFSCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompone
 		EnhancedInput->BindAction(ToggleDrawnAction, ETriggerEvent::Started, this, &AFSCharacter::ToggleWeaponsDrawn);
 	}
 
+	if (TargetAction)
+	{
+		EnhancedInput->BindAction(TargetAction, ETriggerEvent::Started, this, &AFSCharacter::HandleTargetPressed);
+		EnhancedInput->BindAction(TargetAction, ETriggerEvent::Completed, this, &AFSCharacter::HandleTargetReleased);
+		EnhancedInput->BindAction(TargetAction, ETriggerEvent::Canceled, this, &AFSCharacter::HandleTargetReleased);
+	}
+
 	const TPair<UInputAction*, EFSItemUseSlot> UseActions[] =
 	{
 		{ UseRightHandAction, EFSItemUseSlot::RightHand },
@@ -266,8 +289,8 @@ void AFSCharacter::Move(const FInputActionValue& Value)
 		return;
 	}
 
-	// Move relative to where the camera is facing, ignoring pitch
-	const FRotator YawRotation(0.0f, GetControlRotation().Yaw, 0.0f);
+	// Move relative to where the camera is facing, ignoring pitch. While targeting, that's where the camera is swinging to, so that strafing doesn't drift as it swings.
+	const FRotator YawRotation(0.0f, bTargeting ? TargetYaw : GetControlRotation().Yaw, 0.0f);
 	const FRotationMatrix YawMatrix(YawRotation);
 
 	AddMovementInput(YawMatrix.GetUnitAxis(EAxis::X), Input.Y);
@@ -277,6 +300,12 @@ void AFSCharacter::Move(const FInputActionValue& Value)
 void AFSCharacter::Look(const FInputActionValue& Value)
 {
 	const FVector2D Input = Value.Get<FVector2D>();
+
+	// The camera stays locked behind the character while targeting
+	if (bTargeting)
+	{
+		return;
+	}
 
 	AddControllerYawInput(Input.X * LookSpeed);
 	AddControllerPitchInput(Input.Y * LookSpeed);
@@ -300,6 +329,43 @@ void AFSCharacter::StartUsingItem(EFSItemUseSlot Slot)
 void AFSCharacter::StopUsingItem(EFSItemUseSlot Slot)
 {
 	ItemUse->StopUsing(Slot);
+}
+
+void AFSCharacter::HandleTargetPressed()
+{
+	StartTargeting();
+}
+
+void AFSCharacter::HandleTargetReleased()
+{
+	StopTargeting();
+}
+
+void AFSCharacter::StartTargeting()
+{
+	const UFSCharacterMovementComponent* Movement = GetCharacterMovement<UFSCharacterMovementComponent>();
+	if (bTargeting || (Movement && Movement->IsClimbing()))
+	{
+		return;
+	}
+
+	bTargeting = true;
+	TargetYaw = GetActorRotation().Yaw;
+	TargetPitch = Controller ? Controller->GetControlRotation().Pitch : 0.0f;
+
+	// Keeps facing the target yaw, so that moving sideways or back strafes
+	GetCharacterMovement()->bOrientRotationToMovement = false;
+}
+
+void AFSCharacter::StopTargeting()
+{
+	if (!bTargeting)
+	{
+		return;
+	}
+
+	bTargeting = false;
+	GetCharacterMovement()->bOrientRotationToMovement = true;
 }
 
 void AFSCharacter::JumpOrClimb()

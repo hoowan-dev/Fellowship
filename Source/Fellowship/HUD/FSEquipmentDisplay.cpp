@@ -24,6 +24,11 @@ namespace
 	// How far in front of the camera the meshes float. Just past the near clipping plane and the 12cm the camera boom keeps from walls, so nothing comes between them.
 	constexpr double MeshDistance = 14.0;
 
+	// How far the letterbox bars reach past the edges of the screen, in pixels, so that no gap shows when the camera shakes
+	constexpr float LetterboxOverhang = 40.0f;
+
+	const FName LetterboxDarknessParameter(TEXT("Darkness"));
+
 	// How much of a circle's width a mesh's diagonal takes up
 	constexpr double MeshFillFraction = 0.9;
 
@@ -164,11 +169,54 @@ AFSEquipmentDisplay::AFSEquipmentDisplay()
 		NorthNeedleMesh->SetMaterial(0, NeedleMaterial.Object);
 		SouthNeedleMesh->SetMaterial(0, NeedleMaterial.Object);
 	}
+
+	const auto CreateLetterboxBar = [this](const FName Name)
+	{
+		UStaticMeshComponent* Bar = CreateDefaultSubobject<UStaticMeshComponent>(Name);
+		Bar->SetupAttachment(RootComponent);
+		Bar->SetMobility(EComponentMobility::Movable);
+		Bar->SetUsingAbsoluteLocation(true);
+		Bar->SetUsingAbsoluteRotation(true);
+		Bar->SetUsingAbsoluteScale(true);
+		Bar->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Bar->SetCanEverAffectNavigation(false);
+		Bar->SetCastShadow(false);
+		Bar->bVisibleInReflectionCaptures = false;
+		Bar->bVisibleInRealTimeSkyCaptures = false;
+		Bar->bVisibleInRayTracing = false;
+		Bar->SetVisibility(false);
+		return Bar;
+	};
+
+	TopLetterboxBar = CreateLetterboxBar(TEXT("TopLetterboxBar"));
+	BottomLetterboxBar = CreateLetterboxBar(TEXT("BottomLetterboxBar"));
+
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> PlaneMesh(TEXT("/Engine/BasicShapes/Plane.Plane"));
+	if (PlaneMesh.Succeeded())
+	{
+		TopLetterboxBar->SetStaticMesh(PlaneMesh.Object);
+		BottomLetterboxBar->SetStaticMesh(PlaneMesh.Object);
+	}
+
+	// Unlit translucent black, whose Darkness is its opacity. Full, the bars are solid black that no light changes.
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> BlackMaterial(TEXT("/Game/Materials/Inventory/M_InventoryBackgroundDarken.M_InventoryBackgroundDarken"));
+	if (BlackMaterial.Succeeded())
+	{
+		LetterboxMaterial = BlackMaterial.Object;
+	}
 }
 
 void AFSEquipmentDisplay::BeginPlay()
 {
 	Super::BeginPlay();
+
+	if (LetterboxMaterial)
+	{
+		UMaterialInstanceDynamic* Black = UMaterialInstanceDynamic::Create(LetterboxMaterial, this);
+		Black->SetScalarParameterValue(LetterboxDarknessParameter, 1.0f);
+		TopLetterboxBar->SetMaterial(0, Black);
+		BottomLetterboxBar->SetMaterial(0, Black);
+	}
 
 	if (UMaterialInstanceDynamic* NorthMaterial = NorthNeedleMesh->CreateDynamicMaterialInstance(0))
 	{
@@ -259,6 +307,11 @@ void AFSEquipmentDisplay::Tick(float DeltaTime)
 	const UCharacterMovementComponent* Movement = Character ? Character->GetCharacterMovement() : nullptr;
 	Shake.Update(Pawn ? Pawn->GetVelocity() : FVector::ZeroVector, Movement && Movement->IsFalling(), DeltaTime);
 
+	if (PlayerController)
+	{
+		UpdateLetterbox(*PlayerController);
+	}
+
 	if (!Inventory)
 	{
 		for (UStaticMeshComponent* Mesh : SlotMeshes)
@@ -284,6 +337,63 @@ void AFSEquipmentDisplay::Tick(float DeltaTime)
 	UpdateSlot(*PlayerController, EFSEquipmentSlot::Backpack, Inventory->GetBackpack());
 
 	UpdateCompass(*PlayerController);
+}
+
+void AFSEquipmentDisplay::UpdateLetterbox(const AFSPlayerController& PlayerController)
+{
+	const APlayerCameraManager* Camera = PlayerController.PlayerCameraManager;
+
+	int32 ViewportWidth = 0;
+	int32 ViewportHeight = 0;
+	PlayerController.GetViewportSize(ViewportWidth, ViewportHeight);
+
+	const float BarHeight = ViewportHeight * LetterboxHeight;
+	if (!Camera || BarHeight <= 0.0f || ViewportWidth <= 0)
+	{
+		TopLetterboxBar->SetVisibility(false);
+		BottomLetterboxBar->SetVisibility(false);
+		return;
+	}
+
+	const FVector CameraLocation = Camera->GetCameraLocation();
+	const FQuat CameraRotation = Camera->GetCameraRotation().Quaternion();
+	const FVector Forward = CameraRotation.GetForwardVector();
+
+	// Where a point on the screen is on the plane the bars float on
+	const auto OnBarPlane = [&PlayerController, &CameraLocation, &Forward](float ScreenX, float ScreenY, FVector& OutPoint)
+	{
+		FVector Origin, Direction;
+		if (!PlayerController.DeprojectScreenPositionToWorld(ScreenX, ScreenY, Origin, Direction))
+		{
+			return false;
+		}
+
+		OutPoint = Origin + Direction * ((LetterboxDistance - FVector::DotProduct(Origin - CameraLocation, Forward)) / FVector::DotProduct(Direction, Forward));
+		return true;
+	};
+
+	// The plane mesh is 100 across with its face towards +Z, so it's turned to face the camera with +X up the screen
+	const FQuat FacingCamera = FRotationMatrix::MakeFromZX(-Forward, CameraRotation.GetUpVector()).ToQuat();
+
+	const auto PlaceBar = [&](UStaticMeshComponent* Bar, float Top, float Bottom)
+	{
+		FVector TopLeft, BottomRight;
+		if (!OnBarPlane(-LetterboxOverhang, Top, TopLeft) || !OnBarPlane(ViewportWidth + LetterboxOverhang, Bottom, BottomRight))
+		{
+			Bar->SetVisibility(false);
+			return;
+		}
+
+		const FVector Diagonal = BottomRight - TopLeft;
+		const double Height = FMath::Abs(FVector::DotProduct(Diagonal, CameraRotation.GetUpVector()));
+		const double Width = FMath::Abs(FVector::DotProduct(Diagonal, CameraRotation.GetRightVector()));
+
+		Bar->SetWorldTransform(FTransform(FacingCamera, (TopLeft + BottomRight) * 0.5, FVector(Height / 100.0, Width / 100.0, 1.0)));
+		Bar->SetVisibility(true);
+	};
+
+	PlaceBar(TopLetterboxBar, -LetterboxOverhang, BarHeight);
+	PlaceBar(BottomLetterboxBar, ViewportHeight - BarHeight, ViewportHeight + LetterboxOverhang);
 }
 
 bool AFSEquipmentDisplay::GetSlotPlacement(const AFSPlayerController& PlayerController, EFSEquipmentSlot Slot, float ScreenRadius, FVector& OutCentre, double& OutRadius, FQuat& OutRotation) const

@@ -67,6 +67,10 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category = "Input")
 	TObjectPtr<UInputAction> ToggleDrawnAction;
 
+	// Digital (bool). Targets while held: swings the camera round to where the character faces and strafes instead of turning.
+	UPROPERTY(EditDefaultsOnly, Category = "Input")
+	TObjectPtr<UInputAction> TargetAction;
+
 	// Digital (bool). Uses what the right hand holds while held.
 	UPROPERTY(EditDefaultsOnly, Category = "Input")
 	TObjectPtr<UInputAction> UseRightHandAction;
@@ -93,6 +97,18 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, BlueprintSetter = SetMaxLookPitch, Category = "Camera", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", ClampMax = "89.9"))
 	float MaxLookPitch = 89.9f;
 
+	// How quickly the camera swings round behind the character when targeting starts. Higher is snappier.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Targeting", meta = (ClampMin = "0.0"))
+	float TargetingCameraSwingSpeed = 12.0f;
+
+	// How far the camera zooms in while targeting, as a fraction of the camera boom's usual length
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Targeting", meta = (ClampMin = "0.1", ClampMax = "1.0"))
+	float TargetingArmLengthScale = 0.8f;
+
+	// How quickly the camera zooms in and back out. Higher is snappier.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Targeting", meta = (ClampMin = "0.0"))
+	float TargetingZoomSpeed = 8.0f;
+
 	// Hidden while looking at the backpack in first person, because the head would block the camera. The worn backpack's mesh is hidden along with the weapons.
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory")
 	TArray<FName> InventoryViewHiddenBones = { TEXT("head") };
@@ -117,6 +133,9 @@ protected:
 
 	void StartUsingItem(EFSItemUseSlot Slot);
 	void StopUsingItem(EFSItemUseSlot Slot);
+
+	void HandleTargetPressed();
+	void HandleTargetReleased();
 
 public:
 	// What pressing jump does: lets go of the surface while climbing, grabs one that's in reach while in the air, and otherwise jumps.
@@ -149,6 +168,24 @@ public:
 	// Also hides the weapons, which would otherwise get in the way of the camera
 	void SetInventoryViewBonesHidden(bool bHide);
 
+	// Locks the character's facing where it is now, swings the camera round behind it and zooms in a little. While targeting, moving strafes rather than turning,
+	// and the camera stays locked behind the character at the tilt it had when targeting started. Does nothing while climbing.
+	UFUNCTION(BlueprintCallable, Category = "Targeting")
+	void StartTargeting();
+
+	// Goes back to turning to face where the character moves, and frees the camera
+	UFUNCTION(BlueprintCallable, Category = "Targeting")
+	void StopTargeting();
+
+	UFUNCTION(BlueprintPure, Category = "Targeting")
+	bool IsTargeting() const { return bTargeting; }
+
+	// The way the character faces while targeting
+	float GetTargetYaw() const { return TargetYaw; }
+
+	// The camera's tilt while targeting, kept from when targeting started
+	float GetTargetPitch() const { return TargetPitch; }
+
 	// Called by pickups as this character enters and leaves their range
 	void AddNearbyPickup(AFSItemPickup* Pickup);
 	void RemoveNearbyPickup(AFSItemPickup* Pickup);
@@ -167,6 +204,13 @@ public:
 	AActor* GetInteractionTarget() const;
 
 private:
+	bool bTargeting = false;
+	float TargetYaw = 0.0f;
+	float TargetPitch = 0.0f;
+
+	// The camera boom's length when play began, which targeting zooms in from and back out to
+	float DefaultArmLength = 0.0f;
+
 	TArray<TWeakObjectPtr<AFSItemPickup>> NearbyPickups;
 	TArray<TWeakObjectPtr<AFSInteractionVolume>> InteractionVolumes;
 

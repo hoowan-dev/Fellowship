@@ -24,4 +24,9 @@ public:
 	// Returns false, changing nothing, if there's no such entry or this isn't the editor
 	UFUNCTION(BlueprintCallable, Category = "Pose Search Setup")
 	static bool RemoveDatabaseAnimation(UPoseSearchDatabase* Database, int32 Index);
+
+	// Adds an entry playing Animation, with the same settings as the entry at TemplateIndex. Returns the new entry's index,
+	// or INDEX_NONE, changing nothing, if there's no such template or this isn't the editor.
+	UFUNCTION(BlueprintCallable, Category = "Pose Search Setup")
+	static int32 AddDatabaseAnimation(UPoseSearchDatabase* Database, UObject* Animation, int32 TemplateIndex);
 };

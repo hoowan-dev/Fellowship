@@ -584,10 +584,11 @@ void AFSPlayerController::SetInventoryInputActive(bool bActive)
 
 	bShowMouseCursor = bActive;
 
-	// The use buttons aren't mapped while the inventory is open, so they'd never be released
+	// The use and target buttons aren't mapped while the inventory is open, so they'd never be released
 	if (bActive && FSCharacter)
 	{
 		FSCharacter->GetItemUse()->StopUsingAll();
+		FSCharacter->StopTargeting();
 	}
 
 	if (bActive)

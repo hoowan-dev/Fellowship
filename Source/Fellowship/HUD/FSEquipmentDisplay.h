@@ -9,6 +9,7 @@
 class AFSPlayerController;
 class UStaticMesh;
 class UFSItemDefinition;
+class UMaterialInterface;
 class UStaticMeshComponent;
 
 // What the display shows: the circles at the top of the HUD from left to right, then the compass at the bottom right, which has no circle
@@ -54,6 +55,7 @@ private:
 /**
  * The real meshes of what the player has equipped, floating just in front of the camera so that each lines up with its circle on the HUD.
  * They're part of the scene, so they're lit by whatever is around the camera and catch the light differently as it turns. The HUD draws the circles.
+ * Also holds the letterbox's black bars, which float just behind the meshes so that the meshes stay in front of them.
  */
 UCLASS()
 class FELLOWSHIP_API AFSEquipmentDisplay : public AActor
@@ -90,6 +92,14 @@ public:
 	// Places a cone as half of the needle, running from a point at the middle of the case along Rotation's +Z, flattened to face the camera
 	static FTransform GetCompassNeedleTransform(const UStaticMesh& Cone, const FQuat& Rotation, const FVector& Centre, double Radius);
 
+	// How much of the screen's height each letterbox bar covers, from 0 for none. Applied on the next tick, with the camera of that frame.
+	void SetLetterboxHeight(float ScreenFraction) { LetterboxHeight = ScreenFraction; }
+
+	FORCEINLINE UStaticMeshComponent* GetLetterboxBar(bool bTop) const { return bTop ? TopLetterboxBar : BottomLetterboxBar; }
+
+	// How far in front of the camera the letterbox bars float: behind the meshes, so that they're drawn over the bars
+	static constexpr double LetterboxDistance = 30.0;
+
 protected:
 	virtual void BeginPlay() override;
 
@@ -99,6 +109,9 @@ private:
 
 	void UpdateSlot(const AFSPlayerController& PlayerController, EFSEquipmentSlot Slot, const UFSItemDefinition* Item);
 	void UpdateCompass(const AFSPlayerController& PlayerController);
+
+	// Sizes the bars to cover the top and bottom of what the camera sees right now
+	void UpdateLetterbox(const AFSPlayerController& PlayerController);
 
 	UPROPERTY(VisibleAnywhere, Category = "Equipment")
 	TObjectPtr<UStaticMeshComponent> SlotMeshes[static_cast<int32>(EFSEquipmentSlot::Count)];
@@ -110,6 +123,17 @@ private:
 	// The half of the compass's needle that points south
 	UPROPERTY(VisibleAnywhere, Category = "Equipment")
 	TObjectPtr<UStaticMeshComponent> SouthNeedleMesh;
+
+	UPROPERTY(VisibleAnywhere, Category = "Letterbox")
+	TObjectPtr<UStaticMeshComponent> TopLetterboxBar;
+
+	UPROPERTY(VisibleAnywhere, Category = "Letterbox")
+	TObjectPtr<UStaticMeshComponent> BottomLetterboxBar;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInterface> LetterboxMaterial;
+
+	float LetterboxHeight = 0.0f;
 
 	FFSEquipmentShake Shake;
 };

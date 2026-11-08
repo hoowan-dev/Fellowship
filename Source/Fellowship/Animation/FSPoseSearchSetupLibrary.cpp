@@ -20,6 +20,26 @@ bool UFSPoseSearchSetupLibrary::SetDatabaseAnimation(UPoseSearchDatabase* Databa
 #endif
 }
 
+int32 UFSPoseSearchSetupLibrary::AddDatabaseAnimation(UPoseSearchDatabase* Database, UObject* Animation, int32 TemplateIndex)
+{
+#if WITH_EDITOR
+	if (!Database || !Animation || TemplateIndex < 0 || TemplateIndex >= Database->GetNumAnimationAssets())
+	{
+		return INDEX_NONE;
+	}
+
+	FPoseSearchDatabaseAnimationAsset Entry = *Database->GetDatabaseAnimationAsset(TemplateIndex);
+	Entry.AnimAsset = Animation;
+
+	Database->Modify();
+	Database->AddAnimationAsset(Entry);
+	Database->PostEditChange();
+	return Database->GetNumAnimationAssets() - 1;
+#else
+	return INDEX_NONE;
+#endif
+}
+
 bool UFSPoseSearchSetupLibrary::RemoveDatabaseAnimation(UPoseSearchDatabase* Database, int32 Index)
 {
 #if WITH_EDITOR

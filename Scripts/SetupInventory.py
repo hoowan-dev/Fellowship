@@ -116,7 +116,7 @@ def setup_input():
 
     default_context = assets.load_asset(DEFAULT_MAPPING_CONTEXT_PATH)
     map_keys(default_context, action, ["Tab"])
-    map_keys(default_context, interact_action, ["E", "Gamepad_FaceButton_Left"])
+    map_keys(default_context, interact_action, ["F", "Gamepad_FaceButton_Left"])
 
     select_action = load_or_create(SELECT_ACTION_NAME, INPUT_FOLDER, unreal.InputAction, unreal.InputAction_Factory())
     select_action.set_editor_property("value_type", unreal.InputActionValueType.BOOLEAN)

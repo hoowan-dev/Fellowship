@@ -32,6 +32,14 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category = "Enemies", meta = (ClampMin = "0.0", Units = cm))
 	float EnemyHealthBarDistance = 2000.0f;
 
+	// How much of the screen's height each of the black bars covers while targeting
+	UPROPERTY(EditDefaultsOnly, Category = "Targeting", meta = (ClampMin = "0.0", ClampMax = "0.5"))
+	float LetterboxHeight = 0.08f;
+
+	// How long the black bars take to slide in or out
+	UPROPERTY(EditDefaultsOnly, Category = "Targeting", meta = (ClampMin = "0.01", Units = s))
+	float LetterboxBlendTime = 0.2f;
+
 	// How many labels and health bars can show at once
 	static constexpr int32 MaxInteractionLabels = 16;
 	static constexpr int32 MaxEnemyHealthBars = 16;
@@ -46,6 +54,10 @@ private:
 	// Draws one of those circles, with what it's for named above and what it holds named underneath, if anything.
 	// Glow from 0 to 1 lights it up, for while it's being used.
 	void DrawEquipmentSlot(const FVector2D& Centre, const UFSItemDefinition* Item, const FText& SlotName, float Glow = 0.0f);
+
+	// Slides black bars in from the top and bottom of the screen while the character is targeting, and back out after.
+	// The equipment display places them, behind its meshes.
+	void DrawLetterbox();
 
 	// Brightens the glow of each slot whose button is held and fades the rest
 	void UpdateUseGlow();
@@ -97,6 +109,9 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<AFSEquipmentDisplay> EquipmentDisplay;
+
+	// From 0 with no bars to 1 with them all the way in
+	float LetterboxAmount = 0.0f;
 
 	FFSWorldLabelPool InteractionLabels = FFSWorldLabelPool(MaxInteractionLabels);
 	FFSWorldLabelPool EnemyHealthBars = FFSWorldLabelPool(MaxEnemyHealthBars);

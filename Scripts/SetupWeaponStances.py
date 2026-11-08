@@ -30,6 +30,10 @@ BATTLE_CLIPS = {
     'Idle_Normal_NoWeapon_Anim': '{root}/Idle_Battle_{set}_Anim',
     'MoveFWD_Normal_RM_NoWeapon_Anim': '{root}/RootMotion/MoveFWD_Battle_RM_{set}_Anim',
     'SprintFWD_Battle_RM_NoWeapon_Anim': '{root}/RootMotion/SprintFWD_Battle_RM_{set}_Anim',
+    # The strafes for targeting, which Scripts/SetupTargeting.py adds
+    'MoveLFT_Battle_RM_NoWeapon_Anim': '{root}/RootMotion/MoveLFT_Battle_RM_{set}_Anim',
+    'MoveRGT_Battle_RM_NoWeapon_Anim': '{root}/RootMotion/MoveRGT_Battle_RM_{set}_Anim',
+    'MoveBWD_Battle_RM_NoWeapon_Anim': '{root}/RootMotion/MoveBWD_Battle_RM_{set}_Anim',
 }
 
 ITEM_WEAPON_TYPES = {
