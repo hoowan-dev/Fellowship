@@ -102,6 +102,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Targeting", meta = (ClampMin = "0.0"))
 	float TargetingCameraSwingSpeed = 12.0f;
 
+	// The camera's tilt while targeting without an enemy, whatever it was before. Negative looks down.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Targeting", meta = (ClampMin = "-89.0", ClampMax = "89.0", Units = deg))
+	float TargetingCameraPitch = -15.0f;
+
 	// How far the camera zooms in while targeting, as a fraction of the camera boom's usual length
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Targeting", meta = (ClampMin = "0.1", ClampMax = "1.0"))
 	float TargetingArmLengthScale = 0.8f;
@@ -201,8 +205,8 @@ public:
 	void HandleTargetReleased();
 
 	// Starts targeting, locking on to the best enemy in front of the character if there is one. Does nothing while climbing.
-	// Without an enemy, the character's facing is locked where it is now, the camera swings round behind it and zooms in a little, and it stays
-	// behind at the tilt it had when targeting started. Moving strafes rather than turning.
+	// Without an enemy, the character's facing is locked where it is now, the camera swings round behind it to Targeting Camera Pitch and zooms in
+	// a little, and it stays there. Moving strafes rather than turning.
 	// Locked on, the character faces the enemy and strafes around it, and the camera pulls back a little and follows the enemy, keeping it in the middle of the screen.
 	UFUNCTION(BlueprintCallable, Category = "Targeting")
 	void StartTargeting();
@@ -229,7 +233,7 @@ public:
 	// The way the character faces while targeting
 	float GetTargetYaw() const { return TargetYaw; }
 
-	// The camera's tilt while targeting, kept from when targeting started
+	// The camera's tilt while targeting: Targeting Camera Pitch without an enemy, or the tilt it had when the lock on started
 	float GetTargetPitch() const { return TargetPitch; }
 
 	// Called by pickups as this character enters and leaves their range

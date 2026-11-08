@@ -114,7 +114,7 @@ bool FFSTargetingTest::RunTest(const FString& Parameters)
 
 	const FRotator ControlRotation = Test.Controller->GetControlRotation();
 	TestEqual(TEXT("The camera swings round behind the character"), FRotator::NormalizeAxis(ControlRotation.Yaw), 40.0, 0.5);
-	TestEqual(TEXT("Keeping its tilt"), FRotator::NormalizeAxis(ControlRotation.Pitch), -10.0, 0.5);
+	TestEqual(TEXT("To the targeting tilt, whatever the camera's was"), FRotator::NormalizeAxis(ControlRotation.Pitch), static_cast<double>(Character->TargetingCameraPitch), 0.5);
 	TestEqual(TEXT("And zooming in"), Character->GetCameraBoom()->TargetArmLength, DefaultArmLength * Character->TargetingArmLengthScale, 1.0f);
 
 	// Anything that tilts the camera while targeting is undone
@@ -123,7 +123,7 @@ bool FFSTargetingTest::RunTest(const FString& Parameters)
 	{
 		Character->Tick(1.0f / 30.0f);
 	}
-	TestEqual(TEXT("The tilt stays locked where it started"), FRotator::NormalizeAxis(Test.Controller->GetControlRotation().Pitch), -10.0, 0.5);
+	TestEqual(TEXT("The tilt stays locked at the targeting tilt"), FRotator::NormalizeAxis(Test.Controller->GetControlRotation().Pitch), static_cast<double>(Character->TargetingCameraPitch), 0.5);
 
 	Character->StopTargeting();
 	TestFalse(TEXT("Letting go stops targeting"), Character->IsTargeting());

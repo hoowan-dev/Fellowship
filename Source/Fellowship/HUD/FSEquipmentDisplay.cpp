@@ -170,7 +170,8 @@ AFSEquipmentDisplay::AFSEquipmentDisplay()
 		SouthNeedleMesh->SetMaterial(0, NeedleMaterial.Object);
 	}
 
-	const auto CreateLetterboxBar = [this](const FName Name)
+	// The bars and the slots' discs: flat translucent shapes that face the camera and mustn't touch anything else in the scene
+	const auto CreateDarkShape = [this](const FName Name)
 	{
 		UStaticMeshComponent* Bar = CreateDefaultSubobject<UStaticMeshComponent>(Name);
 		Bar->SetupAttachment(RootComponent);
@@ -188,8 +189,22 @@ AFSEquipmentDisplay::AFSEquipmentDisplay()
 		return Bar;
 	};
 
-	TopLetterboxBar = CreateLetterboxBar(TEXT("TopLetterboxBar"));
-	BottomLetterboxBar = CreateLetterboxBar(TEXT("BottomLetterboxBar"));
+	TopLetterboxBar = CreateDarkShape(TEXT("TopLetterboxBar"));
+	BottomLetterboxBar = CreateDarkShape(TEXT("BottomLetterboxBar"));
+
+	const FName BackdropNames[] = { TEXT("LeftQuickSlotBackdrop"), TEXT("LeftHandBackdrop"), TEXT("BackpackBackdrop"), TEXT("RightHandBackdrop"), TEXT("RightQuickSlotBackdrop") };
+	static_assert(UE_ARRAY_COUNT(BackdropNames) == static_cast<int32>(EFSEquipmentSlot::Compass), "One backdrop for each slot before the compass");
+
+	// A cylinder flattened into a disc, 100 across like the plane
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> CylinderMesh(TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
+	for (int32 Index = 0; Index < UE_ARRAY_COUNT(BackdropNames); ++Index)
+	{
+		SlotBackdrops[Index] = CreateDarkShape(BackdropNames[Index]);
+		if (CylinderMesh.Succeeded())
+		{
+			SlotBackdrops[Index]->SetStaticMesh(CylinderMesh.Object);
+		}
+	}
 
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> PlaneMesh(TEXT("/Engine/BasicShapes/Plane.Plane"));
 	if (PlaneMesh.Succeeded())
@@ -216,6 +231,13 @@ void AFSEquipmentDisplay::BeginPlay()
 		Black->SetScalarParameterValue(LetterboxDarknessParameter, 1.0f);
 		TopLetterboxBar->SetMaterial(0, Black);
 		BottomLetterboxBar->SetMaterial(0, Black);
+
+		UMaterialInstanceDynamic* Shade = UMaterialInstanceDynamic::Create(LetterboxMaterial, this);
+		Shade->SetScalarParameterValue(LetterboxDarknessParameter, SlotBackdropDarkness);
+		for (UStaticMeshComponent* Backdrop : SlotBackdrops)
+		{
+			Backdrop->SetMaterial(0, Shade);
+		}
 	}
 
 	if (UMaterialInstanceDynamic* NorthMaterial = NorthNeedleMesh->CreateDynamicMaterialInstance(0))
@@ -318,6 +340,10 @@ void AFSEquipmentDisplay::Tick(float DeltaTime)
 		{
 			Mesh->SetVisibility(false);
 		}
+		for (UStaticMeshComponent* Backdrop : SlotBackdrops)
+		{
+			Backdrop->SetVisibility(false);
+		}
 		NorthNeedleMesh->SetVisibility(false);
 		SouthNeedleMesh->SetVisibility(false);
 		return;
@@ -335,6 +361,13 @@ void AFSEquipmentDisplay::Tick(float DeltaTime)
 	UpdateItem(EFSEquipmentSlot::RightQuickSlot, Inventory->GetQuickSlotItem(EFSQuickSlot::Right));
 
 	UpdateSlot(*PlayerController, EFSEquipmentSlot::Backpack, Inventory->GetBackpack());
+
+	// The HUD only draws the quick slots' circles while there's a backpack, which they belong to
+	UpdateSlotBackdrop(*PlayerController, EFSEquipmentSlot::LeftQuickSlot, Inventory->HasBackpack());
+	UpdateSlotBackdrop(*PlayerController, EFSEquipmentSlot::LeftHand, true);
+	UpdateSlotBackdrop(*PlayerController, EFSEquipmentSlot::Backpack, true);
+	UpdateSlotBackdrop(*PlayerController, EFSEquipmentSlot::RightHand, true);
+	UpdateSlotBackdrop(*PlayerController, EFSEquipmentSlot::RightQuickSlot, Inventory->HasBackpack());
 
 	UpdateCompass(*PlayerController);
 }
@@ -355,21 +388,13 @@ void AFSEquipmentDisplay::UpdateLetterbox(const AFSPlayerController& PlayerContr
 		return;
 	}
 
-	const FVector CameraLocation = Camera->GetCameraLocation();
 	const FQuat CameraRotation = Camera->GetCameraRotation().Quaternion();
 	const FVector Forward = CameraRotation.GetForwardVector();
 
 	// Where a point on the screen is on the plane the bars float on
-	const auto OnBarPlane = [&PlayerController, &CameraLocation, &Forward](float ScreenX, float ScreenY, FVector& OutPoint)
+	const auto OnBarPlane = [&PlayerController](float ScreenX, float ScreenY, FVector& OutPoint)
 	{
-		FVector Origin, Direction;
-		if (!PlayerController.DeprojectScreenPositionToWorld(ScreenX, ScreenY, Origin, Direction))
-		{
-			return false;
-		}
-
-		OutPoint = Origin + Direction * ((LetterboxDistance - FVector::DotProduct(Origin - CameraLocation, Forward)) / FVector::DotProduct(Direction, Forward));
-		return true;
+		return GetScreenPointAtDistance(PlayerController, FVector2D(ScreenX, ScreenY), LetterboxDistance, OutPoint);
 	};
 
 	// The plane mesh is 100 across with its face towards +Z, so it's turned to face the camera with +X up the screen
@@ -394,6 +419,59 @@ void AFSEquipmentDisplay::UpdateLetterbox(const AFSPlayerController& PlayerContr
 
 	PlaceBar(TopLetterboxBar, -LetterboxOverhang, BarHeight);
 	PlaceBar(BottomLetterboxBar, ViewportHeight - BarHeight, ViewportHeight + LetterboxOverhang);
+}
+
+bool AFSEquipmentDisplay::GetScreenPointAtDistance(const AFSPlayerController& PlayerController, const FVector2D& ScreenPoint, double Distance, FVector& OutPoint)
+{
+	const APlayerCameraManager* Camera = PlayerController.PlayerCameraManager;
+
+	FVector Origin, Direction;
+	if (!Camera || !PlayerController.DeprojectScreenPositionToWorld(ScreenPoint.X, ScreenPoint.Y, Origin, Direction))
+	{
+		return false;
+	}
+
+	const FVector Forward = Camera->GetCameraRotation().Vector();
+	const double Along = FVector::DotProduct(Direction, Forward);
+	if (Along <= UE_KINDA_SMALL_NUMBER)
+	{
+		return false;
+	}
+
+	OutPoint = Origin + Direction * ((Distance - FVector::DotProduct(Origin - Camera->GetCameraLocation(), Forward)) / Along);
+	return true;
+}
+
+void AFSEquipmentDisplay::UpdateSlotBackdrop(const AFSPlayerController& PlayerController, EFSEquipmentSlot Slot, bool bShown)
+{
+	UStaticMeshComponent* Backdrop = GetSlotBackdrop(Slot);
+	if (!Backdrop)
+	{
+		return;
+	}
+
+	int32 ViewportWidth = 0;
+	int32 ViewportHeight = 0;
+	PlayerController.GetViewportSize(ViewportWidth, ViewportHeight);
+
+	// The circle's middle and a point on its inside edge, where the HUD draws them
+	const FVector2D ScreenCentre = GetSlotCentre(FVector2D(ViewportWidth, ViewportHeight), Slot);
+	FVector Centre, Edge;
+	bShown = bShown && ViewportWidth > 0
+		&& GetScreenPointAtDistance(PlayerController, ScreenCentre, SlotBackdropDistance, Centre)
+		&& GetScreenPointAtDistance(PlayerController, ScreenCentre + FVector2D(SlotRadius, 0.0), SlotBackdropDistance, Edge);
+
+	Backdrop->SetVisibility(bShown);
+	if (!bShown)
+	{
+		return;
+	}
+
+	// The cylinder's axis points at the camera, and it's flattened along it
+	const FQuat CameraRotation = PlayerController.PlayerCameraManager->GetCameraRotation().Quaternion();
+	const FQuat FacingCamera = FRotationMatrix::MakeFromZX(-CameraRotation.GetForwardVector(), CameraRotation.GetUpVector()).ToQuat();
+	const double Diameter = FVector::Distance(Centre, Edge) * 2.0;
+	Backdrop->SetWorldTransform(FTransform(FacingCamera, Centre, FVector(Diameter / 100.0, Diameter / 100.0, 0.001)));
 }
 
 bool AFSEquipmentDisplay::GetSlotPlacement(const AFSPlayerController& PlayerController, EFSEquipmentSlot Slot, float ScreenRadius, FVector& OutCentre, double& OutRadius, FQuat& OutRotation) const

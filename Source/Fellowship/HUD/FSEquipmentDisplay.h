@@ -55,7 +55,7 @@ private:
 /**
  * The real meshes of what the player has equipped, floating just in front of the camera so that each lines up with its circle on the HUD.
  * They're part of the scene, so they're lit by whatever is around the camera and catch the light differently as it turns. The HUD draws the circles.
- * Also holds the letterbox's black bars, which float just behind the meshes so that the meshes stay in front of them.
+ * Also holds a dark disc filling each slot's circle and the letterbox's black bars, which float just behind the meshes so that the meshes stay in front of them.
  */
 UCLASS()
 class FELLOWSHIP_API AFSEquipmentDisplay : public AActor
@@ -100,6 +100,16 @@ public:
 	// How far in front of the camera the letterbox bars float: behind the meshes, so that they're drawn over the bars
 	static constexpr double LetterboxDistance = 30.0;
 
+	// How far in front of the camera the discs that darken the slots' circles float: behind the meshes, and in front of the letterbox
+	static constexpr double SlotBackdropDistance = 20.0;
+
+	// How dark the discs are, from 0 for clear to 1 for black. Being in the scene, they darken it before it's made ready for the screen, which makes
+	// a given opacity look much lighter than the same on the HUD's own boxes. This looks about as dark as their 0.6.
+	static constexpr float SlotBackdropDarkness = 0.85f;
+
+	// The disc darkening a slot's circle. The compass has none.
+	FORCEINLINE UStaticMeshComponent* GetSlotBackdrop(EFSEquipmentSlot Slot) const { return Slot < EFSEquipmentSlot::Compass ? SlotBackdrops[static_cast<int32>(Slot)].Get() : nullptr; }
+
 protected:
 	virtual void BeginPlay() override;
 
@@ -113,6 +123,12 @@ private:
 	// Sizes the bars to cover the top and bottom of what the camera sees right now
 	void UpdateLetterbox(const AFSPlayerController& PlayerController);
 
+	// Fills a slot's circle with its disc, where the HUD draws the circle, or hides the disc. It doesn't shake with the meshes, as the circle doesn't.
+	void UpdateSlotBackdrop(const AFSPlayerController& PlayerController, EFSEquipmentSlot Slot, bool bShown);
+
+	// Where a point on the screen is on a plane facing the camera this far in front of it. Returns false if it can't be worked out.
+	static bool GetScreenPointAtDistance(const AFSPlayerController& PlayerController, const FVector2D& ScreenPoint, double Distance, FVector& OutPoint);
+
 	UPROPERTY(VisibleAnywhere, Category = "Equipment")
 	TObjectPtr<UStaticMeshComponent> SlotMeshes[static_cast<int32>(EFSEquipmentSlot::Count)];
 
@@ -123,6 +139,9 @@ private:
 	// The half of the compass's needle that points south
 	UPROPERTY(VisibleAnywhere, Category = "Equipment")
 	TObjectPtr<UStaticMeshComponent> SouthNeedleMesh;
+
+	UPROPERTY(VisibleAnywhere, Category = "Equipment")
+	TObjectPtr<UStaticMeshComponent> SlotBackdrops[static_cast<int32>(EFSEquipmentSlot::Compass)];
 
 	UPROPERTY(VisibleAnywhere, Category = "Letterbox")
 	TObjectPtr<UStaticMeshComponent> TopLetterboxBar;

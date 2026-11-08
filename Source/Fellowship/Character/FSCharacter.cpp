@@ -94,7 +94,7 @@ void AFSCharacter::Tick(float DeltaTime)
 		SetActorRotation(LockOnTurnSpeed > 0.0f ? FMath::RInterpTo(GetActorRotation(), Facing, DeltaTime, LockOnTurnSpeed) : Facing);
 	}
 
-	// The camera swings round behind the character, then stays there at the tilt it had when targeting started.
+	// The camera swings round behind the character, then stays there at Targeting Camera Pitch.
 	// Locked on, it stays behind the character on the way to the enemy, and high enough to see the enemy past the character.
 	if (bTargeting && Controller)
 	{
@@ -568,10 +568,12 @@ void AFSCharacter::StartTargeting()
 
 	bTargeting = true;
 	TargetYaw = GetActorRotation().Yaw;
-	TargetPitch = Controller ? Controller->GetControlRotation().Pitch : 0.0f;
 
 	LockedEnemy = FindLockOnTarget();
 	bLockedOn = LockedEnemy.IsValid();
+
+	// A lock on starts from the camera's tilt and keeps it above the character. Without an enemy, the tilt is always the same.
+	TargetPitch = bLockedOn && Controller ? Controller->GetControlRotation().Pitch : TargetingCameraPitch;
 	if (bLockedOn)
 	{
 		// The aim starts where the camera is looking now, and follows the enemy from there

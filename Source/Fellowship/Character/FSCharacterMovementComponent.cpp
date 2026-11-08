@@ -47,9 +47,13 @@ UFSCharacterMovementComponent::UFSCharacterMovementComponent()
 	// Negative is unlimited, so the easing alone controls turn speed; set a positive yaw to cap it
 	RotationRate = FRotator(0.0f, -1.0f, 0.0f);
 
-	// A jump mostly commits to the direction it left the ground in
-	AirControl = 0.025f;
+	// A jump commits to its arc as it leaves the ground, so nothing steers it after. See DoJump.
+	AirControl = 0.0f;
 	AirControlBoostMultiplier = 1.0f;
+
+	// Height is JumpZVelocity^2 / (2 * jump gravity) and time in the air 2 * JumpZVelocity / jump gravity, where jump gravity is normal gravity
+	// times Jump Gravity Scale. Raising this by the square root of the scale keeps the height while shortening the time and distance by it.
+	JumpZVelocity = 594.0f;
 }
 
 float UFSCharacterMovementComponent::GetMaxAcceleration() const
@@ -70,6 +74,103 @@ float UFSCharacterMovementComponent::GetMaxSpeed() const
 float UFSCharacterMovementComponent::GetMaxBrakingDeceleration() const
 {
 	return IsClimbing() ? ClimbBrakingDeceleration : Super::GetMaxBrakingDeceleration();
+}
+
+void UFSCharacterMovementComponent::ControlledCharacterMove(const FVector& InputVector, float DeltaSeconds)
+{
+	// The acceleration still holds last frame's input when the jump is handled, which would launch a jump from a standstill with no speed
+	JumpInputDirection = ConstrainInputAcceleration(InputVector).GetSafeNormal2D();
+
+	Super::ControlledCharacterMove(InputVector, DeltaSeconds);
+}
+
+bool UFSCharacterMovementComponent::DoJump(bool bReplayingMoves, float DeltaTime)
+{
+	// Read before the jump, while it's still walking
+	const FVector InputDirection = JumpInputDirection;
+	const float LaunchSpeed = MaxWalkSpeed;
+
+	if (!Super::DoJump(bReplayingMoves, DeltaTime))
+	{
+		return false;
+	}
+
+	// Set after the jump starts the fall, which clears it
+	bJumpArc = true;
+
+	FVector Lateral = InputDirection * LaunchSpeed;
+
+	// A jump can't launch into something the character is already up against. Launched into an overhang, the collision would turn the jump
+	// down the face and it would land straight away, before it could grab on. Only the part of the launch that points into it goes.
+	if (!Lateral.IsZero())
+	{
+		const UCapsuleComponent* Capsule = CharacterOwner->GetCapsuleComponent();
+		const FVector Start = UpdatedComponent->GetComponentLocation();
+
+		FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(JumpLaunch), false, CharacterOwner);
+		FCollisionResponseParams ResponseParams;
+		UpdatedPrimitive->InitSweepCollisionParams(QueryParams, ResponseParams);
+
+		FHitResult Hit;
+		if (GetWorld()->SweepSingleByChannel(Hit, Start, Start + InputDirection * JumpLaunchClearance, UpdatedComponent->GetComponentQuat(),
+			UpdatedComponent->GetCollisionObjectType(), Capsule->GetCollisionShape(), QueryParams, ResponseParams))
+		{
+			const FVector Into = Hit.ImpactNormal.GetSafeNormal2D();
+			const double IntoSpeed = FVector::DotProduct(Lateral, Into);
+			if (IntoSpeed < 0.0)
+			{
+				Lateral -= Into * IntoSpeed;
+			}
+		}
+	}
+
+	Velocity.X = Lateral.X;
+	Velocity.Y = Lateral.Y;
+	return true;
+}
+
+float UFSCharacterMovementComponent::GetGravityZ() const
+{
+	return GetGravityZAtAirTime(AirTime);
+}
+
+float UFSCharacterMovementComponent::GetGravityZAtAirTime(float InAirTime) const
+{
+	const float Gravity = Super::GetGravityZ();
+	return bJumpArc && IsFalling() && InAirTime < GetJumpArcDuration() ? Gravity * JumpGravityScale : Gravity;
+}
+
+float UFSCharacterMovementComponent::GetJumpArcDuration() const
+{
+	const float JumpGravity = -Super::GetGravityZ() * JumpGravityScale;
+	return JumpGravity > 0.0f ? 2.0f * JumpZVelocity / JumpGravity : 0.0f;
+}
+
+void UFSCharacterMovementComponent::CalcVelocity(float DeltaTime, float Friction, bool bFluid, float BrakingDeceleration)
+{
+	Super::CalcVelocity(DeltaTime, Friction, bFluid, BrakingDeceleration);
+
+	if (IsFalling() && DeltaTime > 0.0f)
+	{
+		const float Kept = GetFallLateralSpeedKept(AirTime, AirTime + DeltaTime);
+		AirTime += DeltaTime;
+
+		// Falling calls this with the vertical speed set aside, but keeping Z as it is is safe either way
+		Velocity.X *= Kept;
+		Velocity.Y *= Kept;
+	}
+}
+
+float UFSCharacterMovementComponent::GetFallLateralSpeedKept(float FromAirTime, float ToAirTime) const
+{
+	// The drain grows in a straight line from the delay, so the total drained is the area under it: Rate * (t - Delay)^2 / 2
+	const auto Drained = [this](float Time)
+	{
+		const float PastDelay = FMath::Max(0.0f, Time - FallLateralFalloffDelay);
+		return FallLateralFalloffRate * PastDelay * PastDelay * 0.5f;
+	};
+
+	return FMath::Exp(-(Drained(ToAirTime) - Drained(FromAirTime)));
 }
 
 bool UFSCharacterMovementComponent::IsClimbing() const
@@ -304,6 +405,13 @@ void UFSCharacterMovementComponent::OnMovementModeChanged(EMovementMode Previous
 			bInClimbCorner = false;
 			bOnClimbLedgePath = false;
 		}
+	}
+
+	// Each fall starts its falloff afresh, and is a jump only if DoJump says so after this
+	if (IsFalling() && PreviousMovementMode != MOVE_Falling)
+	{
+		AirTime = 0.0f;
+		bJumpArc = false;
 	}
 
 	Super::OnMovementModeChanged(PreviousMovementMode, PreviousCustomMode);
@@ -1089,7 +1197,11 @@ void UFSCharacterMovementComponent::AppendPredictedSamples(float DeltaTime)
 
 			if (bFalling)
 			{
-				VerticalSpeed += GetGravityZ() * StepTime;
+				// Mirrors CalcVelocity's falloff
+				const float StepStart = AirTime + (Step - 1) * StepTime;
+				LateralVelocity *= GetFallLateralSpeedKept(StepStart, StepStart + StepTime);
+
+				VerticalSpeed += GetGravityZAtAirTime(StepStart) * StepTime;
 			}
 
 			const FVector NextLocation = Location + (LateralVelocity + FVector::UpVector * VerticalSpeed) * StepTime;

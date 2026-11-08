@@ -152,6 +152,25 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Movement: Climbing")
 	bool bDrawDebugClimb = true;
 
+	// How much stronger gravity is during a jump's own arc, up until it would land on flat ground. Falls, and the rest of a jump that carries on over a drop,
+	// have normal gravity. Stronger gravity makes a jump quicker and shorter: with Jump Z Velocity raised by its square root, the height stays the same
+	// while the time in the air and the distance both shrink by that square root.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Movement: Jumping", meta = (ClampMin = "0.01"))
+	float JumpGravityScale = 3.0f;
+
+	// How close something has to be the way a jump launches for the jump not to launch into it
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Movement: Jumping", meta = (ClampMin = "0.0", ForceUnits = "cm"))
+	float JumpLaunchClearance = 10.0f;
+
+	// How long the character can be in the air before falling starts to drain its sideways speed. About a full jump, so that a jump carries its whole way.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Movement: Jumping", meta = (ClampMin = "0.0", ForceUnits = "s"))
+	float FallLateralFalloffDelay = 0.6f;
+
+	// How quickly falling drains sideways speed after Fall Lateral Falloff Delay. The drain grows the longer the fall lasts, so long falls carry
+	// much less distance: after a further second, speed is down to exp(-Rate / 2) of what it was. 0 keeps all of it.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Movement: Jumping", meta = (ClampMin = "0.0"))
+	float FallLateralFalloffRate = 4.0f;
+
 	// Fastest the character can turn while in the air. 0 keeps it facing the way it left the ground.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Movement: Jumping", meta = (ClampMin = "0.0", UIMin = "0.0", UIMax = "360.0", ForceUnits = "deg/s"))
 	float AirMaxTurnRate = 90.0f;
@@ -169,6 +188,21 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Character Movement: Climbing")
 	bool IsClimbing() const;
+
+	// How long the character has been falling, or 0 when it isn't
+	float GetAirTime() const { return IsFalling() ? AirTime : 0.0f; }
+
+	// Stronger during a jump's own arc. See Jump Gravity Scale.
+	virtual float GetGravityZ() const override;
+
+	// The gravity the character would have after falling for this long. Lets the trajectory prediction follow a jump's arc.
+	float GetGravityZAtAirTime(float InAirTime) const;
+
+	// How long a jump's own arc lasts: until it would land on flat ground, with its stronger gravity
+	float GetJumpArcDuration() const;
+
+	// What's left of sideways speed after falling from FromAirTime to ToAirTime, from 1 for all of it. See Fall Lateral Falloff Rate.
+	float GetFallLateralSpeedKept(float FromAirTime, float ToAirTime) const;
 
 	// Whether the character is on its path up and over a ledge. It counts as climbing until it reaches the top.
 	UFUNCTION(BlueprintPure, Category = "Character Movement: Climbing")
@@ -221,6 +255,15 @@ public:
 protected:
 	virtual FRotator ComputeOrientToMovementRotation(const FRotator& CurrentRotation, float DeltaTime, FRotator& DeltaRotation) const override;
 	virtual void OnMovementModeChanged(EMovementMode PreviousMovementMode, uint8 PreviousCustomMode) override;
+
+	// A jump's arc is fixed as it leaves the ground: straight up with no input, or at full walking speed the way the input points
+	virtual bool DoJump(bool bReplayingMoves, float DeltaTime) override;
+
+	// Notes this frame's input before the engine handles a jump, which it does before turning the input into acceleration
+	virtual void ControlledCharacterMove(const FVector& InputVector, float DeltaSeconds) override;
+
+	// Falling also drains sideways speed, more the longer the fall lasts
+	virtual void CalcVelocity(float DeltaTime, float Friction, bool bFluid, float BrakingDeceleration) override;
 	virtual void UpdateCharacterStateBeforeMovement(float DeltaSeconds) override;
 	virtual void PhysCustom(float DeltaTime, int32 Iterations) override;
 	virtual void PhysicsRotation(float DeltaTime) override;
@@ -375,6 +418,15 @@ private:
 
 	// Whether the feet have been far enough from the floor since grabbing on for reaching it to climb off
 	bool bClimbDismountArmed = false;
+
+	// How long the current fall has lasted
+	float AirTime = 0.0f;
+
+	// The way this frame's input points along the ground, or zero with no input, for a jump to launch in
+	FVector JumpInputDirection = FVector::ZeroVector;
+
+	// Whether the current fall started with a jump, which has stronger gravity for its own arc
+	bool bJumpArc = false;
 
 	// The current airborne stretch, as drawn by DrawDebugJump
 	bool bDebugAirborne = false;

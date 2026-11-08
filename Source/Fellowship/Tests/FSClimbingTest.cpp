@@ -1258,16 +1258,17 @@ bool FFSAirMovementTest::RunTest(const FString& Parameters)
 {
 	FClimbingTestWorld Test;
 
+	// Takes off with no input, then holds right in the air
 	Test.Character->Jump();
-	Test.Step(0.5f, FVector::RightVector);
+	Test.Step(TickTime, FVector::ZeroVector);
 	Test.Character->StopJumping();
+	Test.Step(0.2f, FVector::RightVector);
 
 	if (TestTrue(TEXT("In the air"), Test.Movement->IsFalling()))
 	{
-		const double ExpectedYaw = 0.5 * Test.Movement->AirMaxTurnRate;
+		const double ExpectedYaw = 0.2 * Test.Movement->AirMaxTurnRate;
 		TestNearlyEqual(TEXT("Turning is capped in the air"), static_cast<double>(FRotator::NormalizeAxis(Test.Character->GetActorRotation().Yaw)), ExpectedYaw, 5.0);
-		TestTrue(TEXT("Input still moves the character a little"), Test.Location().Y > 1.0);
-		TestTrue(TEXT("Input barely moves the character"), Test.Location().Y < 10.0);
+		TestTrue(TEXT("Input in the air doesn't steer the jump"), FMath::Abs(Test.Location().Y) < 1.0);
 	}
 
 	// Lands, then turns and moves freely again
@@ -1277,6 +1278,115 @@ bool FFSAirMovementTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Back on the ground"), Test.Movement->IsMovingOnGround());
 	TestTrue(TEXT("Turning is free on the ground"), FMath::IsNearlyEqual(FRotator::NormalizeAxis(Test.Character->GetActorRotation().Yaw), 90.0, 5.0));
 	TestTrue(TEXT("Movement is free on the ground"), Test.Location().Y > LandedY + 50.0);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSJumpArcTest, "Fellowship.Movement.JumpsHaveAFixedArc", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FFSJumpArcTest::RunTest(const FString& Parameters)
+{
+	FClimbingTestWorld Test;
+	const double WalkSpeed = Test.Movement->MaxWalkSpeed;
+	const double Gravity = -Test.Movement->GetGravityZ();
+	const double JumpGravity = Gravity * Test.Movement->JumpGravityScale;
+	const double JumpSpeed = Test.Movement->JumpZVelocity;
+
+	// What the jump speed and its gravity make of a jump on flat ground, whatever they're tuned to
+	const double ExpectedHeight = JumpSpeed * JumpSpeed / (2.0 * JumpGravity);
+	const double ExpectedAirTime = 2.0 * JumpSpeed / JumpGravity;
+	TestTrue(TEXT("A jump has stronger gravity than a fall"), Test.Movement->JumpGravityScale > 1.0f);
+	TestNearlyEqual(TEXT("Its arc lasts as long as the stronger gravity says"), static_cast<double>(Test.Movement->GetJumpArcDuration()), ExpectedAirTime, 0.001);
+
+	// From standing, holding forward as it takes off
+	const FVector Start = Test.Location();
+	Test.Character->Jump();
+	Test.Step(TickTime, FVector::ForwardVector);
+	Test.Character->StopJumping();
+	TestTrue(TEXT("Jumping with input takes off"), Test.Movement->IsFalling());
+	TestNearlyEqual(TEXT("At full walking speed the way the input points, from a standstill"), Test.Movement->Velocity.X, WalkSpeed, 1.0);
+
+	TestNearlyEqual(TEXT("With the jump's stronger gravity"), static_cast<double>(-Test.Movement->GetGravityZ()), JumpGravity, 0.01);
+
+	double Apex = Start.Z;
+	double SpeedBeforeLanding = 0.0;
+	double AirTime = TickTime;
+	for (float Elapsed = 0.0f; Elapsed < 2.0f && Test.Movement->IsFalling(); Elapsed += TickTime)
+	{
+		SpeedBeforeLanding = Test.Movement->Velocity.Size2D();
+
+		// Letting go of the input changes nothing in the air
+		Test.Step(TickTime, FVector::ZeroVector);
+		Apex = FMath::Max(Apex, Test.Location().Z);
+		AirTime += Test.Movement->IsFalling() ? TickTime : 0.0f;
+	}
+
+	TestTrue(TEXT("It lands"), Test.Movement->IsMovingOnGround());
+	TestNearlyEqual(TEXT("Having risen as high as the jump speed and its gravity say"), Apex - Start.Z, ExpectedHeight, 5.0);
+	TestNearlyEqual(TEXT("For as long as they say"), AirTime, ExpectedAirTime, 0.03);
+	TestNearlyEqual(TEXT("Covering walking speed for that long"), Test.Location().X - Start.X, WalkSpeed * ExpectedAirTime, 15.0);
+	TestNearlyEqual(TEXT("And kept its speed all the way, a normal jump being within the falloff's delay"), SpeedBeforeLanding, WalkSpeed, WalkSpeed * 0.02);
+	TestNearlyEqual(TEXT("Back on the ground, gravity is normal again"), static_cast<double>(-Test.Movement->GetGravityZ()), Gravity, 0.01);
+
+	// Running, then jumping with no input
+	Test.Step(1.0f, FVector::ForwardVector);
+	TestTrue(TEXT("Running first"), Test.Movement->Velocity.Size2D() > WalkSpeed * 0.5);
+	Test.Character->Jump();
+	Test.Step(TickTime, FVector::ZeroVector);
+	Test.Character->StopJumping();
+	TestTrue(TEXT("Jumping with no input takes off"), Test.Movement->IsFalling());
+	TestTrue(TEXT("Straight up, whatever speed it had"), Test.Movement->Velocity.Size2D() < 1.0);
+
+	// Past where it would have landed on flat ground, as over a drop, gravity is normal
+	TestNearlyEqual(TEXT("Over a drop, after the arc, gravity is normal"), static_cast<double>(-Test.Movement->GetGravityZAtAirTime(Test.Movement->GetJumpArcDuration() + 0.1f)), Gravity, 0.01);
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSFallFalloffTest, "Fellowship.Movement.LongFallsLoseSidewaysSpeed", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FFSFallFalloffTest::RunTest(const FString& Parameters)
+{
+	FClimbingTestWorld Test;
+	UFSCharacterMovementComponent* Movement = Test.Movement;
+
+	TestNearlyEqual(TEXT("Nothing is lost within the delay"), Movement->GetFallLateralSpeedKept(0.0f, Movement->FallLateralFalloffDelay), 1.0f, 0.0001f);
+	const float AfterASecond = Movement->GetFallLateralSpeedKept(0.0f, Movement->FallLateralFalloffDelay + 1.0f);
+	TestNearlyEqual(TEXT("A second past it, what's kept is exp(-Rate / 2)"), AfterASecond, FMath::Exp(-Movement->FallLateralFalloffRate * 0.5f), 0.001f);
+	TestTrue(TEXT("Each further second loses more than the one before"),
+		Movement->GetFallLateralSpeedKept(Movement->FallLateralFalloffDelay + 1.0f, Movement->FallLateralFalloffDelay + 2.0f) < AfterASecond);
+
+	// Falling from high up at full speed
+	const float NormalGravity = Movement->GetGravityZ();
+	Test.Character->SetActorLocation(FVector(0.0, 0.0, 4000.0));
+	Movement->SetMovementMode(MOVE_Falling);
+	Movement->Velocity = FVector(Movement->MaxWalkSpeed, 0.0, 0.0);
+	TestNearlyEqual(TEXT("A fall that isn't a jump has normal gravity"), Movement->GetGravityZ(), NormalGravity, 0.01f);
+
+	Test.Step(Movement->FallLateralFalloffDelay - 0.05f, FVector::ZeroVector);
+	TestTrue(TEXT("Still falling"), Movement->IsFalling());
+	TestNearlyEqual(TEXT("Keeping its speed through the delay"), Movement->Velocity.Size2D(), static_cast<double>(Movement->MaxWalkSpeed), 2.0);
+
+	Test.Step(1.05f, FVector::ZeroVector);
+	TestTrue(TEXT("Still falling a second later"), Movement->IsFalling());
+	TestNearlyEqual(TEXT("By then it's lost most of it"), Movement->Velocity.Size2D(), Movement->MaxWalkSpeed * static_cast<double>(AfterASecond), Movement->MaxWalkSpeed * 0.03);
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSJumpIntoWallTest, "Fellowship.Movement.JumpsDontLaunchIntoWalls", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FFSJumpIntoWallTest::RunTest(const FString& Parameters)
+{
+	FClimbingTestWorld Test;
+	Test.AddWall();
+
+	// Up against the wall, holding into it and a little to the side
+	Test.Step(1.0f, FVector::ForwardVector);
+	const FVector Input = FVector(1.0, 0.5, 0.0).GetSafeNormal();
+	Test.Character->Jump();
+	Test.Step(TickTime, Input);
+	Test.Character->StopJumping();
+
+	TestTrue(TEXT("The jump takes off"), Test.Movement->IsFalling());
+	TestTrue(TEXT("Without launching into the wall"), Test.Movement->Velocity.X < 1.0);
+	TestNearlyEqual(TEXT("But still along it, at the part of full speed that points that way"), Test.Movement->Velocity.Y, Input.Y * Test.Movement->MaxWalkSpeed, 2.0);
 	return true;
 }
 
