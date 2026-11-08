@@ -22,7 +22,7 @@ namespace
 	constexpr double SlotSpacing = 120.0;
 
 	// From the top of the screen to the centre of the circles, which leaves room for names above them
-	constexpr double SlotHeight = 83.0;
+	constexpr double SlotRowHeight = 83.0;
 
 	// How far in front of the camera the meshes float. Just past the near clipping plane and the 12cm the camera boom keeps from walls, so nothing comes between them.
 	constexpr double MeshDistance = 14.0;
@@ -63,7 +63,7 @@ namespace
 	constexpr float WobbleChannelGap = 11.73f;
 
 	// From the right and bottom edges of the screen to the space the compass and lantern share, the same as the event log's distance from its corner
-	constexpr double CornerMargin = 20.0;
+	constexpr double InstrumentMargin = 20.0;
 
 	// How far the lantern is turned about its height, so that a corner of it faces the camera
 	constexpr double LanternTurn = 15.0;
@@ -309,20 +309,20 @@ FVector2D AFSEquipmentDisplay::GetSlotCentre(const FVector2D& ViewportSize, EFSE
 {
 	// The space from the end of the stat bars to the right edge is split evenly, the compass in the middle of the left half and the lantern of the right
 	const double SpaceLeft = AFSHUD::GetStatBarsRight(ViewportSize.X);
-	const double HalfSpace = (ViewportSize.X - CornerMargin - SpaceLeft) * 0.5;
+	const double HalfSpace = (ViewportSize.X - InstrumentMargin - SpaceLeft) * 0.5;
 
 	if (Slot == EFSEquipmentSlot::Lantern)
 	{
-		return FVector2D(SpaceLeft + HalfSpace * 1.5, ViewportSize.Y - CornerMargin - LanternHeight * 0.5);
+		return FVector2D(SpaceLeft + HalfSpace * 1.5, ViewportSize.Y - InstrumentMargin - LanternHeight * 0.5);
 	}
 
 	if (Slot == EFSEquipmentSlot::Compass)
 	{
-		return FVector2D(SpaceLeft + HalfSpace * 0.5, ViewportSize.Y - CornerMargin - CompassRadius);
+		return FVector2D(SpaceLeft + HalfSpace * 0.5, ViewportSize.Y - InstrumentMargin - CompassRadius);
 	}
 
 	const double FromMiddle = static_cast<int32>(Slot) - static_cast<int32>(EFSEquipmentSlot::Backpack);
-	return FVector2D(ViewportSize.X * 0.5 + FromMiddle * SlotSpacing, SlotHeight);
+	return FVector2D(ViewportSize.X * 0.5 + FromMiddle * SlotSpacing, SlotRowHeight);
 }
 
 FTransform AFSEquipmentDisplay::GetMeshTransform(const UStaticMesh& Mesh, const FTransform& MeshTransform, const FQuat& CameraRotation, const FVector& Centre, double Radius, bool bFillCircle)
