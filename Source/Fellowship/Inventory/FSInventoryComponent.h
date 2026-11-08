@@ -126,7 +126,7 @@ public:
 	UFSInventoryComponent();
 
 	// The width and height of the grid that's there while organizing
-	static constexpr int32 OrganizeGridSize = 12;
+	static constexpr int32 OrganizeGridSize = 10;
 
 	// What the player sees a hand's slot called
 	static FText GetHandSlotName(EFSHand Hand);

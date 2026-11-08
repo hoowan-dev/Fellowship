@@ -324,11 +324,13 @@ void AFSCharacter::Move(const FInputActionValue& Value)
 	}
 
 	// Move relative to where the camera is facing, ignoring pitch. While targeting, that's where the camera is swinging to, so that strafing doesn't drift as it swings.
-	const FRotator YawRotation(0.0f, bTargeting ? TargetYaw : GetControlRotation().Yaw, 0.0f);
-	const FRotationMatrix YawMatrix(YawRotation);
+	// With the inventory open, the view looks the way the character faces, and it walks slowly. A smaller input is a slower walk.
+	const double Yaw = bInventoryOpen ? GetActorRotation().Yaw : bTargeting ? TargetYaw : GetControlRotation().Yaw;
+	const FVector2D Scaled = bInventoryOpen ? Input.GetClampedToMaxSize(1.0) * InventoryMoveSpeedScale : Input;
+	const FRotationMatrix YawMatrix(FRotator(0.0, Yaw, 0.0));
 
-	AddMovementInput(YawMatrix.GetUnitAxis(EAxis::X), Input.Y);
-	AddMovementInput(YawMatrix.GetUnitAxis(EAxis::Y), Input.X);
+	AddMovementInput(YawMatrix.GetUnitAxis(EAxis::X), Scaled.Y);
+	AddMovementInput(YawMatrix.GetUnitAxis(EAxis::Y), Scaled.X);
 }
 
 void AFSCharacter::Look(const FInputActionValue& Value)
@@ -363,6 +365,14 @@ void AFSCharacter::StartUsingItem(EFSItemUseSlot Slot)
 void AFSCharacter::StopUsingItem(EFSItemUseSlot Slot)
 {
 	ItemUse->StopUsing(Slot);
+}
+
+void AFSCharacter::SetInventoryOpen(bool bOpen)
+{
+	bInventoryOpen = bOpen;
+
+	// Turning would swing the inventory, which is attached to the character, around the player's view
+	GetCharacterMovement()->bOrientRotationToMovement = !bInventoryOpen && !bTargeting;
 }
 
 void AFSCharacter::HandleTargetPressed()

@@ -7,6 +7,8 @@
 #include "Camera/CameraComponent.h"
 #include "Components/InstancedStaticMeshComponent.h"
 #include "Components/PoseableMeshComponent.h"
+#include "GameFramework/CharacterMovementComponent.h"
+#include "Components/PointLightComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/Engine.h"
@@ -181,17 +183,21 @@ bool FFSInventoryRigHandSlotsTest::RunTest(const FString& Parameters)
 	HandSlots->GetInstanceTransform(AFSInventoryRig::LeftHandSlot, LeftSlot);
 	HandSlots->GetInstanceTransform(AFSInventoryRig::RightHandSlot, RightSlot);
 
-	TestTrue(TEXT("Larger than a grid cell"), LeftSlot.GetScale3D().X > GridCell.GetScale3D().X);
+	TestTrue(TEXT("Larger than a grid cell"), LeftSlot.GetScale3D().X > GridCell.GetScale3D().X && LeftSlot.GetScale3D().Y > GridCell.GetScale3D().Y);
 
-	// The plane mesh is 100cm across
-	const double HalfSlot = LeftSlot.GetScale3D().X * 50.0;
-	TestTrue(TEXT("The left hand's cell is left of the grid"), LeftSlot.GetLocation().Y + HalfSlot < -HalfGrid);
-	TestTrue(TEXT("The right hand's cell is right of the grid"), RightSlot.GetLocation().Y - HalfSlot > HalfGrid);
+	// The plane mesh is 100cm across, with its X axis up the screen and its Y axis across it
+	const FVector2D SlotSize = Test.Rig->GetSideSlotSize();
+	TestNearlyEqual(TEXT("As wide as a side slot"), LeftSlot.GetScale3D().Y * 100.0, SlotSize.X, 0.001);
+	TestNearlyEqual(TEXT("And as tall"), LeftSlot.GetScale3D().X * 100.0, SlotSize.Y, 0.001);
+	TestTrue(TEXT("The left hand's cell is left of the grid"), LeftSlot.GetLocation().Y + SlotSize.X * 0.5 < -HalfGrid);
+	TestTrue(TEXT("The right hand's cell is right of the grid"), RightSlot.GetLocation().Y - SlotSize.X * 0.5 > HalfGrid);
+	TestTrue(TEXT("They're in the bottom half, beside the grid"), LeftSlot.GetLocation().Z < 0.0 && LeftSlot.GetLocation().Z - SlotSize.Y * 0.5 >= -HalfGrid - 0.001);
+	TestEqual(TEXT("Level with each other"), LeftSlot.GetLocation().Z, RightSlot.GetLocation().Z);
 
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSInventoryRigQuickSlotsTest, "Fellowship.Inventory.Rig.PutsTwoCellsAboveTheGrid", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSInventoryRigQuickSlotsTest, "Fellowship.Inventory.Rig.StacksTheQuickSlotsAboveTheHands", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FFSInventoryRigQuickSlotsTest::RunTest(const FString& Parameters)
 {
@@ -207,21 +213,23 @@ bool FFSInventoryRigQuickSlotsTest::RunTest(const FString& Parameters)
 	QuickSlots->GetInstanceTransform(AFSInventoryRig::LeftQuickSlot, LeftSlot);
 	QuickSlots->GetInstanceTransform(AFSInventoryRig::RightQuickSlot, RightSlot);
 
-	// The plane mesh is 100cm across
-	const double HalfSlot = LeftSlot.GetScale3D().X * 50.0;
-	TestTrue(TEXT("The left slot is above the grid"), LeftSlot.GetLocation().Z - HalfSlot > HalfGrid);
-	TestEqual(TEXT("The slots are level"), LeftSlot.GetLocation().Z, RightSlot.GetLocation().Z);
-	TestTrue(TEXT("They don't overlap"), RightSlot.GetLocation().Y - LeftSlot.GetLocation().Y > HalfSlot * 2.0);
-	TestEqual(TEXT("They're centred over the grid"), LeftSlot.GetLocation().Y, -RightSlot.GetLocation().Y);
+	FTransform LeftHand;
+	FTransform RightHand;
+	Test.Rig->GetHandSlots()->GetInstanceTransform(AFSInventoryRig::LeftHandSlot, LeftHand);
+	Test.Rig->GetHandSlots()->GetInstanceTransform(AFSInventoryRig::RightHandSlot, RightHand);
 
-	// 90 degrees across a 16:9 screen, with the grid 40cm away
-	constexpr double HalfScreenHeight = 22.5;
-	TestTrue(TEXT("They're on a 16:9 screen"), LeftSlot.GetLocation().Z + HalfSlot < HalfScreenHeight);
+	const FVector2D SlotSize = Test.Rig->GetSideSlotSize();
+	TestNearlyEqual(TEXT("The same size as a hand's cell"), LeftSlot.GetScale3D().X * 100.0, SlotSize.Y, 0.001);
+	TestEqual(TEXT("The left slot is in the left hand's column"), LeftSlot.GetLocation().Y, LeftHand.GetLocation().Y);
+	TestEqual(TEXT("And the right in the right's"), RightSlot.GetLocation().Y, RightHand.GetLocation().Y);
+	TestTrue(TEXT("Above the hand, with a gap for its name"), LeftSlot.GetLocation().Z - SlotSize.Y * 0.5 > LeftHand.GetLocation().Z + SlotSize.Y * 0.5);
+	TestTrue(TEXT("Beside the grid, not above it"), LeftSlot.GetLocation().Z + SlotSize.Y * 0.5 <= HalfGrid + 0.001);
+	TestEqual(TEXT("The slots are level"), LeftSlot.GetLocation().Z, RightSlot.GetLocation().Z);
 
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSInventoryRigButtonsTest, "Fellowship.Inventory.Rig.PutsTheButtonsBelowTheGrid", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSInventoryRigButtonsTest, "Fellowship.Inventory.Rig.PutsTheButtonsAroundTheGrid", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
 bool FFSInventoryRigButtonsTest::RunTest(const FString& Parameters)
 {
@@ -239,22 +247,40 @@ bool FFSInventoryRigButtonsTest::RunTest(const FString& Parameters)
 	Buttons->GetInstanceTransform(AFSInventoryRig::UseItemButton, Use);
 	Buttons->GetInstanceTransform(AFSInventoryRig::OrganizeBackpackButton, Organize);
 
-	// The plane mesh is 100cm across, and its X axis runs up the screen
-	const double HalfHeight = Use.GetScale3D().X * 50.0;
-	const double HalfWidth = Use.GetScale3D().Y * 50.0;
-	TestTrue(TEXT("They're below the grid"), Use.GetLocation().Z + HalfHeight < -HalfGrid);
-	TestEqual(TEXT("Use Item is centred under the grid"), Use.GetLocation().Y, 0.0);
-	TestTrue(TEXT("They're wider than they're tall"), HalfWidth > HalfHeight);
-	TestTrue(TEXT("Drop Backpack is on the left, clear of Use Item"), Drop.GetLocation().Y + HalfWidth < Use.GetLocation().Y - HalfWidth);
-	TestTrue(TEXT("Organize Backpack is on the right, clear of Use Item"), Organize.GetLocation().Y - HalfWidth > Use.GetLocation().Y + HalfWidth);
-	TestEqual(TEXT("The row is centred"), Drop.GetLocation().Y, -Organize.GetLocation().Y);
-	TestEqual(TEXT("And level"), Drop.GetLocation().Z, Organize.GetLocation().Z);
+	// The plane mesh is 100cm across, and its X axis runs up the screen. Returns a button's half width and half height.
+	const auto HalfSize = [](const FTransform& Button) { return FVector2D(Button.GetScale3D().Y * 50.0, Button.GetScale3D().X * 50.0); };
+
+	TestTrue(TEXT("Use Item is below the grid"), Use.GetLocation().Z + HalfSize(Use).Y < -HalfGrid);
+	TestTrue(TEXT("Drop Backpack is above it"), Drop.GetLocation().Z - HalfSize(Drop).Y > HalfGrid);
+	TestEqual(TEXT("Use Item is centred on the grid"), Use.GetLocation().Y, 0.0);
+	TestEqual(TEXT("So is Drop Backpack"), Drop.GetLocation().Y, 0.0);
+	TestEqual(TEXT("Use Item is as wide as the grid"), HalfSize(Use).X, HalfGrid, 0.001);
+	TestEqual(TEXT("So is Drop Backpack"), HalfSize(Drop).X, HalfGrid, 0.001);
+	TestEqual(TEXT("They're as thick as each other"), HalfSize(Drop).Y, HalfSize(Use).Y, 0.001);
+
+	const FVector2D SlotSize = Test.Rig->GetSideSlotSize();
+	const FVector2D QuickSlot = Test.Rig->GetQuickSlotCentre(AFSInventoryRig::RightQuickSlot);
+	const FVector2D Hand = Test.Rig->GetHandSlotCentre(AFSInventoryRig::RightHandSlot);
+	TestTrue(TEXT("Organize Backpack is right of the right column"), Organize.GetLocation().Y - HalfSize(Organize).X > Hand.X + SlotSize.X * 0.5);
+	TestEqual(TEXT("Its top is level with the quick slot's"), Organize.GetLocation().Z + HalfSize(Organize).Y, QuickSlot.Y + SlotSize.Y * 0.5, 0.001);
+	TestEqual(TEXT("And its bottom with the hand's"), Organize.GetLocation().Z - HalfSize(Organize).Y, Hand.Y - SlotSize.Y * 0.5, 0.001);
+	TestEqual(TEXT("It's as thick as the others are tall"), HalfSize(Organize).X, HalfSize(Use).Y, 0.001);
+	TestTrue(TEXT("It stands upright"), AFSInventoryRig::IsButtonUpright(AFSInventoryRig::OrganizeBackpackButton) && !AFSInventoryRig::IsButtonUpright(AFSInventoryRig::UseItemButton));
 
 	// 90 degrees across a 16:9 screen, with the grid 40cm away
 	constexpr double HalfScreenWidth = 40.0;
 	constexpr double HalfScreenHeight = 22.5;
-	TestTrue(TEXT("They're on a 16:9 screen"), Use.GetLocation().Z - HalfHeight > -HalfScreenHeight);
-	TestTrue(TEXT("All the way across"), Organize.GetLocation().Y + HalfWidth < HalfScreenWidth);
+	TestTrue(TEXT("They're on a 16:9 screen"), Use.GetLocation().Z - HalfSize(Use).Y > -HalfScreenHeight && Drop.GetLocation().Z + HalfSize(Drop).Y < HalfScreenHeight);
+	TestTrue(TEXT("All the way across"), Organize.GetLocation().Y + HalfSize(Organize).X < HalfScreenWidth);
+
+	for (int32 Button = 0; Button < AFSInventoryRig::ButtonCount; ++Button)
+	{
+		FTransform Placed;
+		Buttons->GetInstanceTransform(Button, Placed);
+		const FVector2D Centre = Test.Rig->GetButtonCentre(Button);
+		TestTrue(TEXT("Each is placed where its centre is"), FVector2D(Placed.GetLocation().Y, Placed.GetLocation().Z).Equals(Centre, 0.001));
+		TestTrue(TEXT("At its size"), (HalfSize(Placed) * 2.0).Equals(Test.Rig->GetButtonSize(Button), 0.001));
+	}
 
 	const FVector Origin = Test.Rig->GetActorLocation();
 	const auto ButtonAt = [&Test, &Origin](const FVector2D& Point)
@@ -270,8 +296,11 @@ bool FFSInventoryRigButtonsTest::RunTest(const FString& Parameters)
 	}
 
 	const FVector2D Centre = Test.Rig->GetButtonCentre(AFSInventoryRig::UseItemButton);
-	TestEqual(TEXT("So does one near its end"), ButtonAt(Centre + FVector2D(HalfWidth - 0.1, 0.0)), AFSInventoryRig::UseItemButton);
-	TestEqual(TEXT("A ray between two buttons misses them"), ButtonAt(Centre + FVector2D(HalfWidth + 0.1, 0.0)), INDEX_NONE);
+	TestEqual(TEXT("So does one near its end"), ButtonAt(Centre + FVector2D(HalfSize(Use).X - 0.1, 0.0)), AFSInventoryRig::UseItemButton);
+	TestEqual(TEXT("A ray past its end misses it"), ButtonAt(Centre + FVector2D(HalfSize(Use).X + 0.1, 0.0)), INDEX_NONE);
+	const FVector2D OrganizeCentre = Test.Rig->GetButtonCentre(AFSInventoryRig::OrganizeBackpackButton);
+	TestEqual(TEXT("One near the top of the upright button finds it"), ButtonAt(OrganizeCentre + FVector2D(0.0, HalfSize(Organize).Y - 0.1)), AFSInventoryRig::OrganizeBackpackButton);
+	TestEqual(TEXT("And one just beside it misses"), ButtonAt(OrganizeCentre + FVector2D(HalfSize(Organize).X + 0.1, 0.0)), INDEX_NONE);
 	TestEqual(TEXT("A ray through the grid misses them"), ButtonAt(FVector2D::ZeroVector), INDEX_NONE);
 
 	FIntPoint Cell = NoCell;
@@ -303,27 +332,25 @@ bool FFSInventoryRigSlotLabelsTest::RunTest(const FString& Parameters)
 {
 	FInventoryRigTestWorld Test;
 
-	// Matches the rig's defaults
-	constexpr double HandSlotSize = 12.0;
-	constexpr double QuickSlotSize = 7.5;
+	const double SlotHeight = Test.Rig->GetSideSlotSize().Y;
 
 	// Where on the grid a location is seen, as a direction from the camera that can be compared to the point it should be over
-	const auto TestLabel = [this, &Test](const TCHAR* Name, const FVector& Location, const FVector2D& SlotCentre, double SlotSize)
+	const auto TestLabel = [this, &Test](const TCHAR* Name, const FVector& Location, const FVector2D& SlotCentre, double SlotHeight)
 	{
 		const FVector Seen = (Location - Test.Rig->GetActorLocation()).GetSafeNormal();
-		const FVector2D Above = SlotCentre + FVector2D(0.0, SlotSize * 0.5 + 0.75);
+		const FVector2D Above = SlotCentre + FVector2D(0.0, SlotHeight * 0.5 + 0.75);
 
 		TestTrue(FString::Printf(TEXT("%s: centred just above its cell"), Name), Seen.Equals(Test.DirectionToGridPoint(Above.X, Above.Y), 0.001));
 	};
 
-	TestLabel(TEXT("Left hand"), Test.Rig->GetHandSlotLabelLocation(AFSInventoryRig::LeftHandSlot), Test.Rig->GetHandSlotCentre(AFSInventoryRig::LeftHandSlot), HandSlotSize);
-	TestLabel(TEXT("Right hand"), Test.Rig->GetHandSlotLabelLocation(AFSInventoryRig::RightHandSlot), Test.Rig->GetHandSlotCentre(AFSInventoryRig::RightHandSlot), HandSlotSize);
-	TestLabel(TEXT("Left quick slot"), Test.Rig->GetQuickSlotLabelLocation(AFSInventoryRig::LeftQuickSlot), Test.Rig->GetQuickSlotCentre(AFSInventoryRig::LeftQuickSlot), QuickSlotSize);
-	TestLabel(TEXT("Right quick slot"), Test.Rig->GetQuickSlotLabelLocation(AFSInventoryRig::RightQuickSlot), Test.Rig->GetQuickSlotCentre(AFSInventoryRig::RightQuickSlot), QuickSlotSize);
+	TestLabel(TEXT("Left hand"), Test.Rig->GetHandSlotLabelLocation(AFSInventoryRig::LeftHandSlot), Test.Rig->GetHandSlotCentre(AFSInventoryRig::LeftHandSlot), SlotHeight);
+	TestLabel(TEXT("Right hand"), Test.Rig->GetHandSlotLabelLocation(AFSInventoryRig::RightHandSlot), Test.Rig->GetHandSlotCentre(AFSInventoryRig::RightHandSlot), SlotHeight);
+	TestLabel(TEXT("Left quick slot"), Test.Rig->GetQuickSlotLabelLocation(AFSInventoryRig::LeftQuickSlot), Test.Rig->GetQuickSlotCentre(AFSInventoryRig::LeftQuickSlot), SlotHeight);
+	TestLabel(TEXT("Right quick slot"), Test.Rig->GetQuickSlotLabelLocation(AFSInventoryRig::RightQuickSlot), Test.Rig->GetQuickSlotCentre(AFSInventoryRig::RightQuickSlot), SlotHeight);
 
 	// 90 degrees across a 16:9 screen, with the grid 40cm away
 	constexpr double HalfScreenHeight = 22.5;
-	const double LabelUp = Test.Rig->GetQuickSlotCentre(AFSInventoryRig::LeftQuickSlot).Y + QuickSlotSize * 0.5 + 0.75;
+	const double LabelUp = Test.Rig->GetQuickSlotCentre(AFSInventoryRig::LeftQuickSlot).Y + SlotHeight * 0.5 + 0.75;
 	TestTrue(TEXT("A quick slot's name is on a 16:9 screen"), LabelUp < HalfScreenHeight);
 
 	return true;
@@ -497,7 +524,7 @@ bool FFSInventoryRigOrganizeTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("And smaller, to make room"), Scale < 1.0);
 
 	const UInstancedStaticMeshComponent* Organize = Rig->GetOrganizeGrid();
-	TestEqual(TEXT("A cell for each of 12 by 12"), Organize->GetInstanceCount(), UFSInventoryComponent::OrganizeGridSize * UFSInventoryComponent::OrganizeGridSize);
+	TestEqual(TEXT("A cell for each of 10 by 10"), Organize->GetInstanceCount(), UFSInventoryComponent::OrganizeGridSize * UFSInventoryComponent::OrganizeGridSize);
 
 	const double HalfOrganize = UFSInventoryComponent::OrganizeGridSize * CellSize * 0.5;
 	const double OrganizeOffset = Rig->GetOrganizeGridOffset();
@@ -510,15 +537,15 @@ bool FFSInventoryRigOrganizeTest::RunTest(const FString& Parameters)
 		return Test.DirectionToGridPoint(Screen.X, Screen.Y);
 	};
 
-	const double RightHandEdge = Rig->GetHandSlotCentre(AFSInventoryRig::RightHandSlot).X + 12.0 * 0.5;
-	TestTrue(TEXT("It's clear of the right hand's cell"), OrganizeOffset - HalfOrganize > RightHandEdge);
+	const double ButtonEdge = Rig->GetButtonCentre(AFSInventoryRig::OrganizeBackpackButton).X + Rig->GetButtonSize(AFSInventoryRig::OrganizeBackpackButton).X * 0.5;
+	TestTrue(TEXT("It's right of the Organize Backpack button"), OrganizeOffset - HalfOrganize > ButtonEdge);
 
 	// The top left corner's cell
 	const FVector2D TopLeftCell(OrganizeOffset - HalfOrganize + CellSize * 0.5, HalfOrganize - CellSize * 0.5);
 	TestTrue(TEXT("A ray finds its cell"), Rig->GetOrganizeCellFromWorldRay(Origin, RayTo(TopLeftCell), Cell));
 	TestEqual(TEXT("The top left"), Cell, FIntPoint(0, 0));
 	TestTrue(TEXT("And its bottom right"), Rig->GetOrganizeCellFromWorldRay(Origin, RayTo(FVector2D(OrganizeOffset + HalfOrganize - 0.1, -HalfOrganize + 0.1)), Cell));
-	TestEqual(TEXT("The bottom right"), Cell, FIntPoint(11, 11));
+	TestEqual(TEXT("The bottom right"), Cell, FIntPoint(UFSInventoryComponent::OrganizeGridSize - 1));
 	TestFalse(TEXT("A ray past it misses"), Rig->GetOrganizeCellFromWorldRay(Origin, RayTo(FVector2D(OrganizeOffset + HalfOrganize + 0.1, 0.0)), Cell));
 
 	// Things slid along with it are still found where they've gone
@@ -550,8 +577,9 @@ bool FFSInventoryRigOrganizeTest::RunTest(const FString& Parameters)
 	Rig->ShowInventory(*Inventory);
 	Rig->SetHoveredOrganizeCell(FIntPoint(2, 3));
 	TestTrue(TEXT("Carrying, it previews each cell"), IsSet(FIntPoint(2, 3), AFSInventoryRig::CellCanPlaceData) && IsSet(FIntPoint(2, 4), AFSInventoryRig::CellCanPlaceData));
-	Rig->SetHoveredOrganizeCell(FIntPoint(2, 11));
-	TestTrue(TEXT("And shows what won't fit"), IsSet(FIntPoint(2, 11), AFSInventoryRig::CellCannotPlaceData));
+	const FIntPoint BottomRow(2, UFSInventoryComponent::OrganizeGridSize - 1);
+	Rig->SetHoveredOrganizeCell(BottomRow);
+	TestTrue(TEXT("And shows what won't fit"), IsSet(BottomRow, AFSInventoryRig::CellCannotPlaceData));
 	Rig->SetHoveredOrganizeCell(NoCell);
 
 	Inventory->PlaceCarriedItem(FIntPoint(2, 3), EFSItemGrid::Organize);
@@ -597,11 +625,8 @@ bool FFSInventoryRigOnScreenTest::RunTest(const FString& Parameters)
 	UFSInventoryComponent* Inventory = Test.World->SpawnActor<AFSPlayerState>()->GetInventory();
 
 	// Match the rig's defaults
-	constexpr double HandSlotSize = 12.0;
-	constexpr double QuickSlotSize = 7.5;
+	const FVector2D SideSlotSize = Rig->GetSideSlotSize();
 	constexpr double ArmorSlotSize = 7.5;
-	constexpr double ButtonWidth = 16.0;
-	constexpr double ButtonHeight = 2.5;
 
 	// 90 degrees across a 16:9 screen, with the grid 40cm away
 	constexpr double HalfScreenWidth = 40.0;
@@ -631,12 +656,12 @@ bool FFSInventoryRigOnScreenTest::RunTest(const FString& Parameters)
 
 			for (int32 HandSlot = 0; HandSlot < AFSInventoryRig::HandSlotCount; ++HandSlot)
 			{
-				TestBoxOnScreen(Prefix + TEXT("hand"), Rig->GetHandSlotCentre(HandSlot), HandSlotSize, HandSlotSize);
+				TestBoxOnScreen(Prefix + TEXT("hand"), Rig->GetHandSlotCentre(HandSlot), SideSlotSize.X, SideSlotSize.Y);
 			}
 
 			for (int32 QuickSlot = 0; QuickSlot < AFSInventoryRig::QuickSlotCount; ++QuickSlot)
 			{
-				TestBoxOnScreen(Prefix + TEXT("quick slot"), Rig->GetQuickSlotCentre(QuickSlot), QuickSlotSize, QuickSlotSize);
+				TestBoxOnScreen(Prefix + TEXT("quick slot"), Rig->GetQuickSlotCentre(QuickSlot), SideSlotSize.X, SideSlotSize.Y);
 			}
 
 			for (int32 ArmorSlot = 0; ArmorSlot < AFSInventoryRig::ArmorSlotCount; ++ArmorSlot)
@@ -646,7 +671,7 @@ bool FFSInventoryRigOnScreenTest::RunTest(const FString& Parameters)
 
 			for (int32 Button = 0; Button < AFSInventoryRig::ButtonCount; ++Button)
 			{
-				TestBoxOnScreen(Prefix + TEXT("button"), Rig->GetButtonCentre(Button), ButtonWidth, ButtonHeight);
+				TestBoxOnScreen(Prefix + TEXT("button"), Rig->GetButtonCentre(Button), Rig->GetButtonSize(Button).X, Rig->GetButtonSize(Button).Y);
 			}
 		};
 
@@ -743,6 +768,171 @@ bool FFSInventoryRigQuickSlotRayTest::RunTest(const FString& Parameters)
 	Test.Rig->SetHoveredQuickSlot(INDEX_NONE);
 	TestEqual(TEXT("And can be cleared"), Test.Rig->GetHoveredQuickSlot(), static_cast<int32>(INDEX_NONE));
 
+	return true;
+}
+
+namespace
+{
+	UFSItemDefinition* MakeRigTestItem(EFSItemType Type, const FIntPoint& Dimensions)
+	{
+		UFSItemDefinition* Item = NewObject<UFSItemDefinition>();
+		Item->ItemType = Type;
+		Item->InventoryDimensions = Dimensions;
+		Item->Mesh = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
+		return Item;
+	}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSInventoryRigLightEverywhereTest, "Fellowship.Inventory.Rig.LightFollowsTheMouseEverywhere", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FFSInventoryRigLightEverywhereTest::RunTest(const FString& Parameters)
+{
+	FInventoryRigTestWorld Test;
+	AFSInventoryRig* Rig = Test.Rig;
+
+	Rig->SetPackVisible(true);
+	Rig->SetGridVisible(true);
+	Rig->Tick(1.0f);
+
+	const FVector2D HandCentre = Rig->GetHandSlotCentre(AFSInventoryRig::LeftHandSlot);
+	Rig->SetCursorRay(Rig->GetActorLocation(), Test.DirectionToGridPoint(HandCentre.X, HandCentre.Y));
+	TestTrue(TEXT("The light shines with the mouse over a hand's cell"), Rig->GetCursorLight()->GetVisibleFlag());
+
+	Rig->SetCursorRay(Rig->GetActorLocation(), Test.DirectionToGridPoint(30.0, 18.0));
+	TestTrue(TEXT("And off every cell altogether"), Rig->GetCursorLight()->GetVisibleFlag());
+
+	TestTrue(TEXT("It reaches the pack behind the grid"), Rig->GetCursorLight()->AttenuationRadius > 20.0f);
+
+	Rig->SetGridVisible(false);
+	TestFalse(TEXT("It goes with the grid"), Rig->GetCursorLight()->GetVisibleFlag());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSInventoryRigPackTest, "Fellowship.Inventory.Rig.PackSwaysWithTheQuickSlotItemsOnIt", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FFSInventoryRigPackTest::RunTest(const FString& Parameters)
+{
+	FInventoryRigTestWorld Test;
+	AFSInventoryRig* Rig = Test.Rig;
+	UFSInventoryComponent* Inventory = Test.World->SpawnActor<AFSPlayerState>()->GetInventory();
+
+	UFSItemDefinition* Backpack = MakeRigTestItem(EFSItemType::Backpack, FIntPoint(8, 8));
+	Inventory->EquipBackpack(Backpack);
+
+	UFSItemDefinition* LeftItem = MakeRigTestItem(EFSItemType::Weapon, FIntPoint(1, 3));
+	Inventory->CarryNewItem(LeftItem);
+	Inventory->SwapCarriedItemWithQuickSlot(EFSQuickSlot::Left);
+	Inventory->ClearCarriedItem();
+
+	Rig->SetPackVisible(true);
+	Rig->ShowInventory(*Inventory);
+
+	const UStaticMeshComponent* Hung = Rig->GetPackHungItems().Get(EFSQuickSlot::Left);
+	if (TestNotNull(TEXT("The left quick slot's item hangs off the pack"), Hung))
+	{
+		TestTrue(TEXT("Showing its mesh"), Hung->GetStaticMesh() == LeftItem->Mesh);
+		TestTrue(TEXT("On the pack"), Hung->GetAttachParent() == Rig->GetPack());
+		TestTrue(TEXT("Seen with the rest of the display"), Hung->GetVisibleFlag());
+	}
+	TestTrue(TEXT("Nothing hangs on the right, which is empty"), !Rig->GetPackHungItems().Get(EFSQuickSlot::Right) || !Rig->GetPackHungItems().Get(EFSQuickSlot::Right)->GetStaticMesh());
+
+	const FQuat Before = Rig->GetPack()->GetRelativeRotation().Quaternion();
+	Rig->Tick(1.0f);
+	const FQuat After = Rig->GetPack()->GetRelativeRotation().Quaternion();
+	TestTrue(TEXT("The pack sways"), !Before.Equals(After, 0.0001));
+	TestTrue(TEXT("Only a little"), Before.AngularDistance(After) < FMath::DegreesToRadians(8.0));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSInventoryRigTrailTest, "Fellowship.Inventory.Rig.CarriedItemTrailsBehindTheMouse", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FFSInventoryRigTrailTest::RunTest(const FString& Parameters)
+{
+	FInventoryRigTestWorld Test;
+	AFSInventoryRig* Rig = Test.Rig;
+	UFSInventoryComponent* Inventory = Test.World->SpawnActor<AFSPlayerState>()->GetInventory();
+	Inventory->EquipBackpack(MakeRigTestItem(EFSItemType::Backpack, FIntPoint(8, 8)));
+	Inventory->CarryNewItem(MakeRigTestItem(EFSItemType::Weapon, FIntPoint(1, 3)));
+
+	Rig->SetPackVisible(true);
+	Rig->SetGridVisible(true);
+	Rig->ShowInventory(*Inventory);
+	Rig->Tick(1.0f);
+
+	// Resting at the left first, so that getting there doesn't count as a drag
+	Rig->SetCursorRay(Rig->GetActorLocation(), Test.DirectionToGridPoint(-9.0, 0.0));
+	for (int32 Frame = 0; Frame < 180; ++Frame)
+	{
+		Rig->Tick(1.0f / 60.0f);
+	}
+
+	// Dragged quickly to the right
+	for (int32 Frame = 1; Frame <= 6; ++Frame)
+	{
+		Rig->SetCursorRay(Rig->GetActorLocation(), Test.DirectionToGridPoint(-9.0 + Frame * 3.0, 0.0));
+		Rig->Tick(1.0f / 60.0f);
+	}
+
+	TestTrue(TEXT("It trails behind, to the left"), Rig->GetCarriedItemTrail().X < -0.5);
+	TestTrue(TEXT("Not too far"), Rig->GetCarriedItemTrail().Size() <= 3.0 + 0.001);
+	TestTrue(TEXT("Leaning hard the way it's going"), Rig->GetCarriedItemSway().X > 15.0);
+
+	for (int32 Frame = 0; Frame < 180; ++Frame)
+	{
+		Rig->Tick(1.0f / 60.0f);
+	}
+	TestTrue(TEXT("Once the mouse stops, it settles back under it"), Rig->GetCarriedItemTrail().Size() < 0.05 && FMath::Abs(Rig->GetCarriedItemSway().X) < 0.5);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSInventoryRigWalkingTest, "Fellowship.Inventory.Rig.WalkingBobsAndJiggles", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FFSInventoryRigWalkingTest::RunTest(const FString& Parameters)
+{
+	FInventoryRigTestWorld Test;
+	AFSInventoryRig* Rig = Test.Rig;
+
+	FActorSpawnParameters SpawnParameters;
+	SpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	ACharacter* Character = Test.World->SpawnActor<ACharacter>(FVector::ZeroVector, FRotator::ZeroRotator, SpawnParameters);
+	Rig->AttachToCharacter(Character);
+	Rig->SetPackVisible(true);
+
+	const FRotator StillView = Rig->GetViewCamera()->GetRelativeRotation();
+	Rig->Tick(0.5f);
+	TestTrue(TEXT("Standing still, nothing moves"), Rig->GetBobWeight() < 0.01f && Rig->GetItemJiggle().IsNearlyZero(0.001));
+	const FVector DisplayAtRest = Rig->GetDisplay()->GetRelativeLocation();
+	const FVector GridAtRest = Rig->GetGrid()->GetRelativeLocation();
+	bool bCellsMoved = false;
+
+	// Walking, without anything moving the character, so that its velocity stays put
+	Character->GetCharacterMovement()->SetMovementMode(MOVE_Walking);
+	Character->GetCharacterMovement()->Velocity = FVector(150.0, 0.0, 0.0);
+
+	double MaxJiggle = 0.0;
+	bool bCameraMoved = false;
+	for (int32 Frame = 0; Frame < 120; ++Frame)
+	{
+		Rig->Tick(1.0f / 60.0f);
+		MaxJiggle = FMath::Max(MaxJiggle, Rig->GetItemJiggle().Size());
+		bCellsMoved |= !Rig->GetDisplay()->GetRelativeLocation().Equals(DisplayAtRest) || !Rig->GetGrid()->GetRelativeLocation().Equals(GridAtRest);
+		bCameraMoved |= !Rig->GetViewCamera()->GetRelativeRotation().Equals(StillView, 0.01);
+	}
+
+	TestTrue(TEXT("Walking bobs the camera"), Rig->GetBobWeight() > 0.5f && bCameraMoved);
+	TestTrue(TEXT("And jiggles the items"), MaxJiggle > 0.03);
+	TestTrue(TEXT("Subtly"), MaxJiggle < 0.7);
+	TestTrue(TEXT("The items move with the jiggle"), Rig->GetItemRoot()->GetRelativeLocation().Equals(FVector(0.0, Rig->GetItemJiggle().X, Rig->GetItemJiggle().Y), 0.0001));
+	TestTrue(TEXT("And the arms with them"), Rig->GetArms()->GetRelativeLocation().Equals(Rig->GetItemRoot()->GetRelativeLocation(), 0.0001));
+	TestFalse(TEXT("But the grids and cells stay still"), bCellsMoved);
+
+	Character->GetCharacterMovement()->Velocity = FVector::ZeroVector;
+	for (int32 Frame = 0; Frame < 240; ++Frame)
+	{
+		Rig->Tick(1.0f / 60.0f);
+	}
+	TestTrue(TEXT("Stopping settles it all"), Rig->GetBobWeight() < 0.01f && Rig->GetItemJiggle().Size() < 0.01);
+	TestTrue(TEXT("Back to the still view"), Rig->GetViewCamera()->GetRelativeRotation().Equals(StillView, 0.05));
 	return true;
 }
 

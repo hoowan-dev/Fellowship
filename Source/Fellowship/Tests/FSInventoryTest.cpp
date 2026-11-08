@@ -26,6 +26,7 @@
 #include "Inventory/FSItemDefinition.h"
 #include "Inventory/FSItemPickup.h"
 #include "HUD/FSEquipmentDisplay.h"
+#include "HUD/FSHUD.h"
 #include "Player/FSPlayerController.h"
 #include "Player/FSPlayerState.h"
 #include "TimerManager.h"
@@ -780,8 +781,11 @@ bool FFSEquipmentDisplayVisibilityTest::RunTest(const FString& Parameters)
 
 	TestTrue(TEXT("It shows during play"), AFSEquipmentDisplay::IsShownFor(*Test.Controller));
 
+	TestTrue(TEXT("The compass and lantern show during play"), AFSEquipmentDisplay::IsCornerShownFor(*Test.Controller));
+
 	Test.Controller->OpenInventory();
 	TestFalse(TEXT("It goes as soon as the inventory starts opening"), AFSEquipmentDisplay::IsShownFor(*Test.Controller));
+	TestTrue(TEXT("But the compass and lantern stay"), AFSEquipmentDisplay::IsCornerShownFor(*Test.Controller));
 
 	return true;
 }
@@ -840,8 +844,16 @@ bool FFSEquipmentCompassLayoutTest::RunTest(const FString& Parameters)
 {
 	const FVector2D Viewport(1920.0, 1080.0);
 	const FVector2D ScreenCentre = AFSEquipmentDisplay::GetSlotCentre(Viewport, EFSEquipmentSlot::Compass);
+	const FVector2D Lantern = AFSEquipmentDisplay::GetSlotCentre(Viewport, EFSEquipmentSlot::Lantern);
+	const double LanternHalfWidth = AFSEquipmentDisplay::LanternWidth * 0.5;
 
-	TestTrue(TEXT("It's towards the right of the screen"), ScreenCentre.X > 1600.0 && ScreenCentre.X + AFSEquipmentDisplay::CompassRadius < Viewport.X);
+	const double BarsEnd = AFSHUD::GetStatBarsRight(Viewport.X);
+
+	TestTrue(TEXT("The lantern is towards the bottom right corner"), Lantern.X > 1700.0 && Lantern.X + LanternHalfWidth < Viewport.X && Lantern.Y > 950.0 && Lantern.Y + AFSEquipmentDisplay::LanternHeight * 0.5 < Viewport.Y);
+	TestTrue(TEXT("The compass is left of the lantern"), ScreenCentre.X + AFSEquipmentDisplay::CompassRadius < Lantern.X - LanternHalfWidth);
+	TestTrue(TEXT("And right of the stat bars"), ScreenCentre.X - AFSEquipmentDisplay::CompassRadius > BarsEnd);
+	TestEqual(TEXT("They split the space after the bars evenly"), ScreenCentre.X - BarsEnd, (Lantern.X - BarsEnd) / 3.0, 0.001);
+	TestEqual(TEXT("The lantern is as far in from the corner's margin as the compass is from the bars"), Viewport.X - 20.0 - Lantern.X, ScreenCentre.X - BarsEnd, 0.001);
 	TestTrue(TEXT("It's towards the bottom of the screen"), ScreenCentre.Y > 900.0 && ScreenCentre.Y + AFSEquipmentDisplay::CompassRadius < Viewport.Y);
 
 	const UStaticMesh* Case = LoadObject<UStaticMesh>(nullptr, TEXT("/Game/Meshes/LowPolyProps/Misc/Flat/SM_compass_misc.SM_compass_misc"));
@@ -886,6 +898,53 @@ bool FFSEquipmentCompassLayoutTest::RunTest(const FString& Parameters)
 	const FVector NeedlePoint = FromCamera(PlacedNeedle.TransformPosition(ConePoint));
 	TestTrue(TEXT("It runs along the rotation's +Z"), NeedlePoint.Z > 0.0 && FMath::IsNearlyZero(NeedlePoint.X, 0.001) && FMath::IsNearlyZero(NeedlePoint.Y, 0.001));
 	TestTrue(TEXT("And stops inside the case"), NeedlePoint.Z < Radius);
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSEquipmentLanternLayoutTest, "Fellowship.Equipment.Display.StandsTheLanternUp", TestFlags)
+
+bool FFSEquipmentLanternLayoutTest::RunTest(const FString& Parameters)
+{
+	const UStaticMesh* Mesh = LoadObject<UStaticMesh>(nullptr, TEXT("/Game/Meshes/LowPolyProps/Misc/Flat/SM_lantern_misc.SM_lantern_misc"));
+	if (!TestNotNull(TEXT("The lantern loads"), Mesh))
+	{
+		return false;
+	}
+
+	const FVector Centre(100.0, 200.0, 300.0);
+	const FQuat Camera = FRotator(-20.0f, 70.0f, 0.0f).Quaternion();
+	constexpr double Height = 3.0;
+
+	const FTransform Placed = AFSEquipmentDisplay::GetLanternTransform(*Mesh, Camera, Centre, Height);
+	const FBoxSphereBounds Bounds = Mesh->GetBounds();
+	const auto FromCamera = [&Camera, &Centre](const FVector& Location)
+	{
+		return Camera.UnrotateVector(Location - Centre);
+	};
+
+	TestTrue(TEXT("It stands up the screen"), Placed.GetRotation().GetUpVector().Equals(Camera.GetUpVector(), 0.001));
+
+	const FVector Bottom = FromCamera(Placed.TransformPosition(Bounds.Origin - FVector(0.0, 0.0, Bounds.BoxExtent.Z)));
+	const FVector Top = FromCamera(Placed.TransformPosition(Bounds.Origin + FVector(0.0, 0.0, Bounds.BoxExtent.Z)));
+	TestEqual(TEXT("It's as tall as asked"), Top.Z - Bottom.Z, Height, 0.001);
+	TestEqual(TEXT("Centred up the screen"), (Top.Z + Bottom.Z) * 0.5, 0.0, 0.001);
+	TestEqual(TEXT("And across it"), (Top.Y + Bottom.Y) * 0.5, 0.0, 0.001);
+
+	// Its nearest corner touches the plane through the point, and the rest is further away
+	double Nearest = TNumericLimits<double>::Max();
+	double Widest = 0.0;
+	for (int32 Corner = 0; Corner < 8; ++Corner)
+	{
+		const FVector Local = Bounds.Origin + Bounds.BoxExtent * FVector(Corner & 1 ? 1.0 : -1.0, Corner & 2 ? 1.0 : -1.0, Corner & 4 ? 1.0 : -1.0);
+		const FVector Seen = FromCamera(Placed.TransformPosition(Local));
+		Nearest = FMath::Min(Nearest, Seen.X);
+		Widest = FMath::Max(Widest, FMath::Abs(Seen.Y));
+	}
+	TestEqual(TEXT("Its front is on the plane"), Nearest, 0.0, 0.001);
+
+	// The room the screen layout gives it, as a fraction of its height
+	TestTrue(TEXT("It fits in the room the layout gives it"), Widest * 2.0 / Height <= AFSEquipmentDisplay::LanternWidth / AFSEquipmentDisplay::LanternHeight);
 
 	return true;
 }
@@ -1224,7 +1283,12 @@ bool FFSInventoryRigCursorLightTest::RunTest(const FString& Parameters)
 	const FVector Origin = Rig->GetActorLocation();
 	const FVector Direction = DirectionToGridPoint(3.0, 2.0);
 	Rig->SetCursorRay(Origin, Direction);
+	TestFalse(TEXT("It stays off while the inventory isn't up"), Light->GetVisibleFlag());
 
+	Rig->SetPackVisible(true);
+	Rig->SetGridVisible(true);
+	Rig->Tick(1.0f);
+	Rig->SetCursorRay(Origin, Direction);
 	TestTrue(TEXT("It's on over the grid"), Light->GetVisibleFlag());
 
 	const FVector FromCamera = Light->GetComponentLocation() - Origin;
@@ -1235,14 +1299,14 @@ bool FFSInventoryRigCursorLightTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("It's in front of the grid as it's drawn"), FromCamera.Size() < DrawnGridDistance);
 	TestTrue(TEXT("And not far in front of it"), FromCamera.Size() > DrawnGridDistance * 0.5);
 
-	Rig->SetCursorRay(Origin, DirectionToGridPoint(1000.0, 0.0));
-	TestFalse(TEXT("It's off away from the grid"), Light->GetVisibleFlag());
+	Rig->SetCursorRay(Origin, DirectionToGridPoint(30.0, 0.0));
+	TestTrue(TEXT("It stays on away from the grid, shining on whatever else is there"), Light->GetVisibleFlag());
 
 	Rig->SetCursorRay(Origin, Direction);
 	Rig->SetGridVisible(false);
 	TestFalse(TEXT("It's off when the grid hides"), Light->GetVisibleFlag());
 
-	Rig->SetCursorRay(Origin, Direction);
+	Rig->SetPackVisible(false);
 	Rig->SetPackVisible(true);
 	TestFalse(TEXT("Showing the pack doesn't turn it on"), Light->GetVisibleFlag());
 
@@ -1656,13 +1720,13 @@ bool FFSBackpackRigTest::RunTest(const FString& Parameters)
 	Rig->ShowInventory(*Inventory);
 
 	TestTrue(TEXT("The pack mesh comes from the item"), Rig->GetPack()->GetStaticMesh() == Cube);
-	TestTrue(TEXT("Turned by the item's rotation"), Rig->GetPack()->GetRelativeRotation().Equals(Backpack->InventoryMeshTransform.Rotator(), 0.001f));
+	TestTrue(TEXT("Turned by the item's rotation, give or take its sway"), Rig->GetPack()->GetRelativeRotation().Quaternion().AngularDistance(Backpack->InventoryMeshTransform.GetRotation()) < FMath::DegreesToRadians(4.0));
 	TestTrue(TEXT("The grid shows"), Rig->GetGrid()->GetVisibleFlag());
 	TestTrue(TEXT("The quick slots show"), Rig->GetQuickSlots()->GetVisibleFlag());
 	TestTrue(TEXT("The buttons show"), Rig->GetButtons()->GetVisibleFlag());
 	TestTrue(TEXT("The hands' cells still show"), Rig->GetHandSlots()->GetVisibleFlag());
 	TestTrue(TEXT("The grid can be pointed at"), Rig->GetCellFromWorldRay(Origin, ToGridCentre, Cell));
-	TestTrue(TEXT("So can the quick slots"), Rig->GetQuickSlotFromWorldRay(Origin, DirectionToGridPoint(QuickSlotCentre), QuickSlot));
+	TestTrue(TEXT("So can the quick slots, beside the backpack's grid"), Rig->GetQuickSlotFromWorldRay(Origin, DirectionToGridPoint(Rig->GetQuickSlotCentre(AFSInventoryRig::LeftQuickSlot)), QuickSlot));
 
 	// The grid scales in by itself on tick, which shouldn't undo any of this once the backpack is gone
 	FFSBackpackContents Contents;
@@ -1699,7 +1763,7 @@ bool FFSOrganizeGridTest::RunTest(const FString& Parameters)
 
 	TestTrue(TEXT("With one, it starts"), Inventory->StartOrganizing());
 	TestFalse(TEXT("Only the once"), Inventory->StartOrganizing());
-	TestEqual(TEXT("The grid is 12 by 12"), Inventory->GetGrid(EFSItemGrid::Organize).GetSize(), FIntPoint(12, 12));
+	TestEqual(TEXT("The grid is 10 by 10"), Inventory->GetGrid(EFSItemGrid::Organize).GetSize(), FIntPoint(10, 10));
 
 	TestTrue(TEXT("A long item can't hang off it"), Inventory->GetCarriedItemPlacement(Cell, EFSItemGrid::Organize) == EFSItemPlacement::Blocked);
 	TestTrue(TEXT("It can go where it fits"), Inventory->PlaceCarriedItem(FIntPoint(0, 0), EFSItemGrid::Organize));
@@ -1956,8 +2020,9 @@ bool FFSInventoryRigCarriedSwayTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("The top of the mesh goes to the right"), GetTurn(Point).RotateVector(FVector::UpVector).Y > 0.01);
 	TestTrue(TEXT("Its front turns to the right"), GetTurn(Point).RotateVector(FVector::BackwardVector).Y > 0.01);
 
-	const FVector ExpectedCentre = Rig->GetCarriedItemTransform(Carried, Point).GetLocation();
-	TestTrue(TEXT("It stays under the cursor, turning about its middle"), Mesh->GetRelativeLocation().Equals(ExpectedCentre, 0.01));
+	TestTrue(TEXT("It trails behind the cursor"), Rig->GetCarriedItemTrail().X < 0.0);
+	const FVector ExpectedCentre = Rig->GetCarriedItemTransform(Carried, Point + Rig->GetCarriedItemTrail()).GetLocation();
+	TestTrue(TEXT("Turning about its middle where it trails to"), Mesh->GetRelativeLocation().Equals(ExpectedCentre, 0.01));
 
 	// Left to swing
 	bool bSwungBack = false;

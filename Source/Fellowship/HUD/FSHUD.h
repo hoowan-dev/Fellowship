@@ -24,6 +24,9 @@ class FELLOWSHIP_API AFSHUD : public AHUD
 public:
 	virtual void DrawHUD() override;
 
+	// The right edge of the row of stat bars along the bottom of the screen, outside its border, in pixels
+	static float GetStatBarsRight(float ScreenWidth);
+
 	// How far from the character an interactable's label can be and still show
 	UPROPERTY(EditDefaultsOnly, Category = "Interaction", meta = (ClampMin = "0.0", Units = cm))
 	float InteractionLabelDistance = 1000.0f;

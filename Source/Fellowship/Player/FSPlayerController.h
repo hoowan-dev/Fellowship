@@ -42,6 +42,10 @@ class FELLOWSHIP_API AFSPlayerController : public APlayerController
 	UPROPERTY(EditDefaultsOnly, Category = "Input")
 	TObjectPtr<UInputMappingContext> InventoryMappingContext;
 
+	// The default context's mappings for the character's Move Action, made the first time the inventory opens, so that the character can still walk with it open
+	UPROPERTY(Transient)
+	TObjectPtr<UInputMappingContext> InventoryMoveMappingContext;
+
 	// Digital (bool). Needs mapping in both contexts.
 	UPROPERTY(EditDefaultsOnly, Category = "Input")
 	TObjectPtr<UInputAction> ToggleInventoryAction;
@@ -172,6 +176,9 @@ private:
 
 	bool CanOpenInventory() const;
 	void SetInventoryInputActive(bool bActive);
+
+	// Copies DefaultMappingContext's mappings for the character's Move Action into InventoryMoveMappingContext. Null if there's nothing to copy.
+	UInputMappingContext* GetInventoryMoveMappingContext();
 	void StartInventoryBlend(AActor* NewViewTarget, float MidpointFraction);
 	void SwapWornPackForHeldPack(bool bHeld);
 	void HandleInventoryBlendMidpoint();

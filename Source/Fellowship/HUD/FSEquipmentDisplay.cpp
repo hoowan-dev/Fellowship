@@ -2,10 +2,13 @@
 
 #include "HUD/FSEquipmentDisplay.h"
 #include "Camera/PlayerCameraManager.h"
+#include "Components/PointLightComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "HUD/FSHUD.h"
+#include "Inventory/FSInventoryRig.h"
 #include "Inventory/FSInventoryComponent.h"
 #include "Inventory/FSItemDefinition.h"
 #include "Materials/MaterialInstanceDynamic.h"
@@ -59,8 +62,27 @@ namespace
 	constexpr float WobbleSlotGap = 37.31f;
 	constexpr float WobbleChannelGap = 11.73f;
 
-	// From the bottom right corner of the screen to the edges of the compass's case, the same as the event log's distance from its corner
-	constexpr double CompassMargin = 20.0;
+	// From the right and bottom edges of the screen to the space the compass and lantern share, the same as the event log's distance from its corner
+	constexpr double CornerMargin = 20.0;
+
+	// How far the lantern is turned about its height, so that a corner of it faces the camera
+	constexpr double LanternTurn = 15.0;
+
+	// The flame: in front of the lantern's middle by this much of its height, so it lights the sides the camera sees
+	constexpr double LanternLightForward = 0.35;
+
+	// How far the flame's light reaches, as a multiple of the lantern's height, and how bright and warm it is. It's in the world's lighting channel,
+	// because a channel of its own goes unlit, but floating this close to the camera it only reaches the world with the camera pressed against it.
+	constexpr double LanternLightReach = 1.5;
+	constexpr float LanternLightIntensity = 8.0f;
+	const FLinearColor LanternLightColor(1.0f, 0.62f, 0.28f);
+
+	// How much the flame's brightness flickers either way, and how quickly
+	constexpr float LanternFlicker = 0.18f;
+	constexpr float LanternFlickerRate = 3.0f;
+
+	// How quickly the meshes go between shaking with the player's movement and jiggling with the inventory
+	constexpr float InventoryBlendRate = 8.0f;
 
 	// The size of each half of the needle, as fractions of the case's radius
 	constexpr double NeedleLength = 0.75;
@@ -140,7 +162,8 @@ AFSEquipmentDisplay::AFSEquipmentDisplay()
 		return Mesh;
 	};
 
-	const FName SlotNames[] = { TEXT("LeftQuickSlotMesh"), TEXT("LeftHandMesh"), TEXT("BackpackMesh"), TEXT("RightHandMesh"), TEXT("RightQuickSlotMesh"), TEXT("CompassMesh") };
+	const FName SlotNames[] = { TEXT("LeftQuickSlotMesh"), TEXT("LeftHandMesh"), TEXT("BackpackMesh"), TEXT("RightHandMesh"), TEXT("RightQuickSlotMesh"), TEXT("CompassMesh"), TEXT("LanternMesh") };
+	static_assert(UE_ARRAY_COUNT(SlotNames) == static_cast<int32>(EFSEquipmentSlot::Count), "One mesh for each slot");
 
 	for (int32 Index = 0; Index < static_cast<int32>(EFSEquipmentSlot::Count); ++Index)
 	{
@@ -155,6 +178,26 @@ AFSEquipmentDisplay::AFSEquipmentDisplay()
 	{
 		SlotMeshes[static_cast<int32>(EFSEquipmentSlot::Compass)]->SetStaticMesh(CompassMesh.Object);
 	}
+
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> LanternMesh(TEXT("/Game/Meshes/LowPolyProps/Misc/Flat/SM_lantern_misc.SM_lantern_misc"));
+	UStaticMeshComponent* Lantern = SlotMeshes[static_cast<int32>(EFSEquipmentSlot::Lantern)];
+	if (LanternMesh.Succeeded())
+	{
+		Lantern->SetStaticMesh(LanternMesh.Object);
+	}
+
+	LanternLight = CreateDefaultSubobject<UPointLightComponent>(TEXT("LanternLight"));
+	LanternLight->SetupAttachment(RootComponent);
+	LanternLight->SetMobility(EComponentMobility::Movable);
+	LanternLight->SetUsingAbsoluteLocation(true);
+	LanternLight->SetCastShadows(false);
+	LanternLight->SetVisibility(false);
+
+	// An inverse square falloff has no upper limit, which burns out whatever's this close to the light
+	LanternLight->bUseInverseSquaredFalloff = false;
+	LanternLight->LightFalloffExponent = 2.0f;
+	LanternLight->SetLightColor(LanternLightColor);
+	LanternLight->SetIntensity(LanternLightIntensity);
 
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> ConeMesh(TEXT("/Engine/BasicShapes/Cone.Cone"));
 	if (ConeMesh.Succeeded())
@@ -214,7 +257,8 @@ AFSEquipmentDisplay::AFSEquipmentDisplay()
 	}
 
 	// Unlit translucent black, whose Darkness is its opacity. Full, the bars are solid black that no light changes.
-	static ConstructorHelpers::FObjectFinder<UMaterialInterface> BlackMaterial(TEXT("/Game/Materials/Inventory/M_InventoryBackgroundDarken.M_InventoryBackgroundDarken"));
+	// Drawn after motion blur, because shapes this close to the camera would otherwise be smeared along with the world moving behind them.
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> BlackMaterial(TEXT("/Game/Materials/HUD/M_HUDShade.M_HUDShade"));
 	if (BlackMaterial.Succeeded())
 	{
 		LetterboxMaterial = BlackMaterial.Object;
@@ -256,11 +300,25 @@ bool AFSEquipmentDisplay::IsShownFor(const AFSPlayerController& PlayerController
 	return PlayerController.GetInventoryViewState() == EFSInventoryViewState::Closed && PlayerController.GetInventory();
 }
 
+bool AFSEquipmentDisplay::IsCornerShownFor(const AFSPlayerController& PlayerController)
+{
+	return PlayerController.GetInventory() != nullptr;
+}
+
 FVector2D AFSEquipmentDisplay::GetSlotCentre(const FVector2D& ViewportSize, EFSEquipmentSlot Slot)
 {
+	// The space from the end of the stat bars to the right edge is split evenly, the compass in the middle of the left half and the lantern of the right
+	const double SpaceLeft = AFSHUD::GetStatBarsRight(ViewportSize.X);
+	const double HalfSpace = (ViewportSize.X - CornerMargin - SpaceLeft) * 0.5;
+
+	if (Slot == EFSEquipmentSlot::Lantern)
+	{
+		return FVector2D(SpaceLeft + HalfSpace * 1.5, ViewportSize.Y - CornerMargin - LanternHeight * 0.5);
+	}
+
 	if (Slot == EFSEquipmentSlot::Compass)
 	{
-		return ViewportSize - FVector2D(CompassMargin + CompassRadius);
+		return FVector2D(SpaceLeft + HalfSpace * 0.5, ViewportSize.Y - CornerMargin - CompassRadius);
 	}
 
 	const double FromMiddle = static_cast<int32>(Slot) - static_cast<int32>(EFSEquipmentSlot::Backpack);
@@ -317,12 +375,35 @@ FTransform AFSEquipmentDisplay::GetCompassNeedleTransform(const UStaticMesh& Con
 	return FTransform(Rotation, Centre + Rotation.RotateVector(FVector(0.0, 0.0, Length * 0.5) - Bounds.Origin * Scale), Scale);
 }
 
+FTransform AFSEquipmentDisplay::GetLanternTransform(const UStaticMesh& Mesh, const FQuat& CameraRotation, const FVector& Centre, double Height)
+{
+	const FBoxSphereBounds Bounds = Mesh.GetBounds();
+
+	// The mesh stands on +Z, which goes up the screen, and is turned about it
+	const FQuat Turn(FVector::UpVector, FMath::DegreesToRadians(LanternTurn));
+	const FQuat Rotation = CameraRotation * Turn;
+	const double Scale = Height / FMath::Max(Bounds.BoxExtent.Z * 2.0, UE_KINDA_SMALL_NUMBER);
+
+	// Its front is on the plane, like the compass's face, so the middle of it is a little further from the camera
+	const double HalfDepth = FBox(-Bounds.BoxExtent, Bounds.BoxExtent).TransformBy(FTransform(Turn)).GetExtent().X * Scale;
+	const FVector Middle = Centre + CameraRotation.GetForwardVector() * HalfDepth;
+
+	return FTransform(Rotation, Middle - Rotation.RotateVector(Bounds.Origin * Scale), FVector(Scale));
+}
+
 void AFSEquipmentDisplay::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 
 	const AFSPlayerController* PlayerController = Cast<AFSPlayerController>(GetOwner());
 	const UFSInventoryComponent* Inventory = PlayerController && IsShownFor(*PlayerController) ? PlayerController->GetInventory() : nullptr;
+
+	// With the inventory open, the meshes left showing jiggle along with its items rather than shaking
+	const AFSInventoryRig* Rig = PlayerController ? PlayerController->GetInventoryRig() : nullptr;
+	const bool bInInventory = PlayerController && PlayerController->GetInventoryViewState() != EFSInventoryViewState::Closed;
+	InventoryWeight = FMath::FInterpTo(InventoryWeight, bInInventory ? 1.0f : 0.0f, DeltaTime, InventoryBlendRate);
+	InventoryJiggle = Rig ? Rig->GetItemJiggleAngle() : FVector2D::ZeroVector;
+	FlickerTime = FMath::Fmod(FlickerTime + LanternFlickerRate * DeltaTime, WobblePeriod);
 
 	const APawn* Pawn = PlayerController ? PlayerController->GetPawn() : nullptr;
 	const ACharacter* Character = Cast<ACharacter>(Pawn);
@@ -334,18 +415,26 @@ void AFSEquipmentDisplay::Tick(float DeltaTime)
 		UpdateLetterbox(*PlayerController);
 	}
 
+	if (PlayerController && IsCornerShownFor(*PlayerController))
+	{
+		UpdateCompass(*PlayerController);
+		UpdateLantern(*PlayerController);
+	}
+	else
+	{
+		HideCorner();
+	}
+
 	if (!Inventory)
 	{
-		for (UStaticMeshComponent* Mesh : SlotMeshes)
+		for (int32 Index = 0; Index < static_cast<int32>(EFSEquipmentSlot::Compass); ++Index)
 		{
-			Mesh->SetVisibility(false);
+			SlotMeshes[Index]->SetVisibility(false);
 		}
 		for (UStaticMeshComponent* Backdrop : SlotBackdrops)
 		{
 			Backdrop->SetVisibility(false);
 		}
-		NorthNeedleMesh->SetVisibility(false);
-		SouthNeedleMesh->SetVisibility(false);
 		return;
 	}
 
@@ -368,8 +457,15 @@ void AFSEquipmentDisplay::Tick(float DeltaTime)
 	UpdateSlotBackdrop(*PlayerController, EFSEquipmentSlot::Backpack, true);
 	UpdateSlotBackdrop(*PlayerController, EFSEquipmentSlot::RightHand, true);
 	UpdateSlotBackdrop(*PlayerController, EFSEquipmentSlot::RightQuickSlot, Inventory->HasBackpack());
+}
 
-	UpdateCompass(*PlayerController);
+void AFSEquipmentDisplay::HideCorner()
+{
+	SlotMeshes[static_cast<int32>(EFSEquipmentSlot::Compass)]->SetVisibility(false);
+	SlotMeshes[static_cast<int32>(EFSEquipmentSlot::Lantern)]->SetVisibility(false);
+	NorthNeedleMesh->SetVisibility(false);
+	SouthNeedleMesh->SetVisibility(false);
+	LanternLight->SetVisibility(false);
 }
 
 void AFSEquipmentDisplay::UpdateLetterbox(const AFSPlayerController& PlayerController)
@@ -507,11 +603,13 @@ bool AFSEquipmentDisplay::GetSlotPlacement(const AFSPlayerController& PlayerCont
 	const FVector Centre = OnMeshPlane(CentreOrigin, CentreDirection);
 	const double Radius = FVector::Distance(Centre, OnMeshPlane(EdgeOrigin, EdgeDirection));
 
-	const FVector2D Offset = Shake.GetOffset(Slot) * Radius;
+	// The jiggle is an angle from the camera, which is what moves things the same distance on the screen
+	const float ShakeWeight = 1.0f - InventoryWeight;
+	const FVector2D Offset = Shake.GetOffset(Slot) * Radius * ShakeWeight + InventoryJiggle * MeshDistance * InventoryWeight;
 
 	OutCentre = Centre + CameraRotation.GetRightVector() * Offset.X + CameraRotation.GetUpVector() * Offset.Y;
 	OutRadius = Radius;
-	OutRotation = CameraRotation * Shake.GetTilt(Slot).Quaternion();
+	OutRotation = CameraRotation * (Shake.GetTilt(Slot) * ShakeWeight).Quaternion();
 	return true;
 }
 
@@ -563,4 +661,31 @@ void AFSEquipmentDisplay::UpdateCompass(const AFSPlayerController& PlayerControl
 	Case->SetWorldTransform(GetCompassTransform(*CaseMesh, Rotation, Centre, Radius));
 	NorthNeedleMesh->SetWorldTransform(GetCompassNeedleTransform(*Cone, North, Centre, Radius));
 	SouthNeedleMesh->SetWorldTransform(GetCompassNeedleTransform(*Cone, South, Centre, Radius));
+}
+
+void AFSEquipmentDisplay::UpdateLantern(const AFSPlayerController& PlayerController)
+{
+	UStaticMeshComponent* Lantern = SlotMeshes[static_cast<int32>(EFSEquipmentSlot::Lantern)];
+	const UStaticMesh* Mesh = Lantern->GetStaticMesh();
+
+	FVector Centre;
+	double HalfHeight = 0.0;
+	FQuat Rotation;
+	const bool bOnScreen = Mesh && GetSlotPlacement(PlayerController, EFSEquipmentSlot::Lantern, LanternHeight * 0.5f, Centre, HalfHeight, Rotation);
+
+	Lantern->SetVisibility(bOnScreen);
+	LanternLight->SetVisibility(bOnScreen);
+	if (!bOnScreen)
+	{
+		return;
+	}
+
+	const double Height = HalfHeight * 2.0;
+	Lantern->SetWorldTransform(GetLanternTransform(*Mesh, Rotation, Centre, Height));
+
+	// Lit from in front of its middle, towards the camera, which the shaking doesn't tilt
+	const FVector Forward = PlayerController.PlayerCameraManager->GetCameraRotation().Vector();
+	LanternLight->SetWorldLocation(Centre - Forward * Height * LanternLightForward);
+	LanternLight->SetAttenuationRadius(Height * LanternLightReach);
+	LanternLight->SetIntensity(LanternLightIntensity * (1.0f + LanternFlicker * FMath::PerlinNoise1D(FlickerTime + 0.5f)));
 }

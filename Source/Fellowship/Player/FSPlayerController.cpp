@@ -580,6 +580,24 @@ void AFSPlayerController::SetInventoryInputActive(bool bActive)
 		{
 			Subsystem->AddMappingContext(ContextToAdd, 0);
 		}
+
+		// Walking stays, though the rest of the default controls make way for the inventory's
+		if (UInputMappingContext* MoveContext = GetInventoryMoveMappingContext())
+		{
+			if (bActive)
+			{
+				Subsystem->AddMappingContext(MoveContext, 0);
+			}
+			else
+			{
+				Subsystem->RemoveMappingContext(MoveContext);
+			}
+		}
+	}
+
+	if (FSCharacter)
+	{
+		FSCharacter->SetInventoryOpen(bActive);
 	}
 
 	bShowMouseCursor = bActive;
@@ -607,6 +625,28 @@ void AFSPlayerController::SetInventoryInputActive(bool bActive)
 	{
 		SetInputMode(FInputModeGameOnly());
 	}
+}
+
+UInputMappingContext* AFSPlayerController::GetInventoryMoveMappingContext()
+{
+	if (InventoryMoveMappingContext || !DefaultMappingContext || !FSCharacter || !FSCharacter->MoveAction)
+	{
+		return InventoryMoveMappingContext;
+	}
+
+	InventoryMoveMappingContext = NewObject<UInputMappingContext>(this, TEXT("InventoryMoveMappingContext"));
+	for (const FEnhancedActionKeyMapping& Mapping : DefaultMappingContext->GetMappings())
+	{
+		if (Mapping.Action == FSCharacter->MoveAction)
+		{
+			// The modifiers are what turn each key into its direction, so they come along
+			FEnhancedActionKeyMapping& Copy = InventoryMoveMappingContext->MapKey(Mapping.Action, Mapping.Key);
+			Copy.Modifiers = Mapping.Modifiers;
+			Copy.Triggers = Mapping.Triggers;
+		}
+	}
+
+	return InventoryMoveMappingContext;
 }
 
 void AFSPlayerController::StartInventoryBlend(AActor* NewViewTarget, float MidpointFraction)

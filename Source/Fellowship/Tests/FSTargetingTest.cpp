@@ -320,4 +320,24 @@ bool FFSLockOnCameraFirstTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSInventoryWalkTest, "Fellowship.Inventory.Walking.OpeningItHoldsTheCharactersFacing", TargetingTestFlags)
+
+bool FFSInventoryWalkTest::RunTest(const FString& Parameters)
+{
+	FTargetingTestWorld Test;
+	AFSCharacter* Character = Test.Character;
+
+	TestFalse(TEXT("Closed to begin with"), Character->IsInventoryOpen());
+	TestTrue(TEXT("The character turns to face where it walks"), Character->GetCharacterMovement()->bOrientRotationToMovement);
+
+	Test.Controller->OpenInventory();
+	TestTrue(TEXT("Opening the inventory tells the character"), Character->IsInventoryOpen());
+	TestFalse(TEXT("Which keeps facing the same way, so walking doesn't swing the inventory round"), Character->GetCharacterMovement()->bOrientRotationToMovement);
+	TestTrue(TEXT("And walks at a third of its speed"), FMath::IsNearlyEqual(Character->InventoryMoveSpeedScale, 1.0f / 3.0f));
+
+	Character->SetInventoryOpen(false);
+	TestTrue(TEXT("Closed again, it turns to face where it walks"), Character->GetCharacterMovement()->bOrientRotationToMovement);
+	return true;
+}
+
 #endif

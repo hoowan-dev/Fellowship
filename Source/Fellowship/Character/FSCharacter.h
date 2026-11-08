@@ -142,6 +142,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Targeting|Lock On", meta = (ClampMin = "0.01", Units = s))
 	float LockOnCameraBlendTime = 0.3f;
 
+	// How fast the character walks with the inventory open, as a fraction of its usual speed
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Inventory", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float InventoryMoveSpeedScale = 1.0f / 3.0f;
+
 	// Hidden while looking at the backpack in first person, because the head would block the camera. The worn backpack's mesh is hidden along with the weapons.
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory")
 	TArray<FName> InventoryViewHiddenBones = { TEXT("head") };
@@ -197,6 +201,12 @@ public:
 
 	// Also hides the weapons, which would otherwise get in the way of the camera
 	void SetInventoryViewBonesHidden(bool bHide);
+
+	// With the inventory open, the character walks slowly, relative to the way it faces, and keeps facing that way, since the mouse is busy with the inventory
+	void SetInventoryOpen(bool bOpen);
+
+	UFUNCTION(BlueprintPure, Category = "Inventory")
+	bool IsInventoryOpen() const { return bInventoryOpen; }
 
 	// What pressing the target button does: lets go of a lock on, or otherwise starts targeting
 	void HandleTargetPressed();
@@ -254,6 +264,7 @@ public:
 	AActor* GetInteractionTarget() const;
 
 private:
+	bool bInventoryOpen = false;
 	bool bTargeting = false;
 	float TargetYaw = 0.0f;
 	float TargetPitch = 0.0f;

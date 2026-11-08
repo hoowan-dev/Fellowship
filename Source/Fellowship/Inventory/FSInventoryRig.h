@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "Inventory/FSInventoryComponent.h"
 #include "FSInventoryRig.generated.h"
 
 class ACharacter;
@@ -26,10 +27,12 @@ enum class EFSItemGrid : uint8;
 
 /**
  * What the player sees with the inventory open: a first person camera looking at the held backpack, with the grid floating between them,
- * the player's forearms raised either side of it with a large cell over each hand, a cell for each quick slot above it, and a row of buttons below it.
+ * a column of two cells either side of it, with that side's quick slot on top and its hand below, the player's forearms raised behind the hands' cells,
+ * and a row of buttons below it. The backpack sways gently, with what's in the quick slots hanging off it. The player can walk slowly with it open,
+ * which bobs the camera and jiggles the items, the arms and the pack. The grids, cells and buttons stay still.
  * While organizing, all of that slides to the left to make room for a second grid on the right.
  * The display moves away from the camera by however much it takes to keep every box on a 16:9 screen.
- * Without a backpack only the forearms and the hands' cells are there.
+ * Without a backpack only the forearms, the hands' cells and the armor slots are there.
  * Exists only on the owning client. The grid's cells run from (0, 0) at the top left.
  */
 UCLASS()
@@ -131,7 +134,8 @@ public:
 
 	FORCEINLINE int32 GetHoveredButton() const { return HoveredButton; }
 
-	// Moves the light and the carried item to where the mouse points, given as a world space ray. The carried item leans the way the point has been moving on tick.
+	// Moves the light and the carried item to where the mouse points, given as a world space ray. The light shines wherever that is, on everything in the inventory.
+	// The carried item leans the way the point has been moving on tick, and trails behind it.
 	void SetCursorRay(const FVector& RayOrigin, const FVector& RayDirection);
 
 	// Matches the pack, the grid, the item meshes, their borders and the carried item to what the inventory holds
@@ -188,6 +192,29 @@ public:
 
 	// How far the carried item is leaning, in degrees: X to the right and Y up
 	FORCEINLINE const FVector2D& GetCarriedItemSway() const { return CarriedItemSway; }
+
+	// How far the carried item trails behind the mouse on the plane of the grid, in cm: X to the right and Y up
+	FORCEINLINE const FVector2D& GetCarriedItemTrail() const { return CarriedItemTrail; }
+
+	// The size of a hand's or quick slot's cell: X across and Y up
+	FORCEINLINE FVector2D GetSideSlotSize() const { return FVector2D(SideSlotWidth, SideSlotHeight); }
+
+	// The meshes of what's in the quick slots, hanging off the displayed backpack
+	FORCEINLINE const FFSHungItemMeshes& GetPackHungItems() const { return PackHungItems; }
+
+	// How far the items and the arms have jiggled away from where they sit, in cm: X to the right and Y up. Walking makes them jiggle.
+	FORCEINLINE const FVector2D& GetItemJiggle() const { return ItemJiggle; }
+
+	// The same jiggle as an angle seen from the camera, in radians, as the items show it on the screen, scaled in and out with the grid.
+	// Something else in front of the camera that moves by this much on the screen jiggles along with them.
+	FORCEINLINE FVector2D GetItemJiggleAngle() const { return ItemJiggle * GridScale / (GridDistance + DisplayDepth); }
+
+	// What every item mesh hangs from, so that they can jiggle while the cells they sit in stay still
+	FORCEINLINE USceneComponent* GetItemRoot() const { return ItemRoot; }
+	FORCEINLINE USceneComponent* GetDisplay() const { return Display; }
+
+	// How much the camera is bobbing, from 0 standing still to 1 walking at Bob Full Speed
+	FORCEINLINE float GetBobWeight() const { return BobWeight; }
 	FORCEINLINE UInstancedStaticMeshComponent* GetButtons() const { return Buttons; }
 
 	// Whether the last inventory shown had a backpack, which is what the grid, quick slots and buttons belong to. True until one is shown.
@@ -211,13 +238,20 @@ public:
 	// The point in the world to centre an armor slot's name on, just above its cell
 	FVector GetArmorSlotLabelLocation(int32 ArmorSlot) const;
 
-	// The centre of a button on the plane of the grid, in cm from the grid's centre: X to the right and Y up
+	// The centre of a button on the plane of the grid, in cm from the grid's centre: X to the right and Y up.
+	// Drop Backpack is above the grid and Use Item below it, both as wide as it. Organize Backpack stands right of the right column, as tall as it.
 	FVector2D GetButtonCentre(int32 Button) const;
+
+	// A button's width and height on the plane of the grid, in cm
+	FVector2D GetButtonSize(int32 Button) const;
+
+	// Whether a button stands upright, with its label running down it
+	static bool IsButtonUpright(int32 Button) { return Button == OrganizeBackpackButton; }
 
 	// The point in the world to centre a button's label on
 	FVector GetButtonLabelLocation(int32 Button) const;
 
-	// How far the middle of the organizing grid is to the right of the middle of the grid, just clear of the right hand's cell. It slides along with everything else, starting off screen.
+	// How far the middle of the organizing grid is to the right of the middle of the grid, just clear of the Organize Backpack button. It slides along with everything else, starting off screen.
 	double GetOrganizeGridOffset() const;
 
 protected:
@@ -238,13 +272,22 @@ protected:
 	// Shows the backpack's mesh in the background, placed by its Inventory Mesh Transform. Null shows nothing.
 	void FitPackMesh(const UFSItemDefinition* Backpack);
 
+	// Places the pack where it rests, plus where the slide and its jiggle take it, turned by its sway
+	void UpdatePackTransform();
+
+	// Places the display where the slide takes it
+	void UpdateDisplayPlacement();
+
+	// Moves the camera's bob and the jiggles on by a frame, from how fast the character the rig is attached to is walking
+	void UpdateWalkingMotion(float DeltaTime);
+
 	// Shows the grid and everything on it if the display is showing and it's scaled in, except for what needs a backpack when there isn't one
 	void UpdateGridVisibility();
 
 	void AddItemBorder(const FFSInventoryItem& Item, const FVector2D& TopLeft);
 
-	// Borders a hand or quick slot in the colour of what's in it. An empty slot gets none.
-	void AddSlotBorder(const FFSInventoryItem& Item, const FVector2D& SlotCentre, double SlotSize);
+	// Borders a slot in the colour of what's in it. An empty slot gets none. Size is X across and Y up.
+	void AddSlotBorder(const FFSInventoryItem& Item, const FVector2D& SlotCentre, const FVector2D& SlotSize);
 
 	void AddBorder(double Left, double Top, double Width, double Height, double Thickness, const FLinearColor& Color);
 	bool IsCellInGrid(const FIntPoint& Cell) const;
@@ -277,8 +320,9 @@ protected:
 
 	// Where the slot items rest depends on the slide
 	void UpdateSlotItemRests();
-	FTransform GetSlotItemTransform(const FFSInventoryItem& Item, const FVector2D& SlotCentre, double SlotSize) const;
-	FVector GetSlotLabelLocation(const FVector2D& SlotCentre, double SlotSize) const;
+	// Size is X across and Y up
+	FTransform GetSlotItemTransform(const FFSInventoryItem& Item, const FVector2D& SlotCentre, const FVector2D& SlotSize) const;
+	FVector GetSlotLabelLocation(const FVector2D& SlotCentre, double SlotHeight) const;
 	FVector GetLocationOnGrid(const FVector2D& GridPoint) const;
 
 	// Starts the carried item's mesh turning from how it looked at its old rotation to how it should look at its current one
@@ -319,11 +363,16 @@ protected:
 	UPROPERTY(VisibleAnywhere, Category = "Inventory")
 	TObjectPtr<UInstancedStaticMeshComponent> ItemBorders;
 
-	// Attached to the grid so it scales in and out along with it. Has no mesh while nothing is carried.
+	// Holds every item mesh, in the grid, the slots and on the cursor, so that they jiggle as the player walks while the cells stay still.
+	// Attached to the grid at its middle, so the items scale in and out along with it.
+	UPROPERTY(VisibleAnywhere, Category = "Inventory")
+	TObjectPtr<USceneComponent> ItemRoot;
+
+	// Has no mesh while nothing is carried
 	UPROPERTY(VisibleAnywhere, Category = "Inventory")
 	TObjectPtr<UStaticMeshComponent> CarriedItemMesh;
 
-	// A large cell over each hand, for what that hand holds. Attached to the grid so they scale in and out along with it.
+	// A cell over each hand, for what that hand holds, at the bottom of the column beside the grid on its side. Attached to the grid so they scale in and out along with it.
 	UPROPERTY(VisibleAnywhere, Category = "Inventory")
 	TObjectPtr<UInstancedStaticMeshComponent> HandSlots;
 
@@ -335,7 +384,7 @@ protected:
 	UPROPERTY(VisibleAnywhere, Category = "Inventory")
 	TObjectPtr<UStaticMeshComponent> RightHandItemMesh;
 
-	// A cell above the grid for each quick slot. Attached to the grid so they scale in and out along with it.
+	// A cell for each quick slot, at the top of the column beside the grid on its side. Attached to the grid so they scale in and out along with it.
 	UPROPERTY(VisibleAnywhere, Category = "Inventory")
 	TObjectPtr<UInstancedStaticMeshComponent> QuickSlots;
 
@@ -370,7 +419,7 @@ protected:
 	UPROPERTY(VisibleAnywhere, Category = "Inventory")
 	TObjectPtr<UPoseableMeshComponent> Arms;
 
-	// Follows the mouse over the grid, shining on the items and the pack. The grid's own cells are unlit, so it doesn't brighten them.
+	// Follows the mouse, shining on everything in the inventory: the items, the arms and the pack. The cells are unlit, so it doesn't brighten them.
 	UPROPERTY(VisibleAnywhere, Category = "Inventory")
 	TObjectPtr<UPointLightComponent> CursorLight;
 
@@ -404,10 +453,17 @@ protected:
 
 	// How many degrees a carried item leans for each cm per second it's dragged at on the grid
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Carried Item", meta = (ClampMin = "0.0"))
-	float CarriedItemSwayPerSpeed = 0.25f;
+	float CarriedItemSwayPerSpeed = 0.5f;
 
-	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Carried Item", meta = (ClampMin = "0.0", ClampMax = "45.0", Units = deg))
-	float CarriedItemMaxSway = 18.0f;
+	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Carried Item", meta = (ClampMin = "0.0", ClampMax = "60.0", Units = deg))
+	float CarriedItemMaxSway = 35.0f;
+
+	// How far a carried item trails behind the mouse for each cm per second it's dragged at on the grid, like something dangling from it
+	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Carried Item", meta = (ClampMin = "0.0", Units = s))
+	float CarriedItemTrailPerSpeed = 0.02f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Carried Item", meta = (ClampMin = "0.0", Units = cm))
+	float CarriedItemMaxTrail = 3.0f;
 
 	// How hard a carried item is pulled towards the lean its speed calls for. Higher swings faster.
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Carried Item", meta = (ClampMin = "1.0", ClampMax = "1000.0"))
@@ -415,7 +471,7 @@ protected:
 
 	// How quickly a carried item's swinging dies down. Lower swings back and forth more times when it stops.
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Carried Item", meta = (ClampMin = "0.0", ClampMax = "60.0"))
-	float CarriedItemSwayDamping = 9.0f;
+	float CarriedItemSwayDamping = 6.0f;
 
 	// How long a carried item takes to turn when it's rotated
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Carried Item", meta = (ClampMin = "0.01", Units = s))
@@ -441,26 +497,31 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Cursor Light", meta = (ClampMin = "0.0", Units = cm))
 	float CursorLightHeight = 8.0f;
 
-	// How far the light reaches, as it's rendered: the meshes it shines on are drawn at FirstPersonScale of their size
+	// How far the light reaches, as it's rendered: the meshes it shines on are drawn at FirstPersonScale of their size.
+	// Far enough to reach the arms and the pack behind the grid from anywhere on it.
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Cursor Light", meta = (ClampMin = "0.1", Units = cm))
-	float CursorLightRadius = 7.0f;
+	float CursorLightRadius = 28.0f;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Cursor Light", meta = (ClampMin = "0.0"))
-	float CursorLightIntensity = 2.0f;
+	float CursorLightIntensity = 1.4f;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Cursor Light")
 	FLinearColor CursorLightColor = FLinearColor(1.0f, 0.85f, 0.65f);
 
-	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Hands", meta = (ClampMin = "0.1", Units = cm))
-	float HandSlotSize = 12.0f;
+	// The size of each cell in the columns either side of the grid, with a quick slot on top and a hand below
+	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Side Slots", meta = (ClampMin = "0.1", Units = cm))
+	float SideSlotWidth = 6.0f;
 
-	// Between the side of the grid and a hand's cell. The hands follow the cells, so they stay clear of the grid whatever its size.
-	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Hands", meta = (ClampMin = "0.0", Units = cm))
-	float HandSlotGap = 3.0f;
+	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Side Slots", meta = (ClampMin = "0.1", Units = cm))
+	float SideSlotHeight = 10.75f;
 
-	// How far the centre of a hand's cell is above the centre of the grid
-	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Hands", meta = (Units = cm))
-	float HandSlotHeight = -2.0f;
+	// Between a quick slot's cell and the hand's below it, which has to leave room for the hand's name. With the defaults the column is as tall as an 8 cell grid.
+	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Side Slots", meta = (ClampMin = "0.0", Units = cm))
+	float SideSlotSpacing = 2.5f;
+
+	// Between the side of the grid and the column. The hands follow their cells, so they stay clear of the grid whatever its size.
+	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Side Slots", meta = (ClampMin = "0.0", Units = cm))
+	float SideSlotGap = 3.0f;
 
 	// From the camera to the palms, which sit behind the grid
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Hands", meta = (ClampMin = "1.0", Units = cm))
@@ -486,18 +547,10 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Hands")
 	FVector UpperArmDirection = FVector(0.55, -0.3, 0.75);
 
-	// Small enough that the cells stay on a 16:9 screen above a grid of the default height
-	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Quick Slots", meta = (ClampMin = "0.1", Units = cm))
-	float QuickSlotSize = 7.5f;
-
-	// Between the top of the grid and the quick slots' cells, and between the two cells
-	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Quick Slots", meta = (ClampMin = "0.0", Units = cm))
-	float QuickSlotGap = 1.5f;
-
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Armor Slots", meta = (ClampMin = "0.1", Units = cm))
 	float ArmorSlotSize = 7.5f;
 
-	// Between the left hand's cell and the armor slots' cells
+	// Between the left column's cells and the armor slots' cells
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Armor Slots", meta = (ClampMin = "0.0", Units = cm))
 	float ArmorSlotGap = 1.5f;
 
@@ -509,20 +562,13 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Armor Slots", meta = (Units = cm))
 	float ArmorSlotHeight = 0.0f;
 
-	// Wide enough for the longest label
-	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Buttons", meta = (ClampMin = "0.1", Units = cm))
-	float ButtonWidth = 16.0f;
-
+	// How thick the buttons are: the height of those above and below the grid, and the width of the one standing beside the right column
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Buttons", meta = (ClampMin = "0.1", Units = cm))
 	float ButtonHeight = 2.5f;
 
-	// Between the bottom of the grid and the buttons
+	// Between the grid and the buttons above and below it, and between the right column and the button beside it
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Buttons", meta = (ClampMin = "0.0", Units = cm))
 	float ButtonGap = 1.0f;
-
-	// Between one button and the next
-	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Buttons", meta = (ClampMin = "0.0", Units = cm))
-	float ButtonSpacing = 1.0f;
 
 	// How far across from the middle of the screen the boxes can go, at the grid's usual distance. 90 degrees across makes the edge of the screen 40cm away.
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Layout", meta = (ClampMin = "1.0", Units = cm))
@@ -532,7 +578,7 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Layout", meta = (ClampMin = "1.0", Units = cm))
 	float ScreenHalfHeight = 22.0f;
 
-	// Between the right hand's cell and the organizing grid
+	// Between the Organize Backpack button and the organizing grid
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Organizing", meta = (ClampMin = "0.0", Units = cm))
 	float OrganizeGridGap = 1.0f;
 
@@ -546,6 +592,48 @@ protected:
 	// The pack is scaled so its longest side is this long, whatever size the mesh is
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Pack", meta = (ClampMin = "1.0", Units = cm))
 	float PackDisplaySize = 55.0f;
+
+	// How far the pack turns each way as it sways
+	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Pack", meta = (ClampMin = "0.0", ClampMax = "30.0", Units = deg))
+	float PackSwayAngle = 2.0f;
+
+	// How long the pack takes to sway there and back
+	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Pack", meta = (ClampMin = "0.1", Units = s))
+	float PackSwayPeriod = 5.0f;
+
+	// How much more the pack jiggles than the rest of the display as the player walks, being heavier and further away
+	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Walking", meta = (ClampMin = "0.0"))
+	float PackJiggleScale = 2.5f;
+
+	// How stiffly the pack follows the jiggle. Lower lags further behind.
+	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Walking", meta = (ClampMin = "1.0"))
+	float PackJiggleStiffness = 60.0f;
+
+	// How far the character walks in one stride, two steps, which is one sway of the bob from side to side and two dips
+	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Walking", meta = (ClampMin = "1.0", Units = cm))
+	float BobStrideLength = 110.0f;
+
+	// The walking speed at which the bob and the jiggle are full. Slower walks less.
+	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Walking", meta = (ClampMin = "1.0", Units = "cm/s"))
+	float BobFullSpeed = 180.0f;
+
+	// How far the camera dips with each step and rolls with each stride
+	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Walking", meta = (ClampMin = "0.0", Units = deg))
+	float BobPitch = 0.6f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Walking", meta = (ClampMin = "0.0", Units = deg))
+	float BobRoll = 0.5f;
+
+	// How far the items and the arms jiggle up and down with each step, and half as far side to side with each stride
+	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Walking", meta = (ClampMin = "0.0", Units = cm))
+	float JiggleAmount = 0.175f;
+
+	// How stiffly the items and the arms follow their jiggle, and how quickly that settles. A spring, so it overshoots a little.
+	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Walking", meta = (ClampMin = "1.0"))
+	float JiggleStiffness = 150.0f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Walking", meta = (ClampMin = "0.0"))
+	float JiggleDamping = 10.0f;
 
 	// How far the camera looks down
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory|View", meta = (ClampMin = "-89.0", ClampMax = "89.0", Units = deg))
@@ -624,6 +712,25 @@ private:
 
 	FVector2D CarriedItemSway = FVector2D::ZeroVector;
 	FVector2D CarriedItemSwayVelocity = FVector2D::ZeroVector;
+	FVector2D CarriedItemTrail = FVector2D::ZeroVector;
+	FVector2D CarriedItemTrailVelocity = FVector2D::ZeroVector;
+
+	// The pack's place and look at rest, which the slide, its jiggle and its sway are added to
+	FQuat PackRestRotation = FQuat::Identity;
+	FVector PackRestScale = FVector::OneVector;
+	double PackSwayTime = 0.0;
+
+	UPROPERTY(Transient)
+	FFSHungItemMeshes PackHungItems;
+
+	// How far through a stride the bob is, as a fraction of a stride, and how strong it is
+	double BobPhase = 0.0;
+	float BobWeight = 0.0f;
+
+	FVector2D ItemJiggle = FVector2D::ZeroVector;
+	FVector2D ItemJiggleVelocity = FVector2D::ZeroVector;
+	FVector2D PackJiggle = FVector2D::ZeroVector;
+	FVector2D PackJiggleVelocity = FVector2D::ZeroVector;
 
 	// The carried item ShowInventory last showed, used to tell when it's been rotated
 	TWeakObjectPtr<const UFSItemDefinition> ShownCarriedDefinition;

@@ -11,8 +11,9 @@ class UStaticMesh;
 class UFSItemDefinition;
 class UMaterialInterface;
 class UStaticMeshComponent;
+class UPointLightComponent;
 
-// What the display shows: the circles at the top of the HUD from left to right, then the compass at the bottom right, which has no circle
+// What the display shows: the circles at the top of the HUD from left to right, then the compass and the lantern at the bottom right, which have no circles
 enum class EFSEquipmentSlot : uint8
 {
 	LeftQuickSlot,
@@ -21,6 +22,7 @@ enum class EFSEquipmentSlot : uint8
 	RightHand,
 	RightQuickSlot,
 	Compass,
+	Lantern,
 	Count
 };
 
@@ -69,14 +71,24 @@ public:
 	// The radius of the compass's round case on the screen, in pixels
 	static constexpr float CompassRadius = 45.0f;
 
+	// How tall the lantern stands on the screen, in pixels
+	static constexpr float LanternHeight = 100.0f;
+
+	// How much room across the screen the lantern takes, in pixels. Its mesh, turned as it stands, is a little narrower.
+	static constexpr float LanternWidth = 76.0f;
+
 	AFSEquipmentDisplay();
 
 	virtual void Tick(float DeltaTime) override;
 
-	// Whether the circles and meshes are showing. They make way for the inventory.
+	// Whether the circles and their meshes are showing. They make way for the inventory.
 	static bool IsShownFor(const AFSPlayerController& PlayerController);
 
-	// The centre of a slot's circle, or of the compass's case, on the screen, in pixels
+	// Whether the compass and the lantern are showing. They stay through the inventory, jiggling with its items as the player walks.
+	static bool IsCornerShownFor(const AFSPlayerController& PlayerController);
+
+	// The centre of a slot's circle, of the compass's case or of the lantern, on the screen, in pixels.
+	// The compass and the lantern split the space between the end of the stat bars and the right edge of the screen evenly, the lantern on the right.
 	static FVector2D GetSlotCentre(const FVector2D& ViewportSize, EFSEquipmentSlot Slot);
 
 	// Places a mesh by an item's Inventory Mesh Transform relative to the camera, so that it's centred on a point and fits inside a circle facing the camera there.
@@ -91,6 +103,12 @@ public:
 
 	// Places a cone as half of the needle, running from a point at the middle of the case along Rotation's +Z, flattened to face the camera
 	static FTransform GetCompassNeedleTransform(const UStaticMesh& Cone, const FQuat& Rotation, const FVector& Centre, double Radius);
+
+	// Stands the lantern upright, turned a little so it doesn't look flat, centred on a point with its front on the plane through it and this height up the screen
+	static FTransform GetLanternTransform(const UStaticMesh& Mesh, const FQuat& CameraRotation, const FVector& Centre, double Height);
+
+	FORCEINLINE UStaticMeshComponent* GetSlotMesh(EFSEquipmentSlot Slot) const { return SlotMeshes[static_cast<int32>(Slot)]; }
+	FORCEINLINE UPointLightComponent* GetLanternLight() const { return LanternLight; }
 
 	// How much of the screen's height each letterbox bar covers, from 0 for none. Applied on the next tick, with the camera of that frame.
 	void SetLetterboxHeight(float ScreenFraction) { LetterboxHeight = ScreenFraction; }
@@ -119,6 +137,8 @@ private:
 
 	void UpdateSlot(const AFSPlayerController& PlayerController, EFSEquipmentSlot Slot, const UFSItemDefinition* Item);
 	void UpdateCompass(const AFSPlayerController& PlayerController);
+	void UpdateLantern(const AFSPlayerController& PlayerController);
+	void HideCorner();
 
 	// Sizes the bars to cover the top and bottom of what the camera sees right now
 	void UpdateLetterbox(const AFSPlayerController& PlayerController);
@@ -152,7 +172,19 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInterface> LetterboxMaterial;
 
+	// The flame, which lights only the lantern
+	UPROPERTY(VisibleAnywhere, Category = "Equipment")
+	TObjectPtr<UPointLightComponent> LanternLight;
+
 	float LetterboxHeight = 0.0f;
 
 	FFSEquipmentShake Shake;
+
+	// From 0 in play to 1 with the inventory open, where the meshes jiggle with the inventory's items instead of shaking
+	float InventoryWeight = 0.0f;
+
+	// How far the inventory's items have jiggled, as an angle from the camera
+	FVector2D InventoryJiggle = FVector2D::ZeroVector;
+
+	float FlickerTime = 0.0f;
 };

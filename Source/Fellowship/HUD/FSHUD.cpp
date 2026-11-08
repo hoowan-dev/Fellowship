@@ -3,6 +3,7 @@
 
 #include "HUD/FSHUD.h"
 #include "CanvasItem.h"
+#include "CanvasTypes.h"
 #include "Character/FSCharacter.h"
 #include "Enemies/FSEnemy.h"
 #include "Enemies/FSEnemyRegistry.h"
@@ -157,6 +158,12 @@ void AFSHUD::BeginPlay()
 	EquipmentDisplay = GetWorld()->SpawnActor<AFSEquipmentDisplay>(FVector::ZeroVector, FRotator::ZeroRotator, SpawnParameters);
 }
 
+float AFSHUD::GetStatBarsRight(float ScreenWidth)
+{
+	// The row is centred
+	return ScreenWidth - GetStatBarsLeft(ScreenWidth);
+}
+
 void AFSHUD::DrawHUD()
 {
 	Super::DrawHUD();
@@ -285,6 +292,19 @@ void AFSHUD::DrawInventorySlotNames()
 		}
 	};
 
+	// Turned a quarter clockwise about its middle, so it reads from top to bottom
+	const auto DrawSidewaysSlotName = [this](const FText& SlotName, const FVector& Location)
+	{
+		const FVector ScreenLocation = Project(Location);
+		if (ScreenLocation.Z > 0.0)
+		{
+			const FVector Centre(ScreenLocation.X, ScreenLocation.Y, 0.0);
+			Canvas->Canvas->PushRelativeTransform(FTranslationMatrix(-Centre) * FRotationMatrix(FRotator(0.0, 90.0, 0.0)) * FTranslationMatrix(Centre));
+			DrawCentredText(SlotName.ToString(), FVector2D(ScreenLocation.X, ScreenLocation.Y));
+			Canvas->Canvas->PopTransform();
+		}
+	};
+
 	for (int32 HandSlot = 0; HandSlot < AFSInventoryRig::HandSlotCount; ++HandSlot)
 	{
 		DrawSlotName(UFSInventoryComponent::GetHandSlotName(AFSInventoryRig::GetHandOfSlot(HandSlot)), Rig->GetHandSlotLabelLocation(HandSlot));
@@ -307,7 +327,8 @@ void AFSHUD::DrawInventorySlotNames()
 
 	DrawSlotName(LOCTEXT("DropBackpackButton", "Drop Backpack"), Rig->GetButtonLabelLocation(AFSInventoryRig::DropBackpackButton));
 	DrawSlotName(LOCTEXT("UseItemButton", "Use Item"), Rig->GetButtonLabelLocation(AFSInventoryRig::UseItemButton));
-	DrawSlotName(Rig->IsOrganizing() ? LOCTEXT("StopOrganizingButton", "Stop Organizing") : LOCTEXT("OrganizeBackpackButton", "Organize Backpack"), Rig->GetButtonLabelLocation(AFSInventoryRig::OrganizeBackpackButton));
+	// It stands on end, with its label running down it
+	DrawSidewaysSlotName(Rig->IsOrganizing() ? LOCTEXT("StopOrganizingButton", "Stop Organizing") : LOCTEXT("OrganizeBackpackButton", "Organize Backpack"), Rig->GetButtonLabelLocation(AFSInventoryRig::OrganizeBackpackButton));
 }
 
 void AFSHUD::DrawShadedRing(const FVector2D& Centre, float Radius, const UFSItemDefinition* Item, float Glow)
