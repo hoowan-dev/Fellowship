@@ -172,10 +172,17 @@ void AFSPlayerController::Interact()
 	}
 
 	// Checked first so the item stays in the world if the inventory can't open
-	if (InventoryRigClass && CanOpenInventory() && Pickup->TryCarry(Inventory))
+	if (!InventoryRigClass || !CanOpenInventory() || !Pickup->TryCarry(Inventory))
 	{
-		OpenInventory();
+		return;
 	}
+
+	// It didn't fit in the backpack, or there isn't one, so the inventory opens to organize, with the item in the top left of the organizing grid.
+	// Too big even for that, it stays on the cursor.
+	Inventory->StartOrganizing();
+	Inventory->PlaceCarriedItem(FIntPoint(0, 0), EFSItemGrid::Organize);
+
+	OpenInventory();
 }
 
 void AFSPlayerController::EnterCharacterEditor()
@@ -330,7 +337,7 @@ void AFSPlayerController::SelectInventoryButton(int32 Button)
 	{
 		DropBackpack();
 	}
-	else if (Button == AFSInventoryRig::OrganizeBackpackButton)
+	else if (Button == AFSInventoryRig::OrganizeInventoryButton)
 	{
 		if (Inventory->IsOrganizing())
 		{
@@ -406,9 +413,7 @@ void AFSPlayerController::DropBackpack()
 		return;
 	}
 
-	// There's nothing left to organize
-	StopOrganizing();
-
+	// The organizing grid stays open, as it doesn't need a backpack
 	FFSBackpackContents Contents;
 	Inventory->RemoveBackpack(Contents);
 	Pickup->SetBackpackContents(Contents);

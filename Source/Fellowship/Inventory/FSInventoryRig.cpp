@@ -11,6 +11,7 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Engine/SkinnedAsset.h"
 #include "Engine/StaticMesh.h"
+#include "Character/FSEquipmentComponent.h"
 #include "GameFramework/Character.h"
 #include "Inventory/FSInventoryComponent.h"
 #include "Inventory/FSItemDefinition.h"
@@ -28,6 +29,12 @@ namespace
 	const FName RightUpperArmBoneName(TEXT("upperarm_r"));
 	const FName RightLowerArmBoneName(TEXT("lowerarm_r"));
 	const FName RightHandBoneName(TEXT("hand_r"));
+
+	// Each hand's fingers and thumb from the knuckle out, which bend to grip what the hand holds
+	const FName LeftFingerBoneNames[] = { TEXT("index_01_l"), TEXT("index_02_l"), TEXT("index_03_l") };
+	const FName RightFingerBoneNames[] = { TEXT("index_01_r"), TEXT("index_02_r"), TEXT("index_03_r") };
+	const FName LeftThumbBoneNames[] = { TEXT("thumb_01_l"), TEXT("thumb_02_l"), TEXT("thumb_03_l") };
+	const FName RightThumbBoneNames[] = { TEXT("thumb_01_r"), TEXT("thumb_02_r"), TEXT("thumb_03_r") };
 
 	// The scale of the root bone, which shrinks the body to a point. Zero would make it impossible to work out the arms' transforms relative to it.
 	constexpr double HiddenBodyScale = 0.001;
@@ -224,8 +231,8 @@ AFSInventoryRig::AFSInventoryRig()
 		return Mesh;
 	};
 
-	LeftHandItemMesh = CreateSlotItemMesh(TEXT("LeftHandItemMesh"));
-	RightHandItemMesh = CreateSlotItemMesh(TEXT("RightHandItemMesh"));
+	LeftHandSlotItemMesh = CreateSlotItemMesh(TEXT("LeftHandSlotItemMesh"));
+	RightHandSlotItemMesh = CreateSlotItemMesh(TEXT("RightHandSlotItemMesh"));
 	LeftQuickSlotItemMesh = CreateSlotItemMesh(TEXT("LeftQuickSlotItemMesh"));
 	RightQuickSlotItemMesh = CreateSlotItemMesh(TEXT("RightQuickSlotItemMesh"));
 	ArmorSlotItemMeshes[static_cast<int32>(EFSArmorType::Head)] = CreateSlotItemMesh(TEXT("HeadArmorItemMesh"));
@@ -250,6 +257,21 @@ AFSInventoryRig::AFSInventoryRig()
 	Arms->SetCanEverAffectNavigation(false);
 	Arms->bComponentUseFixedSkelBounds = true;
 	Arms->SetBoundsScale(ArmsBoundsScale);
+
+	// What the hands hold is in the hands, gripped as the character grips it, at its full size
+	const auto CreateHeldItemMesh = [this](const FName Name, const FName Socket)
+	{
+		UStaticMeshComponent* Mesh = CreateDefaultSubobject<UStaticMeshComponent>(Name);
+		Mesh->SetupAttachment(Arms, Socket);
+		Mesh->SetMobility(EComponentMobility::Movable);
+		Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Mesh->SetCastShadow(false);
+		Mesh->SetCanEverAffectNavigation(false);
+		return Mesh;
+	};
+
+	LeftHandItemMesh = CreateHeldItemMesh(TEXT("LeftHandItemMesh"), TEXT("weapon_l"));
+	RightHandItemMesh = CreateHeldItemMesh(TEXT("RightHandItemMesh"), TEXT("weapon_r"));
 
 	// Attached to the display rather than the grid, because the grid turns its children's visibility back on as it scales
 	CursorLight = CreateDefaultSubobject<UPointLightComponent>(TEXT("CursorLight"));
@@ -301,6 +323,8 @@ void AFSInventoryRig::BeginPlay()
 	HandSlots->SetFirstPersonPrimitiveType(EFirstPersonPrimitiveType::FirstPerson);
 	LeftHandItemMesh->SetFirstPersonPrimitiveType(EFirstPersonPrimitiveType::FirstPerson);
 	RightHandItemMesh->SetFirstPersonPrimitiveType(EFirstPersonPrimitiveType::FirstPerson);
+	LeftHandSlotItemMesh->SetFirstPersonPrimitiveType(EFirstPersonPrimitiveType::FirstPerson);
+	RightHandSlotItemMesh->SetFirstPersonPrimitiveType(EFirstPersonPrimitiveType::FirstPerson);
 	QuickSlots->SetFirstPersonPrimitiveType(EFirstPersonPrimitiveType::FirstPerson);
 	LeftQuickSlotItemMesh->SetFirstPersonPrimitiveType(EFirstPersonPrimitiveType::FirstPerson);
 	RightQuickSlotItemMesh->SetFirstPersonPrimitiveType(EFirstPersonPrimitiveType::FirstPerson);
@@ -450,15 +474,29 @@ void AFSInventoryRig::BuildButtons()
 		Buttons->SetMaterial(0, GridCellMaterial);
 	}
 
-	Buttons->ClearInstances();
-	Buttons->SetNumCustomDataFloats(CellDataCount);
+	// Built once and then moved, so that a highlight stays on as Organize Inventory narrows and widens
+	const bool bBuilt = Buttons->GetInstanceCount() == ButtonCount;
+	if (!bBuilt)
+	{
+		Buttons->ClearInstances();
+		Buttons->SetNumCustomDataFloats(CellDataCount);
+	}
 
 	for (int32 Button = 0; Button < ButtonCount; ++Button)
 	{
-		// The plane's X axis runs up the screen and its Y axis across it
+		// The plane's X axis runs up the screen and its Y axis across it. A button that isn't there shrinks away, the instances being drawn together.
 		const FVector2D Centre = GetButtonCentre(Button);
-		const FVector2D Size = GetButtonSize(Button);
-		Buttons->AddInstance(FTransform(FacingCamera, FVector(0.0, Centre.X, Centre.Y), FVector(Size.Y / CellMeshSize, Size.X / CellMeshSize, 1.0f)));
+		const FVector2D Size = IsButtonShown(Button) ? GetButtonSize(Button) : FVector2D(UE_KINDA_SMALL_NUMBER);
+		const FTransform Transform(FacingCamera, FVector(0.0, Centre.X, Centre.Y), FVector(Size.Y / CellMeshSize, Size.X / CellMeshSize, 1.0f));
+
+		if (bBuilt)
+		{
+			Buttons->UpdateInstanceTransform(Button, Transform, false, Button == ButtonCount - 1);
+		}
+		else
+		{
+			Buttons->AddInstance(Transform);
+		}
 	}
 }
 
@@ -487,8 +525,9 @@ void AFSInventoryRig::BuildOrganizeGrid()
 
 double AFSInventoryRig::GetOrganizeGridOffset() const
 {
-	const double ButtonEdge = GetButtonCentre(OrganizeBackpackButton).X + GetButtonSize(OrganizeBackpackButton).X * 0.5;
-	return ButtonEdge + OrganizeGridGap + UFSInventoryComponent::OrganizeGridSize * CellSize * 0.5;
+	// Beside Organize Inventory as it stands once the grid has slid in
+	const double RightColumnEdge = GetHandSlotCentre(RightHandSlot).X + SideSlotWidth * 0.5;
+	return RightColumnEdge + ButtonGap + ButtonHeight + OrganizeGridGap + UFSInventoryComponent::OrganizeGridSize * CellSize * 0.5;
 }
 
 void AFSInventoryRig::GetDisplayLayout(bool bForOrganizing, double& OutSlide, double& OutScale) const
@@ -496,14 +535,15 @@ void AFSInventoryRig::GetDisplayLayout(bool bForOrganizing, double& OutSlide, do
 	const double HalfOrganizeGrid = UFSInventoryComponent::OrganizeGridSize * CellSize * 0.5;
 
 	const double Left = GetArmorSlotCentre(0).X - ArmorSlotSize * 0.5;
-	const double Right = bForOrganizing ? GetOrganizeGridOffset() + HalfOrganizeGrid : GetButtonCentre(OrganizeBackpackButton).X + GetButtonSize(OrganizeBackpackButton).X * 0.5;
+	// At rest, the edge of Organize Inventory at its widest
+	const double Right = bForOrganizing ? GetOrganizeGridOffset() + HalfOrganizeGrid : GetHandSlotCentre(RightHandSlot).X + SideSlotWidth * 0.5 + ButtonGap + OrganizeButtonWidth;
 
 	// Measured from the top of the highest name, over a quick slot or the top armor slot, or the button above the grid if that's higher
 	const double Top = FMath::Max3(
 		GetQuickSlotCentre(LeftQuickSlot).Y + SideSlotHeight * 0.5 + SlotLabelHeight,
 		GetArmorSlotCentre(0).Y + ArmorSlotSize * 0.5 + SlotLabelHeight,
 		GetButtonCentre(DropBackpackButton).Y + ButtonHeight * 0.5);
-	const double Bottom = -GetButtonCentre(UseItemButton).Y + ButtonHeight * 0.5;
+	const double Bottom = -GetButtonCentre(UseItemButton).Y + UseItemButtonHeight * 0.5;
 	const double HalfHeight = FMath::Max3(Top, Bottom, bForOrganizing ? HalfOrganizeGrid : 0.0);
 
 	// At rest the grid stays in the middle of the screen, however lopsided the boxes around it are
@@ -542,6 +582,9 @@ void AFSInventoryRig::ApplySlide()
 	UpdateDisplayPlacement();
 	UpdatePackTransform();
 
+	// Organize Inventory narrows as the organizing grid comes in
+	BuildButtons();
+
 	PoseArms();
 	UpdateSlotItemRests();
 	UpdateSlotItemSway();
@@ -559,7 +602,7 @@ void AFSInventoryRig::UpdateSlotItemRests()
 
 	for (int32 HandSlot = 0; HandSlot < HandSlotCount; ++HandSlot)
 	{
-		HandItemRests[HandSlot] = GetHandItemTransform(Inventory->GetHandItem(GetHandOfSlot(HandSlot)), HandSlot);
+		HandSlotItemRests[HandSlot] = GetHandSlotItemTransform(Inventory->GetHandItem(GetHandOfSlot(HandSlot)), HandSlot);
 	}
 
 	for (int32 QuickSlot = 0; QuickSlot < QuickSlotCount; ++QuickSlot)
@@ -632,26 +675,28 @@ FVector AFSInventoryRig::GetSlotLabelLocation(const FVector2D& SlotCentre, doubl
 
 FVector2D AFSInventoryRig::GetButtonCentre(int32 Button) const
 {
-	if (Button == OrganizeBackpackButton)
+	const FVector2D Size = GetButtonSize(Button);
+
+	if (Button == OrganizeInventoryButton)
 	{
 		// Beside the right column, which is centred on the grid's middle
 		const double RightColumnEdge = GetHandSlotCentre(RightHandSlot).X + SideSlotWidth * 0.5;
-		return FVector2D(RightColumnEdge + ButtonGap + ButtonHeight * 0.5, 0.0);
+		return FVector2D(RightColumnEdge + ButtonGap + Size.X * 0.5, 0.0);
 	}
 
-	const double FromMiddle = GridHeight * CellSize * 0.5 + ButtonGap + ButtonHeight * 0.5;
+	const double FromMiddle = GridHeight * CellSize * 0.5 + ButtonGap + Size.Y * 0.5;
 	return FVector2D(0.0, Button == DropBackpackButton ? FromMiddle : -FromMiddle);
 }
 
 FVector2D AFSInventoryRig::GetButtonSize(int32 Button) const
 {
-	if (IsButtonUpright(Button))
+	if (Button == OrganizeInventoryButton)
 	{
-		// From the top of the quick slot to the bottom of the hand
-		return FVector2D(ButtonHeight, SideSlotHeight * 2.0 + SideSlotSpacing);
+		// From the top of the quick slot to the bottom of the hand, narrowing as the organizing grid comes in
+		return FVector2D(FMath::Lerp<double>(OrganizeButtonWidth, ButtonHeight, GetOrganizeBlend()), SideSlotHeight * 2.0 + SideSlotSpacing);
 	}
 
-	return FVector2D(GridWidth * CellSize, ButtonHeight);
+	return FVector2D(GridWidth * CellSize, Button == UseItemButton ? UseItemButtonHeight : ButtonHeight);
 }
 
 FVector AFSInventoryRig::GetButtonLabelLocation(int32 Button) const
@@ -730,6 +775,25 @@ void AFSInventoryRig::PoseArm(bool bLeft)
 	Arms->SetBoneTransformByName(UpperArmBone, FTransform(UpperArmRotation, Shoulder), EBoneSpaces::ComponentSpace);
 	Arms->SetBoneTransformByName(LowerArmBone, FTransform(LowerArmRotation, Elbow), EBoneSpaces::ComponentSpace);
 	Arms->SetBoneTransformByName(HandBone, FTransform(HandRotation, Wrist), EBoneSpaces::ComponentSpace);
+
+	// A hand that holds something closes around it. Each joint bends towards the palm from where the skeleton holds it, about its own Z axis, which runs across the knuckles.
+	const UFSInventoryComponent* Inventory = ShownInventory.Get();
+	const bool bHolding = Inventory && Inventory->GetHandItem(bLeft ? EFSHand::Left : EFSHand::Right).Definition;
+	const auto Bend = [this, &Skeleton](TConstArrayView<FName> Bones, float Angle)
+	{
+		for (const FName Bone : Bones)
+		{
+			const int32 BoneIndex = Skeleton.FindBoneIndex(Bone);
+			if (BoneIndex != INDEX_NONE && Arms->BoneSpaceTransforms.IsValidIndex(BoneIndex))
+			{
+				const FTransform& Reference = Skeleton.GetRefBonePose()[BoneIndex];
+				Arms->BoneSpaceTransforms[BoneIndex].SetRotation(Reference.GetRotation() * FQuat(FVector::UpVector, FMath::DegreesToRadians(-Angle)));
+			}
+		}
+	};
+
+	Bend(bLeft ? MakeArrayView(LeftFingerBoneNames) : MakeArrayView(RightFingerBoneNames), bHolding ? FingerGripAngle : 0.0f);
+	Bend(bLeft ? MakeArrayView(LeftThumbBoneNames) : MakeArrayView(RightThumbBoneNames), bHolding ? ThumbGripAngle : 0.0f);
 }
 
 void AFSInventoryRig::FitPackMesh(const UFSItemDefinition* Backpack)
@@ -753,12 +817,20 @@ void AFSInventoryRig::FitPackMesh(const UFSItemDefinition* Backpack)
 	PackRestScale = Scale;
 	PackRestRotation = PackRotation;
 	PackRestLocation = FVector(PackDistance, 0.0, 0.0) - PackRotation.RotateVector(Bounds.Origin * Scale) + MeshTransform.GetLocation() * Fit;
+
+	// Raised so that where the quick slots' items are tied on is level on the screen with the middle of their cells, from which they hang down.
+	// Measured as the display is at rest, unshrunk. A wider backpack shrinks it, which leaves that only roughly level, as the pack is further away than the grid.
+	const FBox PackBox(Bounds.Origin - Bounds.BoxExtent, Bounds.Origin + Bounds.BoxExtent);
+	PackHangPoint = FVector(PackBox.GetCenter().X, PackBox.GetCenter().Y, PackBox.Min.Z + PackBox.GetSize().Z * Backpack->HungItemHeight);
+	const FVector HangOnDisplay = FTransform(PackRotation, PackRestLocation, Scale).TransformPosition(PackHangPoint);
+	PackRaise = GetPackHangTarget() - HangOnDisplay.Z * GridDistance / FMath::Max(HangOnDisplay.X, UE_KINDA_SMALL_NUMBER);
+
 	UpdatePackTransform();
 }
 
 void AFSInventoryRig::UpdatePackTransform()
 {
-	const FVector Location = PackRestLocation + FVector(0.0, GetSlideCorrection(PackDistance) + PackJiggle.X, PackJiggle.Y);
+	const FVector Location = PackRestLocation + FVector(0.0, GetSlideCorrection(PackDistance) + PackJiggle.X, PackRaise * GetDepthRatio(PackDistance) + PackJiggle.Y);
 	const FTransform Rest(PackRestRotation, Location, PackRestScale);
 
 	const UStaticMesh* PackMesh = Pack->GetStaticMesh();
@@ -774,6 +846,20 @@ void AFSInventoryRig::UpdatePackTransform()
 	const FQuat Sway = FQuat(FVector::UpVector, Swing * FMath::Sin(Angle)) * FQuat(FVector::ForwardVector, Swing * 0.5 * FMath::Sin(Angle * 0.62 + 1.0));
 
 	Pack->SetRelativeTransform(TurnAboutMeshCentre(Rest, *PackMesh, Sway));
+}
+
+double AFSInventoryRig::GetPackHangTarget() const
+{
+	return GetQuickSlotCentre(LeftQuickSlot).Y;
+}
+
+FVector2D AFSInventoryRig::GetPackHangPoint() const
+{
+	// Through the camera, which is at minus the display's depth along its X
+	const FVector OnDisplay = Pack->GetRelativeTransform().TransformPosition(PackHangPoint);
+	const double FromCamera = OnDisplay.X + DisplayDepth;
+	const double ToGrid = (GridDistance + DisplayDepth) / FMath::Max(FromCamera, UE_KINDA_SMALL_NUMBER);
+	return FVector2D(OnDisplay.Y + DisplaySlide, OnDisplay.Z) * ToGrid - FVector2D(DisplaySlide, 0.0);
 }
 
 void AFSInventoryRig::UpdateDisplayPlacement()
@@ -794,6 +880,9 @@ void AFSInventoryRig::ShowInventory(const UFSInventoryComponent& Inventory)
 	RefreshArmsMesh();
 
 	bHasBackpack = Inventory.HasBackpack();
+
+	// Drop Backpack comes and goes with the backpack
+	BuildButtons();
 
 	if (bOrganizing != Inventory.IsOrganizing())
 	{
@@ -889,7 +978,8 @@ void AFSInventoryRig::ShowInventory(const UFSInventoryComponent& Inventory)
 		ItemMesh->SetCanEverAffectNavigation(false);
 		ItemMesh->SetFirstPersonPrimitiveType(EFirstPersonPrimitiveType::FirstPerson);
 		ItemMesh->SetRelativeTransform(ItemTransform);
-		ItemMesh->SetVisibility(Grid->GetVisibleFlag());
+		// Whether the grids would show, rather than whether the backpack's does, which stays hidden without a backpack while the organizing grid's items show
+		ItemMesh->SetVisibility(IsGridShown());
 		ItemMesh->RegisterComponent();
 
 		ItemMeshes.Add(ItemMesh);
@@ -936,8 +1026,18 @@ void AFSInventoryRig::ShowInventory(const UFSInventoryComponent& Inventory)
 		const FFSInventoryItem& Item = Inventory.GetHandItem(GetHandOfSlot(HandSlot));
 		UStaticMeshComponent* HandItemMesh = GetHandItemMesh(HandSlot);
 
+		// Held in the hand, at the socket the character holds it at, which a different character could name differently
+		const FName Socket = GetHandSocket(HandSlot);
+		if (HandItemMesh->GetAttachParent() != Arms || HandItemMesh->GetAttachSocketName() != Socket)
+		{
+			HandItemMesh->AttachToComponent(Arms, FAttachmentTransformRules::KeepRelativeTransform, Socket);
+		}
 		HandItemMesh->SetStaticMesh(Item.Definition ? Item.Definition->Mesh.Get() : nullptr);
-		HandItemRests[HandSlot] = GetHandItemTransform(Item, HandSlot);
+		HandItemMesh->SetRelativeTransform(GetHandItemTransform(Item, HandSlot));
+
+		// And in the hand's cell, like the other slots
+		GetHandSlotItemMesh(HandSlot)->SetStaticMesh(Item.Definition ? Item.Definition->Mesh.Get() : nullptr);
+		HandSlotItemRests[HandSlot] = GetHandSlotItemTransform(Item, HandSlot);
 		AddSlotBorder(Item, GetHandSlotCentre(HandSlot), GetSideSlotSize());
 
 		HandSlots->SetCustomDataValue(HandSlot, CellTakenData, Item.Definition ? 1.0f : 0.0f, true);
@@ -947,6 +1047,9 @@ void AFSInventoryRig::ShowInventory(const UFSInventoryComponent& Inventory)
 			SetCellItemColor(*HandSlots, HandSlot, *Item.Definition);
 		}
 	}
+
+	// The fingers close around what the hands now hold
+	PoseArms();
 
 	for (int32 QuickSlot = 0; QuickSlot < QuickSlotCount; ++QuickSlot)
 	{
@@ -1033,6 +1136,31 @@ void AFSInventoryRig::AddBorder(double Left, double Top, double Width, double He
 }
 
 FTransform AFSInventoryRig::GetHandItemTransform(const FFSInventoryItem& Item, int32 HandSlot) const
+{
+	if (!Item.Definition)
+	{
+		return FTransform::Identity;
+	}
+
+	// As the character holds it drawn, relative to the hand's socket
+	const bool bLeft = HandSlot == LeftHandSlot;
+	const AActor* Character = AttachedCharacterMesh.IsValid() ? AttachedCharacterMesh->GetOwner() : nullptr;
+	const UFSEquipmentComponent* Equipment = Character ? Character->FindComponentByClass<UFSEquipmentComponent>() : nullptr;
+	const UFSEquipmentComponent* Defaults = GetDefault<UFSEquipmentComponent>();
+	const UFSEquipmentComponent& Holding = Equipment ? *Equipment : *Defaults;
+
+	return Item.Definition->HandEquippedTransform * (bLeft ? Holding.LeftHeldOffset : Holding.RightHeldOffset);
+}
+
+FName AFSInventoryRig::GetHandSocket(int32 HandSlot) const
+{
+	const AActor* Character = AttachedCharacterMesh.IsValid() ? AttachedCharacterMesh->GetOwner() : nullptr;
+	const UFSEquipmentComponent* Equipment = Character ? Character->FindComponentByClass<UFSEquipmentComponent>() : nullptr;
+	const UFSEquipmentComponent& Holding = Equipment ? *Equipment : *GetDefault<UFSEquipmentComponent>();
+	return HandSlot == LeftHandSlot ? Holding.LeftHandSocket : Holding.RightHandSocket;
+}
+
+FTransform AFSInventoryRig::GetHandSlotItemTransform(const FFSInventoryItem& Item, int32 HandSlot) const
 {
 	return GetSlotItemTransform(Item, GetHandSlotCentre(HandSlot), GetSideSlotSize());
 }
@@ -1204,18 +1332,19 @@ void AFSInventoryRig::SetPackVisible(bool bVisible)
 
 void AFSInventoryRig::UpdateGridVisibility()
 {
-	Grid->SetVisibility(Display->GetVisibleFlag() && GridScale > 0.0f, true);
+	const bool bShown = IsGridShown();
+	Grid->SetVisibility(bShown, true);
 
-	// The hands' cells are attached to the grid too, and they stay. The grid's own cells are hidden without touching its children.
+	// The hands' cells are attached to the grid too, and they stay, as do the buttons that don't need a backpack. The grid's own cells are hidden without touching its children.
 	if (!bHasBackpack)
 	{
 		Grid->SetVisibility(false, false);
 		QuickSlots->SetVisibility(false);
-		Buttons->SetVisibility(false);
 	}
 
 	// Showing the grid shows this too. It stays until it has finished sliding back off the screen.
-	OrganizeGrid->SetVisibility(Grid->GetVisibleFlag() && bHasBackpack && (bOrganizing || SlideAmount > 0.0f));
+	// It doesn't need a backpack, being where items go that don't fit in one, so it goes by whether the grid would show rather than whether it does.
+	OrganizeGrid->SetVisibility(bShown && (bOrganizing || SlideAmount > 0.0f));
 }
 
 void AFSInventoryRig::SetGridVisible(bool bVisible)
@@ -1411,10 +1540,10 @@ void AFSInventoryRig::UpdateSlotItemSway()
 		ItemMesh.SetRelativeTransform(Mesh ? TurnAboutMeshCentre(Rest, *Mesh, Sway) : Rest);
 	};
 
-	// Spread through the sway, so that no two move together
+	// Spread through the sway, so that no two move together. What the hands hold is gripped, so only its copy in the cell sways.
 	for (int32 HandSlot = 0; HandSlot < HandSlotCount; ++HandSlot)
 	{
-		PlaceItem(*GetHandItemMesh(HandSlot), HandItemRests[HandSlot], GetSlotItemSwayRotation(HandSlot * 0.5));
+		PlaceItem(*GetHandSlotItemMesh(HandSlot), HandSlotItemRests[HandSlot], GetSlotItemSwayRotation(HandSlot * 0.5));
 	}
 
 	for (int32 QuickSlot = 0; QuickSlot < QuickSlotCount; ++QuickSlot)
@@ -1454,7 +1583,7 @@ bool AFSInventoryRig::GetCellFromWorldRay(const FVector& RayOrigin, const FVecto
 bool AFSInventoryRig::IsCellInOrganizeGrid(const FIntPoint& Cell) const
 {
 	const int32 Size = UFSInventoryComponent::OrganizeGridSize;
-	return bOrganizing && bHasBackpack && Cell.X >= 0 && Cell.X < Size && Cell.Y >= 0 && Cell.Y < Size;
+	return bOrganizing && Cell.X >= 0 && Cell.X < Size && Cell.Y >= 0 && Cell.Y < Size;
 }
 
 FIntPoint AFSInventoryRig::GetOrganizeCellFromGridPoint(const FVector2D& GridPoint) const
@@ -1546,7 +1675,7 @@ bool AFSInventoryRig::GetArmorSlotFromWorldRay(const FVector& RayOrigin, const F
 bool AFSInventoryRig::GetButtonFromWorldRay(const FVector& RayOrigin, const FVector& RayDirection, int32& OutButton) const
 {
 	FVector2D GridPoint;
-	if (!bHasBackpack || !GetGridPointFromWorldRay(RayOrigin, RayDirection, GridPoint))
+	if (!GetGridPointFromWorldRay(RayOrigin, RayDirection, GridPoint))
 	{
 		return false;
 	}
@@ -1555,7 +1684,7 @@ bool AFSInventoryRig::GetButtonFromWorldRay(const FVector& RayOrigin, const FVec
 	{
 		const FVector2D FromCentre = GridPoint - GetButtonCentre(Button);
 		const FVector2D HalfSize = GetButtonSize(Button) * 0.5;
-		if (FMath::Abs(FromCentre.X) <= HalfSize.X && FMath::Abs(FromCentre.Y) <= HalfSize.Y)
+		if (IsButtonShown(Button) && FMath::Abs(FromCentre.X) <= HalfSize.X && FMath::Abs(FromCentre.Y) <= HalfSize.Y)
 		{
 			OutButton = Button;
 			return true;

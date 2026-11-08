@@ -156,7 +156,7 @@ public:
 
 	FFSOnBackpackChanged OnBackpackChanged;
 
-	// Opens up an empty grid to hold items for a while. Returns false, changing nothing, without a backpack or if it's already open.
+	// Opens up an empty grid to hold items for a while, with or without a backpack. Returns false, changing nothing, if it's already open.
 	bool StartOrganizing();
 
 	// Closes that grid, handing over what's in it. Returns false if it isn't open. The cursor keeps what it holds.

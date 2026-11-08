@@ -71,7 +71,7 @@ public:
 	// The buttons below the grid, from left to right
 	static constexpr int32 DropBackpackButton = 0;
 	static constexpr int32 UseItemButton = 1;
-	static constexpr int32 OrganizeBackpackButton = 2;
+	static constexpr int32 OrganizeInventoryButton = 2;
 	static constexpr int32 ButtonCount = 3;
 
 	// Which of the inventory's quick slots an instance of the quick slots is for
@@ -141,11 +141,17 @@ public:
 	// Matches the pack, the grid, the item meshes, their borders and the carried item to what the inventory holds
 	void ShowInventory(const UFSInventoryComponent& Inventory);
 
-	// Where a held item's mesh sits relative to the grid, upright and fitted to the hand's cell
+	// Where a held item's mesh sits relative to its hand's socket on the arms, gripped as the character grips it drawn, at its full size
 	FTransform GetHandItemTransform(const FFSInventoryItem& Item, int32 HandSlot) const;
+
+	// The socket on the arms that a hand's item is held at, the same as the character holds it at
+	FName GetHandSocket(int32 HandSlot) const;
 
 	// Where a quick slot's item's mesh sits relative to the grid, upright and fitted to the slot's cell
 	FTransform GetQuickSlotItemTransform(const FFSInventoryItem& Item, int32 QuickSlot) const;
+
+	// The same for what a hand holds, shown in the hand's cell
+	FTransform GetHandSlotItemTransform(const FFSInventoryItem& Item, int32 HandSlot) const;
 	FTransform GetArmorSlotItemTransform(const FFSInventoryItem& Item, int32 ArmorSlot) const;
 
 	// Where an item's mesh sits relative to the grid, fitted to the cells it covers
@@ -161,6 +167,9 @@ public:
 	FORCEINLINE const TArray<TObjectPtr<UStaticMeshComponent>>& GetItemMeshes() const { return ItemMeshes; }
 	FORCEINLINE UStaticMeshComponent* GetCarriedItemMesh() const { return CarriedItemMesh; }
 	FORCEINLINE UStaticMeshComponent* GetHandItemMesh(int32 HandSlot) const { return HandSlot == LeftHandSlot ? LeftHandItemMesh : RightHandItemMesh; }
+
+	// The same item shown in the hand's cell, fitted to it like the other slots' items
+	FORCEINLINE UStaticMeshComponent* GetHandSlotItemMesh(int32 HandSlot) const { return HandSlot == LeftHandSlot ? LeftHandSlotItemMesh : RightHandSlotItemMesh; }
 	FORCEINLINE int32 GetHoveredHandSlot() const { return HoveredHandSlot; }
 	FORCEINLINE UPointLightComponent* GetCursorLight() const { return CursorLight; }
 	FORCEINLINE const FIntPoint& GetHoveredCell() const { return HoveredCell; }
@@ -187,6 +196,14 @@ public:
 	FORCEINLINE int32 GetHoveredArmorSlot() const { return HoveredArmorSlot; }
 	FORCEINLINE UPoseableMeshComponent* GetArms() const { return Arms; }
 	FORCEINLINE UStaticMeshComponent* GetPack() const { return Pack; }
+
+	// Where the quick slots' items are tied onto the pack's sides, on the display, in cm from its middle as seen from the camera on the grid's plane:
+	// X to the right and Y up. Taken at the middle of the pack's width.
+	FVector2D GetPackHangPoint() const;
+
+	// The height on the grid's plane that the point where items hang off the pack is raised to, level with the middle of the quick slots' cells,
+	// so that what hangs down from there sits about where the cells are
+	double GetPackHangTarget() const;
 	FORCEINLINE UStaticMeshComponent* GetBackgroundDarkener() const { return BackgroundDarkener; }
 	FORCEINLINE UCameraComponent* GetViewCamera() const { return ViewCamera; }
 
@@ -239,19 +256,23 @@ public:
 	FVector GetArmorSlotLabelLocation(int32 ArmorSlot) const;
 
 	// The centre of a button on the plane of the grid, in cm from the grid's centre: X to the right and Y up.
-	// Drop Backpack is above the grid and Use Item below it, both as wide as it. Organize Backpack stands right of the right column, as tall as it.
+	// Drop Backpack is above the grid and Use Item below it, both as wide as it. Organize Inventory is right of the right column, as tall as it.
+	FVector2D GetButtonSize(int32 Button) const;
 	FVector2D GetButtonCentre(int32 Button) const;
 
-	// A button's width and height on the plane of the grid, in cm
-	FVector2D GetButtonSize(int32 Button) const;
+	// Whether a button is there to see and press. Drop Backpack needs a backpack, and the others are always there.
+	FORCEINLINE bool IsButtonShown(int32 Button) const { return bHasBackpack || Button != DropBackpackButton; }
 
-	// Whether a button stands upright, with its label running down it
-	static bool IsButtonUpright(int32 Button) { return Button == OrganizeBackpackButton; }
+	// How far the display has slid over to organize, eased, from 0 at rest to 1 with the organizing grid on the screen
+	FORCEINLINE float GetOrganizeBlend() const { return FMath::SmoothStep(0.0f, 1.0f, SlideAmount); }
+
+	// Whether a button stands on end, with its label running down it. Organize Inventory does once the organizing grid is mostly on the screen, as it narrows to make room.
+	FORCEINLINE bool IsButtonUpright(int32 Button) const { return Button == OrganizeInventoryButton && GetOrganizeBlend() >= 0.5f; }
 
 	// The point in the world to centre a button's label on
 	FVector GetButtonLabelLocation(int32 Button) const;
 
-	// How far the middle of the organizing grid is to the right of the middle of the grid, just clear of the Organize Backpack button. It slides along with everything else, starting off screen.
+	// How far the middle of the organizing grid is to the right of the middle of the grid, just clear of the Organize Inventory button. It slides along with everything else, starting off screen.
 	double GetOrganizeGridOffset() const;
 
 protected:
@@ -283,6 +304,9 @@ protected:
 
 	// Shows the grid and everything on it if the display is showing and it's scaled in, except for what needs a backpack when there isn't one
 	void UpdateGridVisibility();
+
+	// Whether the grids and what's on them are showing: the display is up and they've started scaling in. The backpack's own cells also need a backpack.
+	FORCEINLINE bool IsGridShown() const { return Display->GetVisibleFlag() && GridScale > 0.0f; }
 
 	void AddItemBorder(const FFSInventoryItem& Item, const FVector2D& TopLeft);
 
@@ -376,13 +400,19 @@ protected:
 	UPROPERTY(VisibleAnywhere, Category = "Inventory")
 	TObjectPtr<UInstancedStaticMeshComponent> HandSlots;
 
-	// Attached to the grid so it scales in and out along with it. Has no mesh while the hand is empty.
+	// Held in the hand, at its full size. Has no mesh while the hand is empty.
 	UPROPERTY(VisibleAnywhere, Category = "Inventory")
 	TObjectPtr<UStaticMeshComponent> LeftHandItemMesh;
 
-	// Attached to the grid so it scales in and out along with it. Has no mesh while the hand is empty.
 	UPROPERTY(VisibleAnywhere, Category = "Inventory")
 	TObjectPtr<UStaticMeshComponent> RightHandItemMesh;
+
+	// What the hand holds, also shown in its cell. Attached to the grid so it scales in and out along with it. Has no mesh while the hand is empty.
+	UPROPERTY(VisibleAnywhere, Category = "Inventory")
+	TObjectPtr<UStaticMeshComponent> LeftHandSlotItemMesh;
+
+	UPROPERTY(VisibleAnywhere, Category = "Inventory")
+	TObjectPtr<UStaticMeshComponent> RightHandSlotItemMesh;
 
 	// A cell for each quick slot, at the top of the column beside the grid on its side. Attached to the grid so they scale in and out along with it.
 	UPROPERTY(VisibleAnywhere, Category = "Inventory")
@@ -527,6 +557,13 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Hands", meta = (ClampMin = "1.0", Units = cm))
 	float HandDistance = 65.0f;
 
+	// How far each joint of a hand's fingers bends to grip what it holds, and the thumb's. An empty hand stays open.
+	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Hands", meta = (Units = deg))
+	float FingerGripAngle = 70.0f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Hands", meta = (Units = deg))
+	float ThumbGripAngle = 30.0f;
+
 	// From the wrist bone to the part of the hand centred in its cell
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Hands", meta = (ClampMin = "0.0", Units = cm))
 	float WristToPalm = 10.0f;
@@ -562,9 +599,17 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Armor Slots", meta = (Units = cm))
 	float ArmorSlotHeight = 0.0f;
 
-	// How thick the buttons are: the height of those above and below the grid, and the width of the one standing beside the right column
+	// How thick the buttons are: the height of Drop Backpack above the grid, and the width of Organize Inventory while it stands beside the organizing grid
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Buttons", meta = (ClampMin = "0.1", Units = cm))
 	float ButtonHeight = 2.5f;
+
+	// The height of Use Item below the grid
+	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Buttons", meta = (ClampMin = "0.1", Units = cm))
+	float UseItemButtonHeight = 5.0f;
+
+	// The width of Organize Inventory while not organizing, room for its label to lie flat. It narrows to Button Height as the organizing grid slides in.
+	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Buttons", meta = (ClampMin = "0.1", Units = cm))
+	float OrganizeButtonWidth = 10.0f;
 
 	// Between the grid and the buttons above and below it, and between the right column and the button beside it
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Buttons", meta = (ClampMin = "0.0", Units = cm))
@@ -578,7 +623,7 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Layout", meta = (ClampMin = "1.0", Units = cm))
 	float ScreenHalfHeight = 22.0f;
 
-	// Between the Organize Backpack button and the organizing grid
+	// Between the Organize Inventory button and the organizing grid
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Organizing", meta = (ClampMin = "0.0", Units = cm))
 	float OrganizeGridGap = 1.0f;
 
@@ -693,6 +738,12 @@ private:
 	// Where the pack sits with the display at rest
 	FVector PackRestLocation = FVector::ZeroVector;
 
+	// How far the pack is raised, as a height on the grid's plane, so that it's raised by the same amount on the screen however far away it is
+	double PackRaise = 0.0;
+
+	// Where items are tied onto the pack's sides, in its mesh's own space
+	FVector PackHangPoint = FVector::ZeroVector;
+
 	bool bHasBackpack = true;
 
 	TArray<FIntPoint> HighlightedCells;
@@ -743,8 +794,8 @@ private:
 	FVector CarriedItemTurnShift = FVector::ZeroVector;
 
 	// Where the items in the hands and quick slots sit, which they sway about
-	FTransform HandItemRests[HandSlotCount];
 	FTransform QuickSlotItemRests[QuickSlotCount];
+	FTransform HandSlotItemRests[HandSlotCount];
 	FTransform ArmorSlotItemRests[ArmorSlotCount];
 	double SlotItemSwayTime = 0.0;
 

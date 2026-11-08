@@ -206,7 +206,7 @@ bool UFSInventoryComponent::RemoveBackpack(FFSBackpackContents& OutContents)
 
 bool UFSInventoryComponent::StartOrganizing()
 {
-	if (!HasBackpack() || bOrganizing)
+	if (bOrganizing)
 	{
 		return false;
 	}
