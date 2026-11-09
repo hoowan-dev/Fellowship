@@ -187,7 +187,7 @@ public:
 	// What selecting a cell of the organizing grid does in the open inventory: picks up the item there or places the carried one
 	void SelectInventoryOrganizeCell(const FIntPoint& Cell);
 
-	// What selecting one of AFSInventoryRig's buttons does in the open inventory. Using an item doesn't do anything yet.
+	// What selecting one of AFSInventoryRig's buttons does in the open inventory. Using an item doesn't do anything yet. Close Inventory closes it, as CloseInventory does.
 	void SelectInventoryButton(int32 Button);
 
 	// Turns the carried item a quarter turn clockwise, if the inventory is open and an item is carried

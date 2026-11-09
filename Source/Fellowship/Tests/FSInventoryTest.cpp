@@ -2007,6 +2007,10 @@ bool FFSInventoryButtonsTest::RunTest(const FString& Parameters)
 	Controller->SelectInventoryButton(AFSInventoryRig::OrganizeInventoryButton);
 	TestFalse(TEXT("And closes it again"), Inventory->IsOrganizing());
 
+	Controller->SelectInventoryButton(AFSInventoryRig::CloseInventoryButton);
+	TestEqual(TEXT("Close Inventory closes it"), Controller->GetInventoryViewState(), EFSInventoryViewState::Closing);
+	TestFalse(TEXT("Tossing what's carried, as closing it any other way does"), Inventory->IsCarryingItem());
+
 	return true;
 }
 

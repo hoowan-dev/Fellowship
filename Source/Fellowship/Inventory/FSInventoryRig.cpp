@@ -210,6 +210,16 @@ AFSInventoryRig::AFSInventoryRig()
 	Buttons->SetCastShadow(false);
 	Buttons->SetCanEverAffectNavigation(false);
 
+	// Just in front of its cell, and drawn after the cells, as the item borders are
+	CloseButtonFill = CreateDefaultSubobject<UInstancedStaticMeshComponent>(TEXT("CloseButtonFill"));
+	CloseButtonFill->SetupAttachment(Grid);
+	CloseButtonFill->SetMobility(EComponentMobility::Movable);
+	CloseButtonFill->SetRelativeLocation(FVector(-ItemBorderOffset, 0.0f, 0.0f));
+	CloseButtonFill->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	CloseButtonFill->SetCastShadow(false);
+	CloseButtonFill->SetCanEverAffectNavigation(false);
+	CloseButtonFill->SetTranslucentSortPriority(1);
+
 	OrganizeGrid = CreateDefaultSubobject<UInstancedStaticMeshComponent>(TEXT("OrganizeGrid"));
 	OrganizeGrid->SetupAttachment(Grid);
 	OrganizeGrid->SetMobility(EComponentMobility::Movable);
@@ -290,6 +300,7 @@ AFSInventoryRig::AFSInventoryRig()
 		QuickSlots->SetStaticMesh(PlaneMesh.Object);
 		ArmorSlots->SetStaticMesh(PlaneMesh.Object);
 		Buttons->SetStaticMesh(PlaneMesh.Object);
+		CloseButtonFill->SetStaticMesh(PlaneMesh.Object);
 		OrganizeGrid->SetStaticMesh(PlaneMesh.Object);
 		BackgroundDarkener->SetStaticMesh(PlaneMesh.Object);
 	}
@@ -331,6 +342,7 @@ void AFSInventoryRig::BeginPlay()
 		ArmorSlotItemMesh->SetFirstPersonPrimitiveType(EFirstPersonPrimitiveType::FirstPerson);
 	}
 	Buttons->SetFirstPersonPrimitiveType(EFirstPersonPrimitiveType::FirstPerson);
+	CloseButtonFill->SetFirstPersonPrimitiveType(EFirstPersonPrimitiveType::FirstPerson);
 	OrganizeGrid->SetFirstPersonPrimitiveType(EFirstPersonPrimitiveType::FirstPerson);
 	Arms->SetFirstPersonPrimitiveType(EFirstPersonPrimitiveType::FirstPerson);
 	BackgroundDarkener->SetFirstPersonPrimitiveType(EFirstPersonPrimitiveType::FirstPerson);
@@ -495,6 +507,40 @@ void AFSInventoryRig::BuildButtons()
 			Buttons->AddInstance(Transform);
 		}
 	}
+
+	// Close Inventory's solid colour covers its cell exactly
+	if (ItemBorderMaterial)
+	{
+		CloseButtonFill->SetMaterial(0, ItemBorderMaterial);
+	}
+
+	const FVector2D CloseCentre = GetButtonCentre(CloseInventoryButton);
+	const FVector2D CloseSize = GetButtonSize(CloseInventoryButton);
+	const FTransform CloseTransform(FacingCamera, FVector(0.0, CloseCentre.X, CloseCentre.Y), FVector(CloseSize.Y / CellMeshSize, CloseSize.X / CellMeshSize, 1.0f));
+
+	if (CloseButtonFill->GetInstanceCount() == 1)
+	{
+		CloseButtonFill->UpdateInstanceTransform(0, CloseTransform, false, true);
+	}
+	else
+	{
+		CloseButtonFill->ClearInstances();
+		CloseButtonFill->SetNumCustomDataFloats(BorderDataCount);
+		CloseButtonFill->AddInstance(CloseTransform);
+	}
+
+	UpdateCloseButtonColor();
+}
+
+void AFSInventoryRig::UpdateCloseButtonColor()
+{
+	if (CloseButtonFill->GetInstanceCount() == 0)
+	{
+		return;
+	}
+
+	const FLinearColor& Color = HoveredButton == CloseInventoryButton ? CloseButtonHoveredColor : CloseButtonColor;
+	CloseButtonFill->SetCustomData(0, TArray<float>{ Color.R, Color.G, Color.B }, true);
 }
 
 void AFSInventoryRig::BuildOrganizeGrid()
@@ -670,6 +716,13 @@ FVector2D AFSInventoryRig::GetButtonCentre(int32 Button) const
 {
 	const FVector2D Size = GetButtonSize(Button);
 
+	if (Button == CloseInventoryButton)
+	{
+		// In the top right corner: level with Drop Backpack, and lined up with the right edge of Organize Inventory
+		const double Right = GetButtonCentre(OrganizeInventoryButton).X + GetButtonSize(OrganizeInventoryButton).X * 0.5;
+		return FVector2D(Right - Size.X * 0.5, GridHeight * CellSize * 0.5 + Spacing + Size.Y * 0.5);
+	}
+
 	if (Button == OrganizeInventoryButton)
 	{
 		// Beside the right column, which is centred on the grid's middle
@@ -683,6 +736,12 @@ FVector2D AFSInventoryRig::GetButtonCentre(int32 Button) const
 
 FVector2D AFSInventoryRig::GetButtonSize(int32 Button) const
 {
+	if (Button == CloseInventoryButton)
+	{
+		// Square, as tall as the other buttons are thick
+		return FVector2D(ButtonHeight, ButtonHeight);
+	}
+
 	if (Button == OrganizeInventoryButton)
 	{
 		// Standing on end, from the top of the quick slot to the bottom of the hand
@@ -1706,6 +1765,8 @@ void AFSInventoryRig::SetHoveredButton(int32 Button)
 	{
 		Buttons->SetCustomDataValue(HoveredButton, CellHoveredData, 1.0f, true);
 	}
+
+	UpdateCloseButtonColor();
 }
 
 void AFSInventoryRig::SetHoveredHandSlot(int32 HandSlot)

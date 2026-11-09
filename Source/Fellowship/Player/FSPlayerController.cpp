@@ -421,7 +421,11 @@ void AFSPlayerController::SelectInventoryButton(int32 Button)
 		return;
 	}
 
-	if (Button == AFSInventoryRig::DropBackpackButton)
+	if (Button == AFSInventoryRig::CloseInventoryButton)
+	{
+		CloseInventory();
+	}
+	else if (Button == AFSInventoryRig::DropBackpackButton)
 	{
 		DropBackpack();
 	}

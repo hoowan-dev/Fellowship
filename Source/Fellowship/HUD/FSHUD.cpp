@@ -316,6 +316,7 @@ void AFSHUD::DrawInventorySlotNames()
 	}
 
 	DrawSlotName(LOCTEXT("UseItemButton", "Use Item"), Rig->GetButtonLabelLocation(AFSInventoryRig::UseItemButton));
+	DrawSlotName(LOCTEXT("CloseInventoryButton", "X"), Rig->GetButtonLabelLocation(AFSInventoryRig::CloseInventoryButton));
 
 	// Standing on end beside the right column, its label runs down it
 	DrawSidewaysSlotName(Rig->IsOrganizing() ? LOCTEXT("StopOrganizingButton", "Stop Organizing") : LOCTEXT("OrganizeInventoryButton", "Organize Inventory"), Rig->GetButtonLabelLocation(AFSInventoryRig::OrganizeInventoryButton));

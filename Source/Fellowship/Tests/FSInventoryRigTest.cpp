@@ -280,7 +280,7 @@ bool FFSInventoryRigButtonsTest::RunTest(const FString& Parameters)
 	const UInstancedStaticMeshComponent* Buttons = Test.Rig->GetButtons();
 	const double HalfGrid = GridSize * CellSize * 0.5;
 
-	TestEqual(TEXT("Three buttons"), Buttons->GetInstanceCount(), AFSInventoryRig::ButtonCount);
+	TestEqual(TEXT("Four buttons"), Buttons->GetInstanceCount(), AFSInventoryRig::ButtonCount);
 	TestEqual(TEXT("They have the same custom data as the grid's cells"), Buttons->NumCustomDataFloats, AFSInventoryRig::CellDataCount);
 
 	FTransform Drop;
@@ -317,6 +317,33 @@ bool FFSInventoryRigButtonsTest::RunTest(const FString& Parameters)
 	constexpr double HalfScreenHeight = 22.5;
 	TestTrue(TEXT("They're on a 16:9 screen"), Use.GetLocation().Z - HalfSize(Use).Y > -HalfScreenHeight && Drop.GetLocation().Z + HalfSize(Drop).Y < HalfScreenHeight);
 	TestTrue(TEXT("All the way across"), Organize.GetLocation().Y + HalfSize(Organize).X < HalfScreenWidth);
+
+	// Close Inventory, in the top right corner
+	FTransform Close;
+	Buttons->GetInstanceTransform(AFSInventoryRig::CloseInventoryButton, Close);
+	TestEqual(TEXT("Close Inventory lines up with Organize Inventory's right edge"), Close.GetLocation().Y + HalfSize(Close).X, Organize.GetLocation().Y + HalfSize(Organize).X, 0.001);
+	TestEqual(TEXT("And is level with Drop Backpack"), Close.GetLocation().Z, Drop.GetLocation().Z, 0.001);
+	TestEqual(TEXT("It's square"), HalfSize(Close).X, HalfSize(Close).Y, 0.001);
+	TestEqual(TEXT("As tall as Drop Backpack"), HalfSize(Close).Y, HalfSize(Drop).Y, 0.001);
+	TestTrue(TEXT("Clear of Drop Backpack"), Close.GetLocation().Y - HalfSize(Close).X > Drop.GetLocation().Y + HalfSize(Drop).X);
+	TestFalse(TEXT("Its label isn't turned"), Test.Rig->IsButtonUpright(AFSInventoryRig::CloseInventoryButton));
+
+	// Its solid colour, in front of its cell
+	const UInstancedStaticMeshComponent* CloseFill = Test.Rig->GetCloseButtonFill();
+	TestEqual(TEXT("It has one solid fill"), CloseFill->GetInstanceCount(), 1);
+	FTransform Fill;
+	CloseFill->GetInstanceTransform(0, Fill);
+	TestTrue(TEXT("Covering the button exactly"), Fill.GetLocation().Equals(Close.GetLocation(), 0.001) && Fill.GetScale3D().Equals(Close.GetScale3D(), 0.001));
+	TestTrue(TEXT("In front of it"), CloseFill->GetRelativeLocation().X < Buttons->GetRelativeLocation().X);
+	TestTrue(TEXT("With the borders' material, which isn't see-through"), CloseFill->GetMaterial(0) == Test.Rig->GetItemBorders()->GetMaterial(0));
+
+	const auto FillColor = [CloseFill]() { return FLinearColor(CloseFill->PerInstanceSMCustomData[0], CloseFill->PerInstanceSMCustomData[1], CloseFill->PerInstanceSMCustomData[2]); };
+	const FLinearColor Red = FillColor();
+	TestTrue(TEXT("Which is red"), Red.R > 0.5f && Red.G < 0.2f && Red.B < 0.2f);
+	Test.Rig->SetHoveredButton(AFSInventoryRig::CloseInventoryButton);
+	TestTrue(TEXT("And brighter while hovered"), FillColor().G > Red.G);
+	Test.Rig->SetHoveredButton(INDEX_NONE);
+	TestTrue(TEXT("Going back after"), FillColor().Equals(Red));
 
 	for (int32 Button = 0; Button < AFSInventoryRig::ButtonCount; ++Button)
 	{

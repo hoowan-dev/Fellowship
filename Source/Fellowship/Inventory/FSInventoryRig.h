@@ -68,11 +68,12 @@ public:
 	static constexpr int32 RightQuickSlot = 1;
 	static constexpr int32 QuickSlotCount = 2;
 
-	// The buttons below the grid, from left to right
+	// The buttons around the grid. Close Inventory is the red X in the top right corner.
 	static constexpr int32 DropBackpackButton = 0;
 	static constexpr int32 UseItemButton = 1;
 	static constexpr int32 OrganizeInventoryButton = 2;
-	static constexpr int32 ButtonCount = 3;
+	static constexpr int32 CloseInventoryButton = 3;
+	static constexpr int32 ButtonCount = 4;
 
 	// Which of the inventory's quick slots an instance of the quick slots is for
 	static EFSQuickSlot GetQuickSlotOfIndex(int32 QuickSlotIndex);
@@ -186,6 +187,7 @@ public:
 	FORCEINLINE double GetDisplayScale() const { return DisplayScale; }
 	FORCEINLINE UInstancedStaticMeshComponent* GetGrid() const { return Grid; }
 	FORCEINLINE UInstancedStaticMeshComponent* GetItemBorders() const { return ItemBorders; }
+	FORCEINLINE UInstancedStaticMeshComponent* GetCloseButtonFill() const { return CloseButtonFill; }
 	FORCEINLINE int32 GetCellIndex(const FIntPoint& Cell) const { return Cell.Y * GridWidth + Cell.X; }
 	FORCEINLINE UInstancedStaticMeshComponent* GetHandSlots() const { return HandSlots; }
 	FORCEINLINE UInstancedStaticMeshComponent* GetQuickSlots() const { return QuickSlots; }
@@ -287,6 +289,9 @@ protected:
 	void BuildQuickSlots();
 	void BuildArmorSlots();
 	void BuildButtons();
+
+	// Brightens Close Inventory while it's hovered, as its solid colour hides its cell's highlight
+	void UpdateCloseButtonColor();
 	void BuildOrganizeGrid();
 	// Matches the arms to the character, or to what's worn on its body
 	void RefreshArmsMesh();
@@ -442,6 +447,10 @@ protected:
 	UPROPERTY(VisibleAnywhere, Category = "Inventory")
 	TObjectPtr<UInstancedStaticMeshComponent> Buttons;
 
+	// Close Inventory's solid colour, drawn just in front of its cell with the item borders' material, as the cells' material is see-through
+	UPROPERTY(VisibleAnywhere, Category = "Inventory")
+	TObjectPtr<UInstancedStaticMeshComponent> CloseButtonFill;
+
 	UPROPERTY(VisibleAnywhere, Category = "Inventory")
 	TObjectPtr<UInstancedStaticMeshComponent> OrganizeGrid;
 
@@ -585,6 +594,13 @@ protected:
 	// How thick every button is: the height of Use Item below the grid and Drop Backpack above it, and the width of Organize Inventory standing on end beside the right column
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Buttons", meta = (ClampMin = "0.1", Units = cm))
 	float ButtonHeight = 5.0f;
+
+	// The colour of Close Inventory, the square in the top right corner, and its colour under the mouse
+	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Buttons")
+	FLinearColor CloseButtonColor = FLinearColor(0.8f, 0.03f, 0.03f);
+
+	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Buttons")
+	FLinearColor CloseButtonHoveredColor = FLinearColor(1.0f, 0.25f, 0.25f);
 
 	// Between every pair of neighbours, across and up and down: the grid and the buttons above and below it, the grid and the columns either side,
 	// a quick slot and the hand below it, the left column and the armor slots, one armor slot and the next, the right column and Organize Inventory,
