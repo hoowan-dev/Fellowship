@@ -1,6 +1,6 @@
 # Fellowship
 
-A third-person action RPG prototype built in **Unreal Engine 5.7** (C++). Fellowship is organized around four pillars. Each one is a group of systems the prototype exists to prove out:
+A third-person action RPG prototype built in **Unreal Engine 5.9** (C++). Fellowship is organized around four pillars. Each one is a group of systems the prototype exists to prove out:
 
 | Pillar | Scope | Status |
 | --- | --- | --- |
@@ -123,11 +123,11 @@ C++ folders mirror `Content/Blueprints/`. The exceptions are `Animation/`, `HUD/
 
 ## Building
 
-Requires Unreal Engine 5.7 (launcher build at `C:\Program Files\Epic Games\UE_5.7`), Visual Studio with MSVC (C++20) and Git LFS.
+Requires Unreal Engine 5.9 (launcher build at `C:\Program Files\Epic Games\UE_5.9`), Visual Studio with MSVC (C++20) and Git LFS.
 
 ```powershell
 # Build the editor target
-& "C:\Program Files\Epic Games\UE_5.7\Engine\Build\BatchFiles\Build.bat" FellowshipEditor Win64 Development "C:\dev\Fellowship\Fellowship.uproject" -waitmutex
+& "C:\Program Files\Epic Games\UE_5.9\Engine\Build\BatchFiles\Build.bat" FellowshipEditor Win64 Development "C:\dev\Fellowship\Fellowship.uproject" -waitmutex
 
 # Or close the editor, build, and reopen it
 .\Scripts\BuildAndRelaunch.ps1

@@ -23,7 +23,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$EngineDir = "C:\Program Files\Epic Games\UE_5.7"
+$EngineDir = "C:\Program Files\Epic Games\UE_5.9"
 $ProjectFile = (Resolve-Path (Join-Path $PSScriptRoot "..\Fellowship.uproject")).Path
 $BuildBat = Join-Path $EngineDir "Engine\Build\BatchFiles\Build.bat"
 $EditorExe = Join-Path $EngineDir "Engine\Binaries\Win64\UnrealEditor.exe"

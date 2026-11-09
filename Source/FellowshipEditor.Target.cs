@@ -8,8 +8,8 @@ public class FellowshipEditorTarget : TargetRules
 	public FellowshipEditorTarget( TargetInfo Target) : base(Target)
 	{
 		Type = TargetType.Editor;
-		DefaultBuildSettings = BuildSettingsVersion.V6;
-		IncludeOrderVersion = EngineIncludeOrderVersion.Unreal5_7;
+		DefaultBuildSettings = BuildSettingsVersion.V8;
+		IncludeOrderVersion = EngineIncludeOrderVersion.Unreal5_9;
 		ExtraModuleNames.Add("Fellowship");
 		ExtraModuleNames.Add("FellowshipEditor");
 	}

@@ -11,8 +11,11 @@ bool UFSPoseSearchSetupLibrary::SetDatabaseAnimation(UPoseSearchDatabase* Databa
 		return false;
 	}
 
+	FPoseSearchDatabaseAnimationAsset Entry = *Database->GetDatabaseAnimationAsset(Index);
+	Entry.AnimAsset = Animation;
+
 	Database->Modify();
-	Database->GetMutableDatabaseAnimationAsset(Index)->AnimAsset = Animation;
+	Database->SetAnimationAssetAt(Entry, Index);
 	Database->PostEditChange();
 	return true;
 #else
