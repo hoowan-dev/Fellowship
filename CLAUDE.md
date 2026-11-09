@@ -20,10 +20,8 @@ Builds go through UnrealBuildTool via the engine's `Build.bat`, run from the eng
 - Clean: `Engine\Build\BatchFiles\Clean.bat` with the same arguments. Rebuild: `Rebuild.bat`.
 - The same commands exist as VS Code tasks in `Fellowship.code-workspace` (e.g. "FellowshipEditor Win64 Development Build").
 - If the editor is open with Live Coding enabled, a command-line build of the editor target will fail; compile from the editor (Ctrl+Alt+F11) or close it first. `Scripts\BuildAndRelaunch.ps1` closes the editor (with its save prompt), builds Development, and reopens the project.
-- After adding/removing source files or modules, regenerate project files / compile commands:
-  ```powershell
-  & "C:\Program Files\Epic Games\UE_5.9\Engine\Build\BatchFiles\Build.bat" -projectfiles -project="C:\dev\Fellowship\Fellowship.uproject" -game -vscode
-  ```
+- After adding/removing source files or modules, regenerate project files / compile commands with `Scripts\GenerateProjectFiles.ps1`. It runs `Build.bat -projectfiles -game -vscode` and then adds the workspace settings the generator leaves out, which turn off the C# and Java extensions' project loading, since it fails on the engine folder. Running the generator directly, or the editor's "Refresh Visual Studio Code Project", drops those settings again.
+- F5 in VS Code runs "Debug Fellowship Editor (DebugGame)" from `.vscode/launch.json` and `.vscode/tasks.json`, which are hand-written and survive regeneration. An installed engine has no Debug libraries, so the generated "(Debug)" configurations can't build. The UE5 Dev Tools extension is disabled for this workspace: on opening a project it regenerates the project files and overwrites `.vscode/launch.json`, `tasks.json`, `c_cpp_properties.json` and `settings.json`, and it reads its engine path from `ue5devtools.enginePath` rather than the `ue5.enginePath` it declares.
 - Toolchain: MSVC from Visual Studio 18 Community, C++20. IntelliSense uses `.vscode/compileCommands_*.json` (generated; don't hand-edit).
 
 Run the editor: `"C:\Program Files\Epic Games\UE_5.9\Engine\Binaries\Win64\UnrealEditor.exe" "C:\dev\Fellowship\Fellowship.uproject"`
