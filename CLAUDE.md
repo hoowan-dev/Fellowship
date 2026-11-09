@@ -29,6 +29,8 @@ Run the editor: `"C:\Program Files\Epic Games\UE_5.9\Engine\Binaries\Win64\Unrea
 Automation tests live in `Source/Fellowship/Tests/`. Run them headless (`Fellowship` runs all of them) with:
 `UnrealEditor-Cmd.exe "C:\dev\Fellowship\Fellowship.uproject" -ExecCmds="Automation RunTests <TestName>;Quit" -unattended -nullrhi -nopause`
 
+The tests also show in VS Code's Testing view through a small local extension in `Scripts/VSCodeTests/`. Install or update it with `Scripts\InstallTestExtension.ps1`, then reload the window. It finds tests by reading the `IMPLEMENT_*_AUTOMATION_TEST`/`DEFINE_SPEC` macros in `Source/`. Before each run it builds the editor target: Development to run, DebugGame to debug (under `cppvsdbg`). It then runs the selected tests headless with `^Path$`/`^Group.` filters and reads the results from `Saved/Automation/VSCode/index.json`. If the editor is open with Live Coding, the build is refused and the tests run on the binaries already on disk, which don't include Live Coding patches.
+
 ## Structure
 
 - `Fellowship.uproject` — module list and plugins (`ModelingToolsEditorMode`, editor-only).

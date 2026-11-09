@@ -1,0 +1,46 @@
+{
+	"name": "fellowship-tests",
+	"displayName": "Fellowship Tests",
+	"description": "Shows the project's Unreal automation tests in VS Code's Testing view and runs or debugs them headless.",
+	"publisher": "hoowan-dev",
+	"version": "0.1.0",
+	"private": true,
+	"engines": {
+		"vscode": "^1.90.0"
+	},
+	"categories": [
+		"Testing"
+	],
+	"main": "./extension.js",
+	"files": [
+		"extension.js"
+	],
+	"activationEvents": [
+		"workspaceContains:*.uproject"
+	],
+	"contributes": {
+		"configuration": {
+			"title": "Fellowship Tests",
+			"properties": {
+				"fellowshipTests.engineDir": {
+					"type": "string",
+					"default": "C:\\Program Files\\Epic Games\\UE_5.9",
+					"description": "Root folder of the Unreal Engine install used to build and run the tests."
+				},
+				"fellowshipTests.buildBeforeRun": {
+					"type": "boolean",
+					"default": true,
+					"description": "Build the editor target before running tests. If the editor is open with Live Coding, the build is refused and the tests run on the binaries already on disk."
+				},
+				"fellowshipTests.extraArgs": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					},
+					"default": [],
+					"description": "Extra command-line arguments passed to the editor that runs the tests."
+				}
+			}
+		}
+	}
+}
