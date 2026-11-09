@@ -13,6 +13,7 @@ class UFSInventoryComponent;
 class UInputAction;
 class UInputMappingContext;
 struct FFSInventoryItem;
+struct FInputActionValue;
 enum class EFSHand : uint8;
 enum class EFSQuickSlot : uint8;
 enum class EFSArmorType : uint8;
@@ -31,7 +32,9 @@ enum class EFSInventoryClickPlace : uint8
 {
 	// The backpack's grid, or outside everything, which tosses the carried item
 	Grid,
-	OrganizeGrid,
+
+	// The list of items nearby. The index is which item, or INDEX_NONE for the list but none of its items.
+	NearbyItem,
 	Hand,
 	QuickSlot,
 	ArmorSlot,
@@ -46,7 +49,7 @@ struct FFSInventoryClick
 	// The cell in a grid. INDEX_NONE in the backpack's grid means outside it.
 	FIntPoint Cell = FIntPoint(INDEX_NONE, INDEX_NONE);
 
-	// Which hand slot, quick slot, armor slot or button, as AFSInventoryRig numbers them
+	// Which hand slot, quick slot, armor slot or button, as AFSInventoryRig numbers them, or which nearby item from the top of the list
 	int32 Index = INDEX_NONE;
 };
 
@@ -86,6 +89,14 @@ class FELLOWSHIP_API AFSPlayerController : public APlayerController
 	UPROPERTY(EditDefaultsOnly, Category = "Input")
 	TObjectPtr<UInputAction> InventoryRotateAction;
 
+	// Axis1D, positive scrolling up. Scrolls the list of nearby items while the inventory is open. Made with the mouse wheel mapped to it when it isn't set.
+	UPROPERTY(EditDefaultsOnly, Category = "Input")
+	TObjectPtr<UInputAction> InventoryScrollAction;
+
+	// Maps the mouse wheel to InventoryScrollAction while the inventory is open, when that's the one made here, since no context asset has it
+	UPROPERTY(Transient)
+	TObjectPtr<UInputMappingContext> InventoryScrollMappingContext;
+
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory")
 	TSubclassOf<AFSInventoryRig> InventoryRigClass;
 
@@ -123,6 +134,12 @@ class FELLOWSHIP_API AFSPlayerController : public APlayerController
 	};
 	FInventoryPickup LastInventoryPickup;
 
+	// What the open inventory's nearby list shows, from the top
+	TArray<TWeakObjectPtr<AFSItemPickup>> NearbyItems;
+
+	// The item the player tried to pick up without room for it, which the nearby list keeps at its top while it's in reach
+	TWeakObjectPtr<AFSItemPickup> PinnedNearbyItem;
+
 	EFSInventoryViewState InventoryViewState = EFSInventoryViewState::Closed;
 	FTimerHandle InventoryMidpointTimer;
 	FTimerHandle InventoryFinishedTimer;
@@ -140,6 +157,15 @@ public:
 	// The item under the mouse in the open inventory, or null if there isn't one
 	const FFSInventoryItem* GetHoveredInventoryItem() const;
 
+	// The item in the nearby list under the mouse in the open inventory, or null if there isn't one
+	AFSItemPickup* GetHoveredNearbyItem() const;
+
+	// The items in reach of the character, as the open inventory lists them: an item the player just tried to pick up without room for it first, then the others in the order they came into reach
+	FORCEINLINE const TArray<TWeakObjectPtr<AFSItemPickup>>& GetNearbyItems() const { return NearbyItems; }
+
+	// Matches the nearby list to what's in reach now, as the character walks with the inventory open. Done every tick while it's open.
+	void UpdateNearbyItems();
+
 	UFUNCTION(BlueprintCallable, Category = "Inventory")
 	void OpenInventory();
 
@@ -147,9 +173,8 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Inventory")
 	void CloseInventory();
 
-	// Picks up the nearest item, if there's one in range and the inventory is closed. An item with no room
-	// goes on the cursor instead, and the inventory opens so the player can make room for it.
-	// A backpack replaces the one being worn, which is left on the ground.
+	// Picks up the nearest item, if there's one in range and the inventory is closed. For an item with no room, the inventory opens
+	// with it at the top of the nearby list, so the player can make room for it. A backpack replaces the one being worn, which is left on the ground.
 	// With no item in range, interacts with the interaction volume the character is standing in, if any.
 	UFUNCTION(BlueprintCallable, Category = "Inventory")
 	void Interact();
@@ -184,10 +209,11 @@ public:
 	// What selecting an armor slot's cell does in the open inventory: puts the carried item in that slot if it's armor of that type, taking what it held onto the cursor
 	void SelectInventoryArmorSlot(EFSArmorType ArmorType);
 
-	// What selecting a cell of the organizing grid does in the open inventory: picks up the item there or places the carried one
-	void SelectInventoryOrganizeCell(const FIntPoint& Cell);
+	// What selecting the nearby list does in the open inventory. An item, counted from the top of the list, goes on the cursor in place of whatever was carried, which is dropped.
+	// A backpack is put on instead, in place of the one being worn, leaving the cursor alone. INDEX_NONE, for the list but none of its items, drops what's carried.
+	void SelectNearbyItem(int32 Item);
 
-	// What selecting one of AFSInventoryRig's buttons does in the open inventory. Using an item doesn't do anything yet. Close Inventory closes it, as CloseInventory does.
+	// What selecting one of AFSInventoryRig's buttons does in the open inventory. Using an item doesn't do anything yet.
 	void SelectInventoryButton(int32 Button);
 
 	// Turns the carried item a quarter turn clockwise, if the inventory is open and an item is carried
@@ -195,7 +221,7 @@ public:
 
 	// What a click does in the open inventory, at Time in seconds. Usually the same as selecting that place, but a second click on an item that the first just picked up,
 	// within InventoryDoubleClickTime, is a double click instead. An item from a grid is then equipped or used, as UFSInventoryComponent::QuickEquipCarriedItem does,
-	// and one from a hand, quick slot or armor slot is put away, as UFSInventoryComponent::StowCarriedItem does.
+	// and one from a hand, quick slot, armor slot or the nearby list is put away, as UFSInventoryComponent::StowCarriedItem does.
 	void ClickInventory(const FFSInventoryClick& Click, double Time);
 
 protected:
@@ -210,9 +236,10 @@ private:
 	void ToggleInventory();
 	void SelectAtInventoryCursor();
 
-	// Closes the organizing grid, leaving what's in it on the ground
-	void StopOrganizing();
 	void TossCarriedItem();
+
+	// Scrolls the nearby list a box for each notch of the wheel
+	void ScrollNearbyItems(const FInputActionValue& Value);
 	void RefreshInventoryView();
 
 	// What a dropped item is spawned as
@@ -231,4 +258,7 @@ private:
 	void HandleInventoryBlendMidpoint();
 	void HandleInventoryBlendFinished();
 	void UpdateHoveredInventoryCell();
+
+	// Whether a key mapped to InventorySelectAction is down, or the left mouse button if none is
+	bool IsInventorySelectHeld() const;
 };

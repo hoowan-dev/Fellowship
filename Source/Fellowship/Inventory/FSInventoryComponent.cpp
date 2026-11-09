@@ -204,47 +204,21 @@ bool UFSInventoryComponent::RemoveBackpack(FFSBackpackContents& OutContents)
 	return true;
 }
 
-bool UFSInventoryComponent::StartOrganizing()
+const FFSInventoryItem* UFSInventoryComponent::FindItemAt(const FIntPoint& Cell) const
 {
-	if (bOrganizing)
-	{
-		return false;
-	}
-
-	bOrganizing = true;
-	OrganizeGrid.Init(FIntPoint(OrganizeGridSize, OrganizeGridSize));
-	return true;
+	const int32 ItemId = Grid.GetItemAt(Cell);
+	return Items.FindByPredicate([ItemId](const FFSInventoryItem& Item) { return Item.Id == ItemId; });
 }
 
-bool UFSInventoryComponent::StopOrganizing(TArray<FFSInventoryItem>& OutItems)
+bool UFSInventoryComponent::PickUpItemAt(const FIntPoint& Cell)
 {
-	if (!bOrganizing)
-	{
-		return false;
-	}
-
-	OutItems = MoveTemp(OrganizeItems);
-	OrganizeItems.Reset();
-	OrganizeGrid.Init(FIntPoint::ZeroValue);
-	bOrganizing = false;
-	return true;
-}
-
-const FFSInventoryItem* UFSInventoryComponent::FindItemAt(const FIntPoint& Cell, EFSItemGrid Which) const
-{
-	const int32 ItemId = GetGrid(Which).GetItemAt(Cell);
-	return GetItems(Which).FindByPredicate([ItemId](const FFSInventoryItem& Item) { return Item.Id == ItemId; });
-}
-
-bool UFSInventoryComponent::PickUpItemAt(const FIntPoint& Cell, EFSItemGrid Which)
-{
-	const int32 ItemId = GetGrid(Which).GetItemAt(Cell);
+	const int32 ItemId = Grid.GetItemAt(Cell);
 	if (ItemId == INDEX_NONE || IsCarryingItem())
 	{
 		return false;
 	}
 
-	LiftItem(ItemId, Which);
+	LiftItem(ItemId);
 	return true;
 }
 
@@ -262,12 +236,10 @@ bool UFSInventoryComponent::CarryNewItem(UFSItemDefinition* Definition)
 	return true;
 }
 
-EFSItemPlacement UFSInventoryComponent::GetCarriedItemPlacement(const FIntPoint& Cell, EFSItemGrid Which) const
+EFSItemPlacement UFSInventoryComponent::GetCarriedItemPlacement(const FIntPoint& Cell) const
 {
-	const bool bGridThere = Which == EFSItemGrid::Organize ? bOrganizing : HasBackpack();
-
 	TArray<int32> CoveredItemIds;
-	if (!bGridThere || !IsCarryingItem() || !GetGrid(Which).GetItemsCovered(Cell, CarriedItem.Definition->InventoryDimensions, CarriedItem.Rotation, CoveredItemIds) || CoveredItemIds.Num() > 1)
+	if (!HasBackpack() || !IsCarryingItem() || !Grid.GetItemsCovered(Cell, CarriedItem.Definition->InventoryDimensions, CarriedItem.Rotation, CoveredItemIds) || CoveredItemIds.Num() > 1)
 	{
 		return EFSItemPlacement::Blocked;
 	}
@@ -286,17 +258,15 @@ bool UFSInventoryComponent::RotateCarriedItem()
 	return true;
 }
 
-bool UFSInventoryComponent::PlaceCarriedItem(const FIntPoint& Cell, EFSItemGrid Which)
+bool UFSInventoryComponent::PlaceCarriedItem(const FIntPoint& Cell)
 {
-	if (!CanPlaceCarriedItemAt(Cell, Which))
+	if (!CanPlaceCarriedItemAt(Cell))
 	{
 		return false;
 	}
 
-	FFSInventoryGrid& PlacedGrid = Which == EFSItemGrid::Organize ? OrganizeGrid : Grid;
-
 	TArray<int32> CoveredItemIds;
-	PlacedGrid.GetItemsCovered(Cell, CarriedItem.Definition->InventoryDimensions, CarriedItem.Rotation, CoveredItemIds);
+	Grid.GetItemsCovered(Cell, CarriedItem.Definition->InventoryDimensions, CarriedItem.Rotation, CoveredItemIds);
 
 	FFSInventoryItem PlacedItem = CarriedItem;
 	PlacedItem.Cell = Cell;
@@ -305,11 +275,11 @@ bool UFSInventoryComponent::PlaceCarriedItem(const FIntPoint& Cell, EFSItemGrid 
 	ClearCarriedItem();
 	if (!CoveredItemIds.IsEmpty())
 	{
-		LiftItem(CoveredItemIds[0], Which);
+		LiftItem(CoveredItemIds[0]);
 	}
 
-	PlacedGrid.Place(PlacedItem.Id, Cell, PlacedItem.Definition->InventoryDimensions, PlacedItem.Rotation);
-	(Which == EFSItemGrid::Organize ? OrganizeItems : Items).Add(PlacedItem);
+	Grid.Place(PlacedItem.Id, Cell, PlacedItem.Definition->InventoryDimensions, PlacedItem.Rotation);
+	Items.Add(PlacedItem);
 
 	return true;
 }
@@ -357,7 +327,7 @@ bool UFSInventoryComponent::SwapCarriedItemWithArmorSlot(EFSArmorType ArmorType)
 	return true;
 }
 
-bool UFSInventoryComponent::QuickEquipCarriedItem(EFSItemGrid FromGrid, const FIntPoint& FromCell, uint8 FromRotation)
+bool UFSInventoryComponent::QuickEquipCarriedItem(const FIntPoint& FromCell, uint8 FromRotation)
 {
 	if (!IsCarryingItem())
 	{
@@ -393,9 +363,9 @@ bool UFSInventoryComponent::QuickEquipCarriedItem(EFSItemGrid FromGrid, const FI
 	if (IsCarryingItem())
 	{
 		CarriedItem.Rotation = FromRotation;
-		if (GetCarriedItemPlacement(FromCell, FromGrid) == EFSItemPlacement::Open)
+		if (GetCarriedItemPlacement(FromCell) == EFSItemPlacement::Open)
 		{
-			PlaceCarriedItem(FromCell, FromGrid);
+			PlaceCarriedItem(FromCell);
 		}
 		else
 		{
@@ -413,25 +383,15 @@ bool UFSInventoryComponent::StowCarriedItem()
 		return false;
 	}
 
-	const FIntPoint Dimensions = CarriedItem.Definition->InventoryDimensions;
 	FIntPoint Cell;
 	uint8 Rotation;
-
-	if (HasBackpack() && Grid.FindFirstFit(Dimensions, Cell, Rotation))
+	if (!HasBackpack() || !Grid.FindFirstFit(CarriedItem.Definition->InventoryDimensions, Cell, Rotation))
 	{
-		CarriedItem.Rotation = Rotation;
-		return PlaceCarriedItem(Cell);
+		return false;
 	}
 
-	// Left for the player to find room for, as a pickup that doesn't fit is
-	StartOrganizing();
-	if (OrganizeGrid.FindFirstFit(Dimensions, Cell, Rotation))
-	{
-		CarriedItem.Rotation = Rotation;
-		return PlaceCarriedItem(Cell, EFSItemGrid::Organize);
-	}
-
-	return false;
+	CarriedItem.Rotation = Rotation;
+	return PlaceCarriedItem(Cell);
 }
 
 bool UFSInventoryComponent::SwapCarriedItemWith(FFSInventoryItem& HeldItem, const FText& SlotName)
@@ -459,16 +419,14 @@ bool UFSInventoryComponent::SwapCarriedItemWith(FFSInventoryItem& HeldItem, cons
 	return true;
 }
 
-void UFSInventoryComponent::LiftItem(int32 ItemId, EFSItemGrid Which)
+void UFSInventoryComponent::LiftItem(int32 ItemId)
 {
-	TArray<FFSInventoryItem>& LiftedFrom = Which == EFSItemGrid::Organize ? OrganizeItems : Items;
-
-	const int32 ItemIndex = LiftedFrom.IndexOfByPredicate([ItemId](const FFSInventoryItem& Item) { return Item.Id == ItemId; });
+	const int32 ItemIndex = Items.IndexOfByPredicate([ItemId](const FFSInventoryItem& Item) { return Item.Id == ItemId; });
 	check(ItemIndex != INDEX_NONE);
 
-	CarriedItem = LiftedFrom[ItemIndex];
-	LiftedFrom.RemoveAt(ItemIndex);
-	(Which == EFSItemGrid::Organize ? OrganizeGrid : Grid).Remove(ItemId);
+	CarriedItem = Items[ItemIndex];
+	Items.RemoveAt(ItemIndex);
+	Grid.Remove(ItemId);
 }
 
 #undef LOCTEXT_NAMESPACE

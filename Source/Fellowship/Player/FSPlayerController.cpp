@@ -13,6 +13,7 @@
 #include "EnhancedInputSubsystems.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "InputAction.h"
+#include "InputActionValue.h"
 #include "InputMappingContext.h"
 #include "Inventory/FSInventoryComponent.h"
 #include "Inventory/FSInventoryRig.h"
@@ -99,6 +100,23 @@ void AFSPlayerController::SetupInputComponent()
 	{
 		UE_LOG(LogTemp, Warning, TEXT("Carried items can't be rotated: EnhancedInput=%d InventoryRotateAction=%s"), EnhancedInput != nullptr, *GetNameSafe(InventoryRotateAction));
 	}
+
+	if (!EnhancedInput)
+	{
+		return;
+	}
+
+	// Made here with the mouse wheel mapped to it, unless the Blueprint gives one that the inventory's context maps
+	if (!InventoryScrollAction)
+	{
+		InventoryScrollAction = NewObject<UInputAction>(this, TEXT("InventoryScrollAction"));
+		InventoryScrollAction->ValueType = EInputActionValueType::Axis1D;
+
+		InventoryScrollMappingContext = NewObject<UInputMappingContext>(this, TEXT("InventoryScrollMappingContext"));
+		InventoryScrollMappingContext->MapKey(InventoryScrollAction, EKeys::MouseWheelAxis);
+	}
+
+	EnhancedInput->BindAction(InventoryScrollAction, ETriggerEvent::Triggered, this, &AFSPlayerController::ScrollNearbyItems);
 }
 
 UFSInventoryComponent* AFSPlayerController::GetInventory() const
@@ -133,12 +151,70 @@ const FFSInventoryItem* AFSPlayerController::GetHoveredInventoryItem() const
 		return ArmorItem.Definition ? &ArmorItem : nullptr;
 	}
 
-	if (InventoryRig->GetHoveredOrganizeCell().X != INDEX_NONE)
+	return Inventory->FindItemAt(InventoryRig->GetHoveredCell());
+}
+
+AFSItemPickup* AFSPlayerController::GetHoveredNearbyItem() const
+{
+	if (!InventoryRig || InventoryViewState != EFSInventoryViewState::Open)
 	{
-		return Inventory->FindItemAt(InventoryRig->GetHoveredOrganizeCell(), EFSItemGrid::Organize);
+		return nullptr;
 	}
 
-	return Inventory->FindItemAt(InventoryRig->GetHoveredCell());
+	// The rig numbers the items it shows as this list does
+	const int32 Item = InventoryRig->GetHoveredNearbyItem();
+	return NearbyItems.IsValidIndex(Item) ? NearbyItems[Item].Get() : nullptr;
+}
+
+void AFSPlayerController::UpdateNearbyItems()
+{
+	TArray<TWeakObjectPtr<AFSItemPickup>> Items;
+
+	if (FSCharacter)
+	{
+		const TArray<AFSItemPickup*> InReach = FSCharacter->GetNearbyPickups();
+
+		// Out of reach, it's no longer what the player was trying to pick up, and coming back it goes to the bottom like any other
+		AFSItemPickup* Pinned = PinnedNearbyItem.Get();
+		if (Pinned && !InReach.Contains(Pinned))
+		{
+			PinnedNearbyItem.Reset();
+			Pinned = nullptr;
+		}
+
+		if (Pinned && Pinned->Item)
+		{
+			Items.Add(Pinned);
+		}
+
+		// A pickup with no item has nothing to show or take
+		for (AFSItemPickup* Pickup : InReach)
+		{
+			if (Pickup != Pinned && Pickup->Item)
+			{
+				Items.Add(Pickup);
+			}
+		}
+	}
+
+	if (Items == NearbyItems)
+	{
+		return;
+	}
+
+	NearbyItems = MoveTemp(Items);
+
+	if (InventoryRig)
+	{
+		TArray<UFSItemDefinition*> Definitions;
+		Definitions.Reserve(NearbyItems.Num());
+		for (const TWeakObjectPtr<AFSItemPickup>& Pickup : NearbyItems)
+		{
+			Definitions.Add(Pickup->Item);
+		}
+
+		InventoryRig->ShowNearbyItems(Definitions);
+	}
 }
 
 void AFSPlayerController::Interact()
@@ -161,28 +237,25 @@ void AFSPlayerController::Interact()
 		return;
 	}
 
-	if (Pickup && Pickup->IsBackpack() && Inventory && Inventory->HasBackpack())
+	if (Pickup->IsBackpack() && Inventory && Inventory->HasBackpack())
 	{
 		DropBackpack();
 	}
 
-	if (!Pickup || Pickup->TryPickUp(Inventory))
+	if (Pickup->TryPickUp(Inventory))
 	{
 		return;
 	}
 
-	// Checked first so the item stays in the world if the inventory can't open
-	if (!InventoryRigClass || !CanOpenInventory() || !Pickup->TryCarry(Inventory))
-	{
-		return;
-	}
-
-	// It didn't fit in the backpack, or there isn't one, so the inventory opens to organize, with the item in the top left of the organizing grid.
-	// Too big even for that, it stays on the cursor.
-	Inventory->StartOrganizing();
-	Inventory->PlaceCarriedItem(FIntPoint(0, 0), EFSItemGrid::Organize);
-
+	// It didn't fit in the backpack, or there isn't one, so it stays on the ground and the inventory opens with it at the top of the nearby list,
+	// for the player to make room for it
+	PinnedNearbyItem = Pickup;
 	OpenInventory();
+
+	if (InventoryViewState == EFSInventoryViewState::Closed)
+	{
+		PinnedNearbyItem.Reset();
+	}
 }
 
 void AFSPlayerController::EnterCharacterEditor()
@@ -229,12 +302,25 @@ void AFSPlayerController::SelectAtInventoryCursor()
 
 	UpdateHoveredInventoryCell();
 
+	// Pressing on the nearby list's scrollbar grabs it, and does nothing else, until the button is let go
+	FVector RayOrigin;
+	FVector RayDirection;
+	if (DeprojectMousePositionToWorld(RayOrigin, RayDirection) && InventoryRig->BeginNearbyScrollbarDrag(RayOrigin, RayDirection))
+	{
+		return;
+	}
+
 	// Outside the grid means tossing the carried item, so the buttons and the slots have to be checked first
 	FFSInventoryClick Click;
 	if (InventoryRig->GetHoveredButton() != INDEX_NONE)
 	{
 		Click.Place = EFSInventoryClickPlace::Button;
 		Click.Index = InventoryRig->GetHoveredButton();
+	}
+	else if (InventoryRig->IsNearbyListHovered())
+	{
+		Click.Place = EFSInventoryClickPlace::NearbyItem;
+		Click.Index = InventoryRig->GetHoveredNearbyItem();
 	}
 	else if (InventoryRig->GetHoveredHandSlot() != INDEX_NONE)
 	{
@@ -250,11 +336,6 @@ void AFSPlayerController::SelectAtInventoryCursor()
 	{
 		Click.Place = EFSInventoryClickPlace::ArmorSlot;
 		Click.Index = InventoryRig->GetHoveredArmorSlot();
-	}
-	else if (InventoryRig->GetHoveredOrganizeCell().X != INDEX_NONE)
-	{
-		Click.Place = EFSInventoryClickPlace::OrganizeGrid;
-		Click.Cell = InventoryRig->GetHoveredOrganizeCell();
 	}
 	else
 	{
@@ -272,8 +353,7 @@ void AFSPlayerController::ClickInventory(const FFSInventoryClick& Click, double 
 		return;
 	}
 
-	const bool bFromGrid = Click.Place == EFSInventoryClickPlace::Grid || Click.Place == EFSInventoryClickPlace::OrganizeGrid;
-	const EFSItemGrid Grid = Click.Place == EFSInventoryClickPlace::OrganizeGrid ? EFSItemGrid::Organize : EFSItemGrid::Backpack;
+	const bool bFromGrid = Click.Place == EFSInventoryClickPlace::Grid;
 
 	// The second click of a double click lands on the item the first picked up, which is still on the cursor
 	const FInventoryPickup& Pickup = LastInventoryPickup;
@@ -286,13 +366,14 @@ void AFSPlayerController::ClickInventory(const FFSInventoryClick& Click, double 
 		if (bFromGrid)
 		{
 			// Anything it can't be equipped as goes back where it was
-			if (!Inventory->QuickEquipCarriedItem(Grid, Pickup.Cell, Pickup.Rotation))
+			if (!Inventory->QuickEquipCarriedItem(Pickup.Cell, Pickup.Rotation))
 			{
-				Inventory->PlaceCarriedItem(Pickup.Cell, Grid);
+				Inventory->PlaceCarriedItem(Pickup.Cell);
 			}
 		}
 		else
 		{
+			// Without room in the backpack, it stays on the cursor
 			Inventory->StowCarriedItem();
 		}
 
@@ -305,7 +386,7 @@ void AFSPlayerController::ClickInventory(const FFSInventoryClick& Click, double 
 	FInventoryPickup NewPickup;
 	NewPickup.Click = Click;
 	NewPickup.Time = Time;
-	if (const FFSInventoryItem* Item = bFromGrid && !Inventory->IsCarryingItem() ? Inventory->FindItemAt(Click.Cell, Grid) : nullptr)
+	if (const FFSInventoryItem* Item = bFromGrid && !Inventory->IsCarryingItem() ? Inventory->FindItemAt(Click.Cell) : nullptr)
 	{
 		NewPickup.Cell = Item->Cell;
 		NewPickup.Rotation = Item->Rotation;
@@ -328,8 +409,8 @@ void AFSPlayerController::ClickInventory(const FFSInventoryClick& Click, double 
 	case EFSInventoryClickPlace::ArmorSlot:
 		SelectInventoryArmorSlot(AFSInventoryRig::GetArmorTypeOfSlot(Click.Index));
 		break;
-	case EFSInventoryClickPlace::OrganizeGrid:
-		SelectInventoryOrganizeCell(Click.Cell);
+	case EFSInventoryClickPlace::NearbyItem:
+		SelectNearbyItem(Click.Index);
 		break;
 	default:
 		SelectInventoryCell(Click.Cell);
@@ -366,7 +447,7 @@ void AFSPlayerController::SelectInventoryCell(const FIntPoint& Cell)
 	RefreshInventoryView();
 }
 
-void AFSPlayerController::SelectInventoryOrganizeCell(const FIntPoint& Cell)
+void AFSPlayerController::SelectNearbyItem(int32 Item)
 {
 	UFSInventoryComponent* Inventory = GetInventory();
 	if (!Inventory || InventoryViewState != EFSInventoryViewState::Open)
@@ -374,13 +455,27 @@ void AFSPlayerController::SelectInventoryOrganizeCell(const FIntPoint& Cell)
 		return;
 	}
 
-	if (Inventory->IsCarryingItem())
+	AFSItemPickup* Pickup = NearbyItems.IsValidIndex(Item) ? NearbyItems[Item].Get() : nullptr;
+	if (Pickup && Pickup->IsActorBeingDestroyed())
 	{
-		Inventory->PlaceCarriedItem(Cell, EFSItemGrid::Organize);
+		Pickup = nullptr;
+	}
+
+	if (Pickup && Pickup->IsBackpack())
+	{
+		// Swapped for the one being worn, as interacting with it does, and the cursor keeps what it holds
+		DropBackpack();
+		Pickup->TryPickUp(Inventory);
 	}
 	else
 	{
-		Inventory->PickUpItemAt(Cell, EFSItemGrid::Organize);
+		// What's carried goes on the ground, where the item it's swapped for was
+		TossCarriedItem();
+
+		if (Pickup && !Inventory->IsCarryingItem())
+		{
+			Pickup->TryCarry(Inventory);
+		}
 	}
 
 	RefreshInventoryView();
@@ -421,49 +516,23 @@ void AFSPlayerController::SelectInventoryButton(int32 Button)
 		return;
 	}
 
-	if (Button == AFSInventoryRig::CloseInventoryButton)
-	{
-		CloseInventory();
-	}
-	else if (Button == AFSInventoryRig::DropBackpackButton)
+	if (Button == AFSInventoryRig::DropBackpackButton)
 	{
 		DropBackpack();
 	}
-	else if (Button == AFSInventoryRig::OrganizeInventoryButton)
-	{
-		if (Inventory->IsOrganizing())
-		{
-			StopOrganizing();
-		}
-		else
-		{
-			Inventory->StartOrganizing();
-		}
-
-		RefreshInventoryView();
-	}
 }
 
-void AFSPlayerController::StopOrganizing()
+void AFSPlayerController::ScrollNearbyItems(const FInputActionValue& Value)
 {
-	UFSInventoryComponent* Inventory = GetInventory();
-	TArray<FFSInventoryItem> Items;
-
-	if (!Inventory || !FSCharacter || !Inventory->StopOrganizing(Items))
+	const float Notches = Value.Get<float>();
+	if (!InventoryRig || InventoryViewState != EFSInventoryViewState::Open || Notches == 0.0f)
 	{
 		return;
 	}
 
-	// There can be a lot of them, so they're spread out around the character's feet rather than all landing in one spot. The golden angle keeps a spiral like this evenly filled, however many there are.
-	constexpr double SpreadPerItem = 12.0;
-	constexpr double GoldenAngle = 2.39996;
-
-	for (int32 Index = 0; Index < Items.Num(); ++Index)
-	{
-		const double Radius = SpreadPerItem * FMath::Sqrt(static_cast<double>(Index));
-		const double Angle = GoldenAngle * Index;
-		AFSItemPickup::DropAtFeet(GetDroppedItemClass(), Items[Index].Definition, *FSCharacter, FVector2D(Radius * FMath::Cos(Angle), Radius * FMath::Sin(Angle)));
-	}
+	// Rolling the wheel up goes up the list. A fast roll can bring more than one notch in a frame.
+	const int32 Boxes = FMath::Max(1, FMath::RoundToInt32(FMath::Abs(Notches)));
+	InventoryRig->ScrollNearbyItems(Notches > 0.0f ? -Boxes : Boxes);
 }
 
 void AFSPlayerController::RotateCarriedInventoryItem()
@@ -505,7 +574,6 @@ void AFSPlayerController::DropBackpack()
 		return;
 	}
 
-	// The organizing grid stays open, as it doesn't need a backpack
 	FFSBackpackContents Contents;
 	Inventory->RemoveBackpack(Contents);
 	Pickup->SetBackpackContents(Contents);
@@ -527,6 +595,9 @@ void AFSPlayerController::RefreshInventoryView()
 	if (Inventory && InventoryRig)
 	{
 		InventoryRig->ShowInventory(*Inventory);
+
+		// Something taken from the list or dropped onto the ground changes it straight away
+		UpdateNearbyItems();
 		UpdateHoveredInventoryCell();
 	}
 }
@@ -547,10 +618,50 @@ void AFSPlayerController::PlayerTick(float DeltaTime)
 		return;
 	}
 
-	if (InventoryViewState == EFSInventoryViewState::Open)
+	// Walking with it open brings items into reach and leaves others behind
+	UpdateNearbyItems();
+
+	if (InventoryViewState != EFSInventoryViewState::Open)
 	{
-		UpdateHoveredInventoryCell();
+		return;
 	}
+
+	// A grabbed scrollbar follows the mouse until the select button is let go
+	if (InventoryRig->IsDraggingNearbyScrollbar())
+	{
+		FVector RayOrigin;
+		FVector RayDirection;
+		if (!IsInventorySelectHeld())
+		{
+			InventoryRig->EndNearbyScrollbarDrag();
+		}
+		else if (DeprojectMousePositionToWorld(RayOrigin, RayDirection))
+		{
+			InventoryRig->DragNearbyScrollbar(RayOrigin, RayDirection);
+		}
+	}
+
+	UpdateHoveredInventoryCell();
+}
+
+bool AFSPlayerController::IsInventorySelectHeld() const
+{
+	// Asked of the keys themselves, as how the action reports being let go depends on the triggers it's given
+	TArray<FKey> Keys;
+	if (const UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(GetLocalPlayer()))
+	{
+		if (InventorySelectAction)
+		{
+			Keys = Subsystem->QueryKeysMappedToAction(InventorySelectAction);
+		}
+	}
+
+	if (Keys.IsEmpty())
+	{
+		Keys.Add(EKeys::LeftMouseButton);
+	}
+
+	return Keys.ContainsByPredicate([this](const FKey& Key) { return IsInputKeyDown(Key); });
 }
 
 void AFSPlayerController::OnPossess(APawn* InPawn)
@@ -616,6 +727,11 @@ void AFSPlayerController::OpenInventory()
 		InventoryRig->ShowInventory(*Inventory);
 	}
 
+	// From the top, where an item the player just tried to pick up is. Emptied first so that the rig is shown the list even if it's the same as last time.
+	NearbyItems.Reset();
+	InventoryRig->ShowNearbyItems(TArray<UFSItemDefinition*>());
+	UpdateNearbyItems();
+
 	InventoryViewState = EFSInventoryViewState::Opening;
 	SetInventoryInputActive(true);
 	StartInventoryBlend(InventoryRig, OpeningSwapFraction);
@@ -628,9 +744,10 @@ void AFSPlayerController::CloseInventory()
 		return;
 	}
 
-	StopOrganizing();
 	TossCarriedItem();
 	RefreshInventoryView();
+	PinnedNearbyItem.Reset();
+	InventoryRig->EndNearbyScrollbarDrag();
 
 	InventoryViewState = EFSInventoryViewState::Closing;
 	InventoryRig->SetGridVisible(false);
@@ -648,9 +765,10 @@ void AFSPlayerController::CloseInventoryImmediately()
 	GetWorldTimerManager().ClearTimer(InventoryMidpointTimer);
 	GetWorldTimerManager().ClearTimer(InventoryFinishedTimer);
 
-	StopOrganizing();
 	TossCarriedItem();
 	RefreshInventoryView();
+	PinnedNearbyItem.Reset();
+	InventoryRig->EndNearbyScrollbarDrag();
 
 	InventoryRig->SetGridVisible(false);
 	SetInventoryInputActive(false);
@@ -678,16 +796,21 @@ void AFSPlayerController::SetInventoryInputActive(bool bActive)
 			Subsystem->AddMappingContext(ContextToAdd, 0);
 		}
 
-		// Walking stays, though the rest of the default controls make way for the inventory's
-		if (UInputMappingContext* MoveContext = GetInventoryMoveMappingContext())
+		// Walking stays, though the rest of the default controls make way for the inventory's. The mouse wheel scrolls the nearby list.
+		for (UInputMappingContext* Context : { GetInventoryMoveMappingContext(), InventoryScrollMappingContext.Get() })
 		{
+			if (!Context)
+			{
+				continue;
+			}
+
 			if (bActive)
 			{
-				Subsystem->AddMappingContext(MoveContext, 0);
+				Subsystem->AddMappingContext(Context, 0);
 			}
 			else
 			{
-				Subsystem->RemoveMappingContext(MoveContext);
+				Subsystem->RemoveMappingContext(Context);
 			}
 		}
 	}
@@ -793,11 +916,14 @@ void AFSPlayerController::UpdateHoveredInventoryCell()
 	int32 QuickSlot = INDEX_NONE;
 	int32 ArmorSlot = INDEX_NONE;
 	int32 Button = INDEX_NONE;
-	FIntPoint OrganizeCell(INDEX_NONE, INDEX_NONE);
+	bool bOverNearbyList = false;
+	int32 NearbyItem = INDEX_NONE;
+	bool bOverScrollbar = false;
 
 	if (DeprojectMousePositionToWorld(RayOrigin, RayDirection))
 	{
-		InventoryRig->GetOrganizeCellFromWorldRay(RayOrigin, RayDirection, OrganizeCell);
+		bOverNearbyList = InventoryRig->GetNearbyItemFromWorldRay(RayOrigin, RayDirection, NearbyItem);
+		bOverScrollbar = InventoryRig->IsNearbyScrollbarUnderRay(RayOrigin, RayDirection);
 		InventoryRig->GetButtonFromWorldRay(RayOrigin, RayDirection, Button);
 		InventoryRig->GetCellFromWorldRay(RayOrigin, RayDirection, Cell);
 		InventoryRig->GetHandSlotFromWorldRay(RayOrigin, RayDirection, HandSlot);
@@ -811,5 +937,6 @@ void AFSPlayerController::UpdateHoveredInventoryCell()
 	InventoryRig->SetHoveredQuickSlot(QuickSlot);
 	InventoryRig->SetHoveredArmorSlot(ArmorSlot);
 	InventoryRig->SetHoveredButton(Button);
-	InventoryRig->SetHoveredOrganizeCell(OrganizeCell);
+	InventoryRig->SetHoveredNearbyItem(bOverNearbyList, NearbyItem);
+	InventoryRig->SetNearbyScrollbarHovered(bOverScrollbar);
 }

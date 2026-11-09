@@ -282,28 +282,20 @@ void AFSHUD::DrawInventorySlotNames()
 		return;
 	}
 
-	const auto DrawSlotName = [this](const FText& SlotName, const FVector& Location)
+	// A name sits in a shaded box, as the labels over items in the world do, so it reads against whatever's behind it.
+	// A button's label goes without, as the button itself is behind it.
+	const auto DrawLabel = [this](const FText& Label, const FVector& Location, bool bShaded)
 	{
 		// Z is not positive when the point is behind the camera
 		const FVector ScreenLocation = Project(Location);
 		if (ScreenLocation.Z > 0.0)
 		{
-			DrawCentredText(SlotName.ToString(), FVector2D(ScreenLocation.X, ScreenLocation.Y));
+			DrawCentredText(Label.ToString(), FVector2D(ScreenLocation.X, ScreenLocation.Y), bShaded);
 		}
 	};
 
-	// Turned a quarter clockwise about its middle, so it reads from top to bottom
-	const auto DrawSidewaysSlotName = [this](const FText& SlotName, const FVector& Location)
-	{
-		const FVector ScreenLocation = Project(Location);
-		if (ScreenLocation.Z > 0.0)
-		{
-			const FVector Centre(ScreenLocation.X, ScreenLocation.Y, 0.0);
-			Canvas->Canvas->PushRelativeTransform(FTranslationMatrix(-Centre) * FRotationMatrix(FRotator(0.0, 90.0, 0.0)) * FTranslationMatrix(Centre));
-			DrawCentredText(SlotName.ToString(), FVector2D(ScreenLocation.X, ScreenLocation.Y));
-			Canvas->Canvas->PopTransform();
-		}
-	};
+	const auto DrawSlotName = [&DrawLabel](const FText& SlotName, const FVector& Location) { DrawLabel(SlotName, Location, true); };
+	const auto DrawButtonLabel = [&DrawLabel](const FText& ButtonLabel, const FVector& Location) { DrawLabel(ButtonLabel, Location, false); };
 
 	for (int32 HandSlot = 0; HandSlot < AFSInventoryRig::HandSlotCount; ++HandSlot)
 	{
@@ -315,11 +307,13 @@ void AFSHUD::DrawInventorySlotNames()
 		DrawSlotName(UFSInventoryComponent::GetArmorSlotName(AFSInventoryRig::GetArmorTypeOfSlot(ArmorSlot)), Rig->GetArmorSlotLabelLocation(ArmorSlot));
 	}
 
-	DrawSlotName(LOCTEXT("UseItemButton", "Use Item"), Rig->GetButtonLabelLocation(AFSInventoryRig::UseItemButton));
-	DrawSlotName(LOCTEXT("CloseInventoryButton", "X"), Rig->GetButtonLabelLocation(AFSInventoryRig::CloseInventoryButton));
+	DrawButtonLabel(LOCTEXT("UseItemButton", "Use Item"), Rig->GetButtonLabelLocation(AFSInventoryRig::UseItemButton));
 
-	// Standing on end beside the right column, its label runs down it
-	DrawSidewaysSlotName(Rig->IsOrganizing() ? LOCTEXT("StopOrganizingButton", "Stop Organizing") : LOCTEXT("OrganizeInventoryButton", "Organize Inventory"), Rig->GetButtonLabelLocation(AFSInventoryRig::OrganizeInventoryButton));
+	// Just above the list, while there's anything nearby to name
+	if (Rig->GetNearbyItemCount() > 0)
+	{
+		DrawSlotName(LOCTEXT("NearbyItems", "Nearby Items"), Rig->GetNearbyListLabelLocation());
+	}
 
 	if (!Rig->HasBackpack())
 	{
@@ -331,7 +325,7 @@ void AFSHUD::DrawInventorySlotNames()
 		DrawSlotName(UFSInventoryComponent::GetQuickSlotName(AFSInventoryRig::GetQuickSlotOfIndex(QuickSlot)), Rig->GetQuickSlotLabelLocation(QuickSlot));
 	}
 
-	DrawSlotName(LOCTEXT("DropBackpackButton", "Drop Backpack"), Rig->GetButtonLabelLocation(AFSInventoryRig::DropBackpackButton));
+	DrawButtonLabel(LOCTEXT("DropBackpackButton", "Drop Backpack"), Rig->GetButtonLabelLocation(AFSInventoryRig::DropBackpackButton));
 }
 
 void AFSHUD::DrawShadedRing(const FVector2D& Centre, float Radius, const UFSItemDefinition* Item, float Glow)
@@ -583,11 +577,15 @@ void AFSHUD::DrawInteractionLabels()
 void AFSHUD::DrawHoveredItemName()
 {
 	const AFSPlayerController* PlayerController = Cast<AFSPlayerController>(GetOwningPlayerController());
-	const FFSInventoryItem* Item = PlayerController ? PlayerController->GetHoveredInventoryItem() : nullptr;
 	const UFSInventoryComponent* Inventory = PlayerController ? PlayerController->GetInventory() : nullptr;
 
+	// One of the inventory's own, or one in the nearby list
+	const FFSInventoryItem* Item = PlayerController ? PlayerController->GetHoveredInventoryItem() : nullptr;
+	const AFSItemPickup* NearbyItem = PlayerController ? PlayerController->GetHoveredNearbyItem() : nullptr;
+	const UFSItemDefinition* Definition = Item ? Item->Definition.Get() : NearbyItem ? NearbyItem->Item.Get() : nullptr;
+
 	// While an item is carried, the hovered cell is just where its top left would go
-	if (!Item || !Item->Definition || !Inventory || Inventory->IsCarryingItem())
+	if (!Definition || !Inventory || (Item && Inventory->IsCarryingItem()))
 	{
 		return;
 	}
@@ -595,7 +593,7 @@ void AFSHUD::DrawHoveredItemName()
 	FVector2D Mouse;
 	if (PlayerController->GetMousePosition(Mouse.X, Mouse.Y))
 	{
-		DrawCentredText(FFSItemText::FromItem(*Item->Definition), Mouse - FVector2D(0.0, HoveredItemNameHeight), true);
+		DrawCentredText(FFSItemText::FromItem(*Definition), Mouse - FVector2D(0.0, HoveredItemNameHeight), true);
 	}
 }
 

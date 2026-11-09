@@ -253,6 +253,9 @@ public:
 	// The closest pickup in range, or null if there are none
 	AFSItemPickup* GetNearestPickup() const;
 
+	// Every pickup in range, in the order they came into it
+	TArray<AFSItemPickup*> GetNearbyPickups() const;
+
 	// Called by interaction volumes as this character walks in and out of them
 	void AddInteractionVolume(AFSInteractionVolume* Volume);
 	void RemoveInteractionVolume(AFSInteractionVolume* Volume);

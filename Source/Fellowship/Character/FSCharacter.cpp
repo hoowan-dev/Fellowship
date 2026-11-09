@@ -175,6 +175,23 @@ AFSItemPickup* AFSCharacter::GetNearestPickup() const
 	return Nearest;
 }
 
+TArray<AFSItemPickup*> AFSCharacter::GetNearbyPickups() const
+{
+	TArray<AFSItemPickup*> Pickups;
+	Pickups.Reserve(NearbyPickups.Num());
+
+	for (const TWeakObjectPtr<AFSItemPickup>& Pickup : NearbyPickups)
+	{
+		// One being picked up is gone, though it hasn't left yet
+		if (Pickup.IsValid() && !Pickup->IsActorBeingDestroyed())
+		{
+			Pickups.Add(Pickup.Get());
+		}
+	}
+
+	return Pickups;
+}
+
 void AFSCharacter::AddInteractionVolume(AFSInteractionVolume* Volume)
 {
 	InteractionVolumes.Remove(Volume);

@@ -36,15 +36,6 @@ enum class EFSQuickSlot : uint8
 
 enum class EFSArmorType : uint8;
 
-// The grids that items can be placed in
-enum class EFSItemGrid : uint8
-{
-	Backpack,
-
-	// Only there while organizing
-	Organize
-};
-
 DECLARE_MULTICAST_DELEGATE(FFSOnHandItemsChanged);
 DECLARE_MULTICAST_DELEGATE(FFSOnBackpackChanged);
 DECLARE_MULTICAST_DELEGATE(FFSOnQuickSlotItemsChanged);
@@ -125,9 +116,6 @@ class FELLOWSHIP_API UFSInventoryComponent : public UActorComponent
 public:
 	UFSInventoryComponent();
 
-	// The width and height of the grid that's there while organizing
-	static constexpr int32 OrganizeGridSize = 10;
-
 	// What the player sees a hand's slot called
 	static FText GetHandSlotName(EFSHand Hand);
 
@@ -156,33 +144,25 @@ public:
 
 	FFSOnBackpackChanged OnBackpackChanged;
 
-	// Opens up an empty grid to hold items for a while, with or without a backpack. Returns false, changing nothing, if it's already open.
-	bool StartOrganizing();
-
-	// Closes that grid, handing over what's in it. Returns false if it isn't open. The cursor keeps what it holds.
-	bool StopOrganizing(TArray<FFSInventoryItem>& OutItems);
-
-	FORCEINLINE bool IsOrganizing() const { return bOrganizing; }
-
 	// The item covering a cell, or null if there isn't one
-	const FFSInventoryItem* FindItemAt(const FIntPoint& Cell, EFSItemGrid Which = EFSItemGrid::Backpack) const;
+	const FFSInventoryItem* FindItemAt(const FIntPoint& Cell) const;
 
 	// Takes the item covering a cell out of the grid and carries it. Returns false, changing nothing, if there's no item there or one is already carried.
-	bool PickUpItemAt(const FIntPoint& Cell, EFSItemGrid Which = EFSItemGrid::Backpack);
+	bool PickUpItemAt(const FIntPoint& Cell);
 
 	// Carries an item that wasn't in the inventory. Returns false, changing nothing, if there's no definition, one is already carried or the item is a backpack.
 	bool CarryNewItem(UFSItemDefinition* Definition);
 
 	// What would happen with the carried item's top left in this cell. Blocked if nothing is carried.
-	EFSItemPlacement GetCarriedItemPlacement(const FIntPoint& Cell, EFSItemGrid Which = EFSItemGrid::Backpack) const;
+	EFSItemPlacement GetCarriedItemPlacement(const FIntPoint& Cell) const;
 
-	FORCEINLINE bool CanPlaceCarriedItemAt(const FIntPoint& Cell, EFSItemGrid Which = EFSItemGrid::Backpack) const { return GetCarriedItemPlacement(Cell, Which) != EFSItemPlacement::Blocked; }
+	FORCEINLINE bool CanPlaceCarriedItemAt(const FIntPoint& Cell) const { return GetCarriedItemPlacement(Cell) != EFSItemPlacement::Blocked; }
 
 	// Turns the carried item a quarter turn clockwise. Returns false if nothing is carried.
 	bool RotateCarriedItem();
 
 	// Puts the carried item in the grid, and any item it lands on becomes the carried item. Returns false, changing nothing, if CanPlaceCarriedItemAt doesn't allow it.
-	bool PlaceCarriedItem(const FIntPoint& Cell, EFSItemGrid Which = EFSItemGrid::Backpack);
+	bool PlaceCarriedItem(const FIntPoint& Cell);
 
 	// Forgets the carried item, once it's somewhere else such as the world
 	void ClearCarriedItem();
@@ -216,25 +196,24 @@ public:
 
 	FFSOnArmorChanged OnArmorChanged;
 
-	// What double clicking an item in a grid does, once the first click has put it on the cursor. FromGrid, FromCell and FromRotation are where it lay.
+	// What double clicking an item in the grid does, once the first click has put it on the cursor. FromCell and FromRotation are where it lay.
 	// Armor goes in its slot. A weapon goes in the right hand if that's empty, otherwise the left if that's empty, otherwise the right. Nothing goes in a quick slot.
-	// Whatever it replaces goes where it lay if there's room there, and otherwise wherever StowCarriedItem finds for it.
+	// Whatever it replaces goes where it lay if there's room there, and otherwise wherever StowCarriedItem finds for it, staying on the cursor if there's none.
 	// A consumable is used up. Returns false, changing nothing, if nothing is carried or it's none of those.
-	bool QuickEquipCarriedItem(EFSItemGrid FromGrid, const FIntPoint& FromCell, uint8 FromRotation);
+	bool QuickEquipCarriedItem(const FIntPoint& FromCell, uint8 FromRotation);
 
-	// Puts the carried item in the first open space in the backpack, or failing that in the organizing grid, which opens if it isn't already.
-	// Returns false, leaving it on the cursor, if neither has room or nothing is carried.
+	// Puts the carried item in the first open space in the backpack. Returns false, leaving it on the cursor, if there's no room, no backpack or nothing carried.
 	bool StowCarriedItem();
 
 	// What an armor slot holds. Its definition is null if the slot is empty.
 	FORCEINLINE const FFSInventoryItem& GetArmorItem(EFSArmorType ArmorType) const { return ArmorItems[static_cast<int32>(ArmorType)]; }
 
-	FORCEINLINE const FFSInventoryGrid& GetGrid(EFSItemGrid Which = EFSItemGrid::Backpack) const { return Which == EFSItemGrid::Organize ? OrganizeGrid : Grid; }
-	FORCEINLINE const TArray<FFSInventoryItem>& GetItems(EFSItemGrid Which = EFSItemGrid::Backpack) const { return Which == EFSItemGrid::Organize ? OrganizeItems : Items; }
+	FORCEINLINE const FFSInventoryGrid& GetGrid() const { return Grid; }
+	FORCEINLINE const TArray<FFSInventoryItem>& GetItems() const { return Items; }
 
 private:
-	// Moves an item from a grid to the cursor
-	void LiftItem(int32 ItemId, EFSItemGrid Which);
+	// Moves an item from the grid to the cursor
+	void LiftItem(int32 ItemId);
 
 	// Swaps the carried item with one held outside the grid, logging what's unequipped and equipped. SlotName is where it's held.
 	// Returns false, changing nothing, if both are empty.
@@ -248,14 +227,6 @@ private:
 
 	UPROPERTY(Transient)
 	TArray<FFSInventoryItem> Items;
-
-	UPROPERTY(Transient)
-	FFSInventoryGrid OrganizeGrid;
-
-	UPROPERTY(Transient)
-	TArray<FFSInventoryItem> OrganizeItems;
-
-	bool bOrganizing = false;
 
 	UPROPERTY(Transient)
 	FFSInventoryItem CarriedItem;

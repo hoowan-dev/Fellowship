@@ -1406,39 +1406,86 @@ bool FFSInventoryNoRoomTest::RunTest(const FString& Parameters)
 	Test.Character->GetCharacterMovement()->SetMovementMode(MOVE_Walking);
 	Controller->Interact();
 	TestTrue(TEXT("On the ground the inventory opens"), Controller->GetInventoryViewState() == EFSInventoryViewState::Opening);
-	TestTrue(TEXT("To organize"), Inventory->IsOrganizing());
-	TestTrue(TEXT("The world's copy is removed"), NoRoom->IsActorBeingDestroyed());
-	TestTrue(TEXT("Too big even for the organizing grid, it stays on the cursor"), Inventory->IsCarryingItem() && Inventory->GetCarriedItem().Definition == TooLarge);
+	TestFalse(TEXT("The item stays in the world"), NoRoom->IsActorBeingDestroyed());
+	TestFalse(TEXT("Rather than going on the cursor"), Inventory->IsCarryingItem());
+	TestTrue(TEXT("It's at the top of the nearby list"), !Controller->GetNearbyItems().IsEmpty() && Controller->GetNearbyItems()[0] == NoRoom);
 
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSInventoryNoBackpackOrganizeTest, "Fellowship.Inventory.Controller.OrganizesAPickupWithoutABackpack", TestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSInventoryNoRoomListTest, "Fellowship.Inventory.Controller.ListsAPickupWithNoRoomFirst", TestFlags)
 
-bool FFSInventoryNoBackpackOrganizeTest::RunTest(const FString& Parameters)
+bool FFSInventoryNoRoomListTest::RunTest(const FString& Parameters)
 {
-	FInventoryPlayerTestWorld Test(false);
+	FInventoryPlayerTestWorld Test;
 	UFSInventoryComponent* Inventory = Test.Inventory;
 	AFSPlayerController* Controller = Test.Controller;
 
-	// With a mesh, so that the rig shows it
 	UStaticMesh* Cube = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
 	if (!TestNotNull(TEXT("The test mesh loads"), Cube))
 	{
 		return false;
 	}
 
-	UFSItemDefinition* Sword = MakeItem(SwordSize, Cube);
+	// Fills the backpack, so that nothing more has anywhere to go
+	Inventory->AddItem(MakeItem(Inventory->GetGrid().GetSize()));
+	const int32 ItemsInPack = Inventory->GetItems().Num();
+
+	// Lying about already, in reach but further off, and one out of reach
+	AFSItemPickup* First = Test.SpawnPickup(MakeItem(FIntPoint(1, 1), Cube), FVector(150.0, 0.0, 0.0));
+	AFSItemPickup* Second = Test.SpawnPickup(MakeItem(FIntPoint(1, 1), Cube), FVector(200.0, 0.0, 0.0));
+	Test.SpawnPickup(MakeItem(FIntPoint(1, 1), Cube), FVector(1000.0, 0.0, 0.0));
+
+	// The nearest, which the interact button goes to
+	AFSItemPickup* NoRoom = Test.SpawnPickup(MakeItem(SwordSize, Cube), FVector(-60.0, 0.0, 0.0));
+	Controller->Interact();
+
+	TestTrue(TEXT("An item that doesn't fit opens the inventory"), Controller->GetInventoryViewState() == EFSInventoryViewState::Opening);
+	TestFalse(TEXT("It isn't put on the cursor"), Inventory->IsCarryingItem());
+	TestFalse(TEXT("It stays in the world"), NoRoom->IsActorBeingDestroyed());
+	TestEqual(TEXT("The pack is as it was"), Inventory->GetItems().Num(), ItemsInPack);
+
+	const TArray<TWeakObjectPtr<AFSItemPickup>>& Nearby = Controller->GetNearbyItems();
+	TestEqual(TEXT("Everything in reach is listed"), Nearby.Num(), 3);
+	if (Nearby.Num() == 3)
+	{
+		TestTrue(TEXT("With the item that didn't fit at the top"), Nearby[0] == NoRoom);
+		TestTrue(TEXT("Then the others in the order they came into reach"), Nearby[1] == First && Nearby[2] == Second);
+	}
+
+	const AFSInventoryRig* Rig = Controller->GetInventoryRig();
+	if (TestNotNull(TEXT("The rig is there"), Rig))
+	{
+		TestEqual(TEXT("The rig lists them too"), Rig->GetNearbyItemCount(), 3);
+		TestEqual(TEXT("From the top"), Rig->GetNearbyScroll(), 0);
+		TestTrue(TEXT("With the item that didn't fit in the top box"), Rig->GetNearbyItemMesh(0) && Rig->GetNearbyItemMesh(0)->GetStaticMesh() == Cube);
+	}
+
+	// Walking out of its reach and back, while the others stay in reach, it's no longer kept at the top
+	Test.Character->SetActorLocation(FVector(300.0, 0.0, 0.0));
+	Controller->UpdateNearbyItems();
+	TestEqual(TEXT("Walking away from it takes it off the list"), Nearby.Num(), 2);
+	Test.Character->SetActorLocation(FVector::ZeroVector);
+	Controller->UpdateNearbyItems();
+	TestTrue(TEXT("Coming back lists it at the bottom"), Nearby.Num() == 3 && Nearby[2] == NoRoom);
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSInventoryNoBackpackListTest, "Fellowship.Inventory.Controller.ListsAPickupFirstWithoutABackpack", TestFlags)
+
+bool FFSInventoryNoBackpackListTest::RunTest(const FString& Parameters)
+{
+	FInventoryPlayerTestWorld Test(false);
+	AFSPlayerController* Controller = Test.Controller;
+
+	UFSItemDefinition* Sword = MakeItem(SwordSize, LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube")));
 	AFSItemPickup* Pickup = Test.SpawnPickup(Sword);
 	Controller->Interact();
 	TestTrue(TEXT("Without a backpack, picking up an item opens the inventory"), Controller->GetInventoryViewState() == EFSInventoryViewState::Opening);
-	TestTrue(TEXT("To organize"), Inventory->IsOrganizing());
-	TestFalse(TEXT("It isn't left on the cursor"), Inventory->IsCarryingItem());
-	const FFSInventoryItem* InCorner = Inventory->FindItemAt(FIntPoint(0, 0), EFSItemGrid::Organize);
-	TestTrue(TEXT("It's in the top left cell of the organizing grid"), InCorner && InCorner->Definition == Sword && InCorner->Cell == FIntPoint(0, 0));
-	TestTrue(TEXT("The world's copy is removed"), Pickup->IsActorBeingDestroyed());
+	TestFalse(TEXT("It stays in the world"), Pickup->IsActorBeingDestroyed());
+	TestTrue(TEXT("At the top of the nearby list"), !Controller->GetNearbyItems().IsEmpty() && Controller->GetNearbyItems()[0] == Pickup);
 
-	// The rig shows the organizing grid, though there's no backpack's grid beside it
 	// Runs the camera blend's timers to the end, then lets the grid scale in
 	Test.World->GetTimerManager().Tick(0.0f);
 	++GFrameCounter;
@@ -1447,50 +1494,17 @@ bool FFSInventoryNoBackpackOrganizeTest::RunTest(const FString& Parameters)
 	if (TestNotNull(TEXT("The rig is there"), Rig))
 	{
 		Rig->Tick(1.0f);
-		TestTrue(TEXT("The organizing grid shows without a backpack"), Rig->GetOrganizeGrid()->GetVisibleFlag());
-		TestFalse(TEXT("The backpack's own grid doesn't"), Rig->GetGrid()->GetVisibleFlag());
+		TestTrue(TEXT("The nearby list shows without a backpack"), Rig->GetNearbyList()->GetVisibleFlag());
+		TestFalse(TEXT("The backpack's grid doesn't"), Rig->GetGrid()->GetVisibleFlag());
+		TestTrue(TEXT("The item's mesh shows in its box"), Rig->GetNearbyItemMesh(0) && Rig->GetNearbyItemMesh(0)->GetVisibleFlag());
 
-		const auto IsItemShown = [this, Rig]()
-		{
-			return TestEqual(TEXT("The item has a mesh"), Rig->GetItemMeshes().Num(), 1) && Rig->GetItemMeshes()[0]->GetVisibleFlag();
-		};
-		TestTrue(TEXT("Its item shows"), IsItemShown());
-
-		// Picked up and put back, the item's mesh is made again
 		TestTrue(TEXT("The inventory has opened"), Controller->GetInventoryViewState() == EFSInventoryViewState::Open);
-		Controller->SelectInventoryOrganizeCell(FIntPoint(0, 0));
-		TestTrue(TEXT("The item can be picked up"), Inventory->IsCarryingItem());
-		Controller->SelectInventoryOrganizeCell(FIntPoint(0, 0));
-		TestFalse(TEXT("And put back"), Inventory->IsCarryingItem());
-		TestNotNull(TEXT("Where it was"), Inventory->FindItemAt(FIntPoint(0, 0), EFSItemGrid::Organize));
-		TestTrue(TEXT("Still showing"), IsItemShown());
+		Controller->SelectNearbyItem(0);
+		TestTrue(TEXT("The item can be taken from the list"), Test.Inventory->IsCarryingItem() && Test.Inventory->GetCarriedItem().Definition == Sword);
+		Controller->SelectInventoryHand(EFSHand::Right);
+		TestTrue(TEXT("And held"), Test.Inventory->GetHandItem(EFSHand::Right).Definition == Sword);
+		TestTrue(TEXT("Leaving the list empty"), Controller->GetNearbyItems().IsEmpty() && Rig->GetNearbyItemCount() == 0);
 	}
-
-	return true;
-}
-
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSInventoryNoRoomOrganizeTest, "Fellowship.Inventory.Controller.OrganizesAnItemThatHasNoRoom", TestFlags)
-
-bool FFSInventoryNoRoomOrganizeTest::RunTest(const FString& Parameters)
-{
-	FInventoryPlayerTestWorld Test;
-	UFSInventoryComponent* Inventory = Test.Inventory;
-	AFSPlayerController* Controller = Test.Controller;
-
-	// Fills the backpack, so that the sword has nowhere to go
-	Inventory->AddItem(MakeItem(Inventory->GetGrid().GetSize()));
-	const int32 ItemsInPack = Inventory->GetItems().Num();
-
-	UFSItemDefinition* Sword = MakeItem(SwordSize);
-	AFSItemPickup* NoRoomForSword = Test.SpawnPickup(Sword);
-	Controller->Interact();
-	TestTrue(TEXT("An item that fits nowhere opens the inventory"), Controller->GetInventoryViewState() == EFSInventoryViewState::Opening);
-	TestTrue(TEXT("To organize"), Inventory->IsOrganizing());
-	TestFalse(TEXT("It isn't left on the cursor"), Inventory->IsCarryingItem());
-	const FFSInventoryItem* InCorner = Inventory->FindItemAt(FIntPoint(0, 0), EFSItemGrid::Organize);
-	TestTrue(TEXT("It's in the top left cell of the organizing grid"), InCorner && InCorner->Definition == Sword && InCorner->Cell == FIntPoint(0, 0));
-	TestEqual(TEXT("The pack is as it was"), Inventory->GetItems().Num(), ItemsInPack);
-	TestTrue(TEXT("The world's copy is removed"), NoRoomForSword->IsActorBeingDestroyed());
 
 	return true;
 }
@@ -1793,7 +1807,7 @@ bool FFSBackpackRigTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("No grid"), Rig->GetGrid()->GetVisibleFlag());
 	TestFalse(TEXT("No quick slots"), Rig->GetQuickSlots()->GetVisibleFlag());
 	TestTrue(TEXT("But the buttons are there"), Rig->GetButtons()->GetVisibleFlag());
-	TestTrue(TEXT("Use Item and Organize Inventory, that is"), Rig->IsButtonShown(AFSInventoryRig::UseItemButton) && Rig->IsButtonShown(AFSInventoryRig::OrganizeInventoryButton));
+	TestTrue(TEXT("Use Item, that is"), Rig->IsButtonShown(AFSInventoryRig::UseItemButton));
 	TestFalse(TEXT("Not Drop Backpack"), Rig->IsButtonShown(AFSInventoryRig::DropBackpackButton));
 	FTransform DropButton;
 	Rig->GetButtons()->GetInstanceTransform(AFSInventoryRig::DropBackpackButton, DropButton);
@@ -1804,7 +1818,8 @@ bool FFSBackpackRigTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("Nor the quick slots"), Rig->GetQuickSlotFromWorldRay(Origin, DirectionToGridPoint(QuickSlotCentre), QuickSlot));
 	int32 Button = INDEX_NONE;
 	TestTrue(TEXT("Use Item can be"), Rig->GetButtonFromWorldRay(Origin, DirectionToGridPoint(ButtonCentre), Button) && Button == AFSInventoryRig::UseItemButton);
-	TestTrue(TEXT("So can Organize Inventory"), Rig->GetButtonFromWorldRay(Origin, DirectionToGridPoint(Rig->GetButtonCentre(AFSInventoryRig::OrganizeInventoryButton)), Button) && Button == AFSInventoryRig::OrganizeInventoryButton);
+	int32 NearbyItem = INDEX_NONE;
+	TestTrue(TEXT("And the nearby list"), Rig->GetNearbyItemFromWorldRay(Origin, DirectionToGridPoint(Rig->GetNearbyListCentre()), NearbyItem));
 	TestFalse(TEXT("But not Drop Backpack"), Rig->GetButtonFromWorldRay(Origin, DirectionToGridPoint(Rig->GetButtonCentre(AFSInventoryRig::DropBackpackButton)), Button));
 	TestTrue(TEXT("The hands' cells can"), Rig->GetHandSlotFromWorldRay(Origin, DirectionToGridPoint(Rig->GetHandSlotCentre(AFSInventoryRig::LeftHandSlot)), HandSlot));
 
@@ -1835,138 +1850,120 @@ bool FFSBackpackRigTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSOrganizeGridTest, "Fellowship.Inventory.Organizing.GridHoldsItemsLikeTheBackpacks", TestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSNearbyTakeTest, "Fellowship.Inventory.Nearby.TakesAndDropsItems", TestFlags)
 
-bool FFSOrganizeGridTest::RunTest(const FString& Parameters)
+bool FFSNearbyTakeTest::RunTest(const FString& Parameters)
 {
-	FInventoryPlayerTestWorld Test(false);
+	FInventoryPlayerTestWorld Test;
 	UFSInventoryComponent* Inventory = Test.Inventory;
-	const FIntPoint Cell(11, 0);
+	AFSPlayerController* Controller = Test.Controller;
+	const TArray<TWeakObjectPtr<AFSItemPickup>>& Nearby = Controller->GetNearbyItems();
 
-	UFSItemDefinition* Small = MakeItem(FIntPoint(1, 1));
 	UFSItemDefinition* Sword = MakeItem(SwordSize);
+	UFSItemDefinition* Apple = MakeItem(FIntPoint(1, 1));
+	AFSItemPickup* SwordPickup = Test.SpawnPickup(Sword, FVector(50.0, 0.0, 0.0));
+	AFSItemPickup* ApplePickup = Test.SpawnPickup(Apple, FVector(-50.0, 0.0, 0.0));
 
-	TestTrue(TEXT("It starts without a backpack"), Inventory->StartOrganizing());
-	TestEqual(TEXT("With the whole grid"), Inventory->GetGrid(EFSItemGrid::Organize).GetSize(), FIntPoint(UFSInventoryComponent::OrganizeGridSize));
-	TArray<FFSInventoryItem> NothingYet;
-	Inventory->StopOrganizing(NothingYet);
+	Controller->SelectNearbyItem(0);
+	TestFalse(TEXT("Selecting does nothing while the inventory is closed"), Inventory->IsCarryingItem());
 
-	Inventory->EquipBackpack(MakeBackpack());
-	Inventory->AddItem(Small);
+	Test.OpenInventory();
+	if (!TestTrue(TEXT("The inventory opens"), Controller->GetInventoryViewState() == EFSInventoryViewState::Open))
+	{
+		return false;
+	}
 
-	Inventory->CarryNewItem(Sword);
-	TestTrue(TEXT("Before organizing, the grid isn't there to place in"), Inventory->GetCarriedItemPlacement(Cell, EFSItemGrid::Organize) == EFSItemPlacement::Blocked);
+	TestTrue(TEXT("Both are listed, in the order they came into reach"), Nearby.Num() == 2 && Nearby[0] == SwordPickup && Nearby[1] == ApplePickup);
 
-	TestTrue(TEXT("With one, it starts"), Inventory->StartOrganizing());
-	TestFalse(TEXT("Only the once"), Inventory->StartOrganizing());
-	TestEqual(TEXT("The grid is 10 by 10"), Inventory->GetGrid(EFSItemGrid::Organize).GetSize(), FIntPoint(10, 10));
+	Controller->SelectNearbyItem(0);
+	TestTrue(TEXT("Selecting one carries it"), Inventory->IsCarryingItem() && Inventory->GetCarriedItem().Definition == Sword);
+	TestTrue(TEXT("Taking it from the world"), SwordPickup->IsActorBeingDestroyed());
+	TestTrue(TEXT("And off the list, leaving the other at the top"), Nearby.Num() == 1 && Nearby[0] == ApplePickup);
+	TestEqual(TEXT("Which the rig follows"), Controller->GetInventoryRig()->GetNearbyItemCount(), 1);
 
-	TestTrue(TEXT("A long item can't hang off it"), Inventory->GetCarriedItemPlacement(Cell, EFSItemGrid::Organize) == EFSItemPlacement::Blocked);
-	TestTrue(TEXT("It can go where it fits"), Inventory->PlaceCarriedItem(FIntPoint(0, 0), EFSItemGrid::Organize));
-	TestFalse(TEXT("Which takes it off the cursor"), Inventory->IsCarryingItem());
-	TestEqual(TEXT("It's in that grid"), Inventory->GetItems(EFSItemGrid::Organize).Num(), 1);
-	TestEqual(TEXT("And not the backpack's"), Inventory->GetItems().Num(), 1);
-	TestTrue(TEXT("It can be found there"), Inventory->FindItemAt(FIntPoint(0, 0), EFSItemGrid::Organize)->Definition == Sword);
-	TestTrue(TEXT("The backpack's cell is its own"), Inventory->FindItemAt(FIntPoint(0, 0))->Definition == Small);
+	Controller->SelectNearbyItem(0);
+	TestTrue(TEXT("Selecting another swaps the carried item for it"), Inventory->IsCarryingItem() && Inventory->GetCarriedItem().Definition == Apple);
+	TestEqual(TEXT("Leaving the carried one on the ground"), Test.CountPickups(), 1);
+	TestTrue(TEXT("Where it's listed"), Nearby.Num() == 1 && Nearby[0].IsValid() && Nearby[0]->Item == Sword);
 
-	TestTrue(TEXT("The backpack's item can be picked up"), Inventory->PickUpItemAt(FIntPoint(0, 0)));
-	TestTrue(TEXT("And land on an item in the other grid, which swaps them"), Inventory->GetCarriedItemPlacement(FIntPoint(0, 0), EFSItemGrid::Organize) == EFSItemPlacement::Swap);
-	TestTrue(TEXT("It goes in"), Inventory->PlaceCarriedItem(FIntPoint(0, 0), EFSItemGrid::Organize));
-	TestTrue(TEXT("Taking the other's place"), Inventory->GetCarriedItem().Definition == Sword);
-	Inventory->PlaceCarriedItem(FIntPoint(0, 0));
-	TestEqual(TEXT("The other goes in the backpack"), Inventory->GetItems().Num(), 1);
+	Controller->SelectNearbyItem(INDEX_NONE);
+	TestFalse(TEXT("Selecting the list away from its items drops what's carried"), Inventory->IsCarryingItem());
+	TestTrue(TEXT("Listing it at the bottom"), Nearby.Num() == 2 && Nearby[1].IsValid() && Nearby[1]->Item == Apple);
 
-	TArray<FFSInventoryItem> Left;
-	TestTrue(TEXT("It stops"), Inventory->StopOrganizing(Left));
-	TestEqual(TEXT("Handing over what was left"), Left.Num(), 1);
-	TestTrue(TEXT("Which is the right item"), Left[0].Definition == Small);
-	TestFalse(TEXT("It's stopped"), Inventory->IsOrganizing());
-	TestEqual(TEXT("Nothing stays"), Inventory->GetItems(EFSItemGrid::Organize).Num(), 0);
-	TestFalse(TEXT("And there's nothing more to stop"), Inventory->StopOrganizing(Left));
-	TestTrue(TEXT("It starts empty next time"), Inventory->StartOrganizing() && Inventory->GetItems(EFSItemGrid::Organize).IsEmpty());
+	Controller->SelectNearbyItem(INDEX_NONE);
+	TestEqual(TEXT("With nothing carried that drops nothing"), Test.CountPickups(), 2);
+
+	Controller->SelectNearbyItem(1);
+	Controller->SelectInventoryCell(FIntPoint(0, 0));
+	const FFSInventoryItem* Stored = Inventory->FindItemAt(FIntPoint(0, 0));
+	TestTrue(TEXT("What's taken from the list can go in the backpack"), Stored && Stored->Definition == Apple);
+
+	// The sword is all that's left in the list
+	FFSInventoryClick Click;
+	Click.Place = EFSInventoryClickPlace::NearbyItem;
+	Click.Index = 0;
+	Controller->ClickInventory(Click, 10.0);
+	TestTrue(TEXT("Clicking an item carries it"), Inventory->IsCarryingItem() && Inventory->GetCarriedItem().Definition == Sword);
+	Controller->ClickInventory(Click, 10.1);
+	TestFalse(TEXT("A quick second click puts it in the backpack"), Inventory->IsCarryingItem());
+	TestTrue(TEXT("Where it is"), Inventory->GetItems().ContainsByPredicate([Sword](const FFSInventoryItem& Item) { return Item.Definition == Sword; }));
+	TestEqual(TEXT("Leaving nothing in the world"), Test.CountPickups(), 0);
+	TestEqual(TEXT("Or in the list"), Nearby.Num(), 0);
+
+	// A backpack is put on rather than carried, in place of the one being worn
+	UFSItemDefinition* OldBackpack = Inventory->GetBackpack();
+	UFSItemDefinition* NewBackpack = MakeBackpack();
+	Test.SpawnPickup(NewBackpack, FVector(0.0, 50.0, 0.0));
+	Controller->UpdateNearbyItems();
+	UFSItemDefinition* Carried = MakeItem(FIntPoint(1, 1));
+	Inventory->CarryNewItem(Carried);
+
+	Controller->SelectNearbyItem(0);
+	TestTrue(TEXT("Selecting a backpack puts it on"), Inventory->GetBackpack() == NewBackpack);
+	TestTrue(TEXT("The cursor keeps what it holds"), Inventory->IsCarryingItem() && Inventory->GetCarriedItem().Definition == Carried);
+	TestTrue(TEXT("And the old one is listed in its place"), Nearby.Num() == 1 && Nearby[0].IsValid() && Nearby[0]->Item == OldBackpack);
+
+	Controller->CloseInventory();
+	TestTrue(TEXT("Closing still drops what's carried, as before"), !Inventory->IsCarryingItem() && Test.CountPickups() == 2);
 
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSOrganizeLeavingTest, "Fellowship.Inventory.Organizing.LeavingDropsWhatsInTheGrid", TestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSNearbyStreamingTest, "Fellowship.Inventory.Nearby.FollowsWhatsInReach", TestFlags)
 
-bool FFSOrganizeLeavingTest::RunTest(const FString& Parameters)
+bool FFSNearbyStreamingTest::RunTest(const FString& Parameters)
 {
-	FInventoryPlayerTestWorld Test(false);
-	UFSInventoryComponent* Inventory = Test.Inventory;
+	FInventoryPlayerTestWorld Test;
 	AFSPlayerController* Controller = Test.Controller;
-	UFSItemDefinition* Sword = MakeItem(SwordSize, LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube")));
+	const TArray<TWeakObjectPtr<AFSItemPickup>>& Nearby = Controller->GetNearbyItems();
 
-	const auto PutInOrganizeGrid = [&](const FIntPoint& Cell)
+	Test.OpenInventory();
+	const AFSInventoryRig* Rig = Controller->GetInventoryRig();
+	if (!TestNotNull(TEXT("The rig is there"), Rig))
 	{
-		Inventory->CarryNewItem(Sword);
-		Controller->SelectInventoryOrganizeCell(Cell);
-	};
+		return false;
+	}
 
-	Inventory->EquipBackpack(MakeBackpack());
-	Test.OpenInventory();
+	TestEqual(TEXT("Nothing's listed with nothing in reach"), Nearby.Num(), 0);
 
-	Controller->SelectInventoryButton(AFSInventoryRig::OrganizeInventoryButton);
-	TestTrue(TEXT("The button starts organizing"), Inventory->IsOrganizing());
-	TestTrue(TEXT("Which the rig follows"), Controller->GetInventoryRig()->IsOrganizing());
+	AFSItemPickup* Ahead = Test.SpawnPickup(MakeItem(FIntPoint(1, 1)), FVector(600.0, 0.0, 0.0));
+	Controller->UpdateNearbyItems();
+	TestEqual(TEXT("Something out of reach isn't listed"), Nearby.Num(), 0);
 
-	PutInOrganizeGrid(FIntPoint(0, 0));
-	PutInOrganizeGrid(FIntPoint(3, 0));
-	TestEqual(TEXT("Both are in the grid"), Inventory->GetItems(EFSItemGrid::Organize).Num(), 2);
-	TestEqual(TEXT("Each with a mesh"), Controller->GetInventoryRig()->GetItemMeshes().Num(), 2);
+	Test.Character->SetActorLocation(FVector(500.0, 0.0, 0.0));
+	Controller->UpdateNearbyItems();
+	TestTrue(TEXT("Walking up to it lists it"), Nearby.Num() == 1 && Nearby[0] == Ahead);
+	TestEqual(TEXT("In the rig too"), Rig->GetNearbyItemCount(), 1);
 
-	Controller->SelectInventoryOrganizeCell(FIntPoint(0, 0));
-	TestTrue(TEXT("Selecting one picks it up"), Inventory->IsCarryingItem());
-	Controller->SelectInventoryOrganizeCell(FIntPoint(0, 0));
-	TestFalse(TEXT("And again puts it down"), Inventory->IsCarryingItem());
+	// A pickup with nothing to pick up has nothing to show
+	Test.SpawnPickup(nullptr, FVector(500.0, 0.0, 0.0));
+	Controller->UpdateNearbyItems();
+	TestEqual(TEXT("An empty pickup isn't listed"), Nearby.Num(), 1);
 
-	// Held on the cursor, which the button leaves alone
-	Inventory->CarryNewItem(Sword);
-	Controller->SelectInventoryButton(AFSInventoryRig::OrganizeInventoryButton);
-	TestFalse(TEXT("The button also stops it"), Inventory->IsOrganizing());
-	TestFalse(TEXT("Which the rig follows"), Controller->GetInventoryRig()->IsOrganizing());
-	TestEqual(TEXT("Dropping what's in the grid"), Test.CountPickups(), 2);
-	TestTrue(TEXT("While the cursor keeps what it holds"), Inventory->IsCarryingItem());
-	TestEqual(TEXT("And the meshes go"), Controller->GetInventoryRig()->GetItemMeshes().Num(), 0);
-	Inventory->ClearCarriedItem();
-
-	// Closing the inventory
-	Controller->SelectInventoryButton(AFSInventoryRig::OrganizeInventoryButton);
-	PutInOrganizeGrid(FIntPoint(0, 0));
-	Controller->CloseInventory();
-	TestFalse(TEXT("Closing stops it"), Inventory->IsOrganizing());
-	TestEqual(TEXT("Dropping what's in the grid"), Test.CountPickups(), 3);
-
-	// Being pulled out of the inventory by something else. A timer manager won't tick twice in the same frame, and the first tick only starts timers that were just set.
-	const auto NextFrame = [&Test]()
-	{
-		++GFrameCounter;
-		Test.World->GetTimerManager().Tick(0.0f);
-		++GFrameCounter;
-		Test.World->GetTimerManager().Tick(2.0f);
-		++GFrameCounter;
-	};
-
-	NextFrame();
-	Test.OpenInventory();
-	++GFrameCounter;
-	Controller->SelectInventoryButton(AFSInventoryRig::OrganizeInventoryButton);
-	PutInOrganizeGrid(FIntPoint(0, 0));
-	Controller->UnPossess();
-	TestFalse(TEXT("Losing the character stops it"), Inventory->IsOrganizing());
-	TestEqual(TEXT("Dropping what's in the grid"), Test.CountPickups(), 4);
-	Controller->Possess(Test.Character);
-
-	// Dropping the backpack
-	NextFrame();
-	Test.OpenInventory();
-	Controller->SelectInventoryButton(AFSInventoryRig::OrganizeInventoryButton);
-	PutInOrganizeGrid(FIntPoint(0, 0));
-	Controller->SelectInventoryButton(AFSInventoryRig::DropBackpackButton);
-	TestFalse(TEXT("The backpack can be dropped"), Inventory->HasBackpack());
-	TestTrue(TEXT("Which leaves the organizing grid open, as it doesn't need one"), Inventory->IsOrganizing());
-	TestEqual(TEXT("With what's in it"), Inventory->GetItems(EFSItemGrid::Organize).Num(), 1);
-	TestEqual(TEXT("Only the backpack lands in the world"), Test.CountPickups(), 5);
+	Test.Character->SetActorLocation(FVector(-500.0, 0.0, 0.0));
+	Controller->UpdateNearbyItems();
+	TestEqual(TEXT("Walking away takes it off"), Nearby.Num(), 0);
+	TestEqual(TEXT("In the rig too"), Rig->GetNearbyItemCount(), 0);
 
 	return true;
 }
@@ -1989,27 +1986,16 @@ bool FFSInventoryButtonsTest::RunTest(const FString& Parameters)
 
 	Test.OpenInventory();
 
-	for (const int32 Button : { AFSInventoryRig::UseItemButton, AFSInventoryRig::OrganizeInventoryButton, AFSInventoryRig::OrganizeInventoryButton })
-	{
-		Controller->SelectInventoryButton(Button);
-		TestTrue(TEXT("It leaves the backpack on"), Inventory->GetBackpack() == Backpack);
-		TestTrue(TEXT("It doesn't toss what's carried, as selecting outside the grid would"), Inventory->IsCarryingItem() && Inventory->GetCarriedItem().Definition == Sword);
-		TestEqual(TEXT("Nothing lands on the ground"), Test.CountPickups(), 0);
-	}
+	Controller->SelectInventoryButton(AFSInventoryRig::UseItemButton);
+	TestTrue(TEXT("Use Item leaves the backpack on"), Inventory->GetBackpack() == Backpack);
+	TestTrue(TEXT("It doesn't toss what's carried, as selecting outside the grid would"), Inventory->IsCarryingItem() && Inventory->GetCarriedItem().Definition == Sword);
+	TestEqual(TEXT("Nothing lands on the ground"), Test.CountPickups(), 0);
 
 	Controller->SelectInventoryButton(AFSInventoryRig::DropBackpackButton);
 	TestFalse(TEXT("Drop Backpack drops it"), Inventory->HasBackpack());
 	TestEqual(TEXT("It's on the ground"), Test.CountPickups(), 1);
 	TestTrue(TEXT("While the cursor keeps what it holds"), Inventory->IsCarryingItem());
-
-	Controller->SelectInventoryButton(AFSInventoryRig::OrganizeInventoryButton);
-	TestTrue(TEXT("Organize Inventory opens the organizing grid without a backpack"), Inventory->IsOrganizing());
-	Controller->SelectInventoryButton(AFSInventoryRig::OrganizeInventoryButton);
-	TestFalse(TEXT("And closes it again"), Inventory->IsOrganizing());
-
-	Controller->SelectInventoryButton(AFSInventoryRig::CloseInventoryButton);
-	TestEqual(TEXT("Close Inventory closes it"), Controller->GetInventoryViewState(), EFSInventoryViewState::Closing);
-	TestFalse(TEXT("Tossing what's carried, as closing it any other way does"), Inventory->IsCarryingItem());
+	TestTrue(TEXT("And the inventory stays open"), Controller->GetInventoryViewState() == EFSInventoryViewState::Open);
 
 	return true;
 }
@@ -2813,20 +2799,20 @@ bool FFSQuickEquipTest::RunTest(const FString& Parameters)
 	UFSItemDefinition* ThirdSword = MakeNamed(TEXT("Third Sword"), SwordSize, EFSItemType::Weapon);
 	UFSItemDefinition* Dagger = MakeNamed(TEXT("Dagger"), FIntPoint(1, 2), EFSItemType::Weapon);
 
-	TestFalse(TEXT("Nothing carried, nothing to equip"), Inventory->QuickEquipCarriedItem(EFSItemGrid::Backpack, FIntPoint(0, 0), 0));
+	TestFalse(TEXT("Nothing carried, nothing to equip"), Inventory->QuickEquipCarriedItem(FIntPoint(0, 0), 0));
 
 	PickUpFrom(FirstSword, FIntPoint(0, 0));
-	TestTrue(TEXT("A weapon is equipped"), Inventory->QuickEquipCarriedItem(EFSItemGrid::Backpack, FIntPoint(0, 0), 0));
+	TestTrue(TEXT("A weapon is equipped"), Inventory->QuickEquipCarriedItem(FIntPoint(0, 0), 0));
 	TestTrue(TEXT("In the right hand first"), Inventory->GetHandItem(EFSHand::Right).Definition == FirstSword);
 	TestFalse(TEXT("Off the cursor"), Inventory->IsCarryingItem());
 	TestTrue(TEXT("And out of the grid"), Inventory->GetItems().IsEmpty());
 
 	PickUpFrom(SecondSword, FIntPoint(0, 0));
-	Inventory->QuickEquipCarriedItem(EFSItemGrid::Backpack, FIntPoint(0, 0), 0);
+	Inventory->QuickEquipCarriedItem(FIntPoint(0, 0), 0);
 	TestTrue(TEXT("Then the left, with the right full"), Inventory->GetHandItem(EFSHand::Left).Definition == SecondSword);
 
 	PickUpFrom(ThirdSword, FIntPoint(4, 1));
-	Inventory->QuickEquipCarriedItem(EFSItemGrid::Backpack, FIntPoint(4, 1), 0);
+	Inventory->QuickEquipCarriedItem(FIntPoint(4, 1), 0);
 	TestTrue(TEXT("With both full, the right is replaced"), Inventory->GetHandItem(EFSHand::Right).Definition == ThirdSword);
 	const FFSInventoryItem* Replaced = Inventory->FindItemAt(FIntPoint(4, 1));
 	TestTrue(TEXT("What it replaced takes its place"), Replaced && Replaced->Definition == FirstSword && Replaced->Cell == FIntPoint(4, 1));
@@ -2834,7 +2820,7 @@ bool FFSQuickEquipTest::RunTest(const FString& Parameters)
 
 	// A sword can't stand where a dagger in the bottom right corner was, since it would hang off the grid
 	PickUpFrom(Dagger, FIntPoint(InventoryWidth - 1, InventoryHeight - 2));
-	Inventory->QuickEquipCarriedItem(EFSItemGrid::Backpack, FIntPoint(InventoryWidth - 1, InventoryHeight - 2), 0);
+	Inventory->QuickEquipCarriedItem(FIntPoint(InventoryWidth - 1, InventoryHeight - 2), 0);
 	TestTrue(TEXT("A smaller weapon replaces the right hand's too"), Inventory->GetHandItem(EFSHand::Right).Definition == Dagger);
 	const FFSInventoryItem* Moved = Inventory->FindItemAt(FIntPoint(0, 0));
 	TestTrue(TEXT("What it replaced goes in the first open space instead"), Moved && Moved->Definition == ThirdSword && Moved->Cell == FIntPoint(0, 0));
@@ -2845,14 +2831,14 @@ bool FFSQuickEquipTest::RunTest(const FString& Parameters)
 	Mail->ArmorType = EFSArmorType::Body;
 
 	PickUpFrom(Helmet, FIntPoint(8, 0));
-	Inventory->QuickEquipCarriedItem(EFSItemGrid::Backpack, FIntPoint(8, 0), 0);
+	Inventory->QuickEquipCarriedItem(FIntPoint(8, 0), 0);
 	TestTrue(TEXT("Armor goes in its own slot"), Inventory->GetArmorItem(EFSArmorType::Head).Definition == Helmet);
 	PickUpFrom(Mail, FIntPoint(8, 0));
-	Inventory->QuickEquipCarriedItem(EFSItemGrid::Backpack, FIntPoint(8, 0), 0);
+	Inventory->QuickEquipCarriedItem(FIntPoint(8, 0), 0);
 	TestTrue(TEXT("Whatever its type"), Inventory->GetArmorItem(EFSArmorType::Body).Definition == Mail);
 	TestTrue(TEXT("Leaving the others alone"), Inventory->GetArmorItem(EFSArmorType::Head).Definition == Helmet);
 	PickUpFrom(Hood, FIntPoint(8, 0));
-	Inventory->QuickEquipCarriedItem(EFSItemGrid::Backpack, FIntPoint(8, 0), 0);
+	Inventory->QuickEquipCarriedItem(FIntPoint(8, 0), 0);
 	TestTrue(TEXT("And replaces what's there"), Inventory->GetArmorItem(EFSArmorType::Head).Definition == Hood);
 	const FFSInventoryItem* OldHelmet = Inventory->FindItemAt(FIntPoint(8, 0));
 	TestTrue(TEXT("Which takes its place"), OldHelmet && OldHelmet->Definition == Helmet);
@@ -2861,7 +2847,7 @@ bool FFSQuickEquipTest::RunTest(const FString& Parameters)
 	UFSItemDefinition* Apple = MakeNamed(TEXT("Apple"), FIntPoint(1, 1), EFSItemType::Consumable);
 	const int32 ItemsBefore = Inventory->GetItems().Num();
 	PickUpFrom(Apple, FIntPoint(10, 0));
-	TestTrue(TEXT("A consumable is used"), Inventory->QuickEquipCarriedItem(EFSItemGrid::Backpack, FIntPoint(10, 0), 0));
+	TestTrue(TEXT("A consumable is used"), Inventory->QuickEquipCarriedItem(FIntPoint(10, 0), 0));
 	TestFalse(TEXT("And is gone"), Inventory->IsCarryingItem());
 	TestEqual(TEXT("Not back in the grid"), Inventory->GetItems().Num(), ItemsBefore);
 	TestEqual(TEXT("Which is logged"), Events.IsEmpty() ? FString() : Events.Last().ToString(), FString(TEXT("Used Apple")));
@@ -2871,15 +2857,14 @@ bool FFSQuickEquipTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("An equipped item is put away"), Inventory->StowCarriedItem());
 	TestFalse(TEXT("Leaving its hand empty"), Inventory->GetHandItem(EFSHand::Left).Definition != nullptr || Inventory->IsCarryingItem());
 	TestTrue(TEXT("In the backpack"), Inventory->GetItems().ContainsByPredicate([SecondSword](const FFSInventoryItem& Item) { return Item.Definition == SecondSword; }));
-	TestFalse(TEXT("Without organizing"), Inventory->IsOrganizing());
 	TestFalse(TEXT("Nothing carried, nothing to put away"), Inventory->StowCarriedItem());
 
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSQuickEquipOrganizeTest, "Fellowship.Inventory.QuickEquip.UsesTheOrganizingGridWithoutRoom", TestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSQuickEquipNoRoomTest, "Fellowship.Inventory.QuickEquip.LeavesWhatHasNoRoomOnTheCursor", TestFlags)
 
-bool FFSQuickEquipOrganizeTest::RunTest(const FString& Parameters)
+bool FFSQuickEquipNoRoomTest::RunTest(const FString& Parameters)
 {
 	FInventoryTestWorld Test(false);
 	UFSInventoryComponent* Inventory = Test.Inventory;
@@ -2890,14 +2875,11 @@ bool FFSQuickEquipOrganizeTest::RunTest(const FString& Parameters)
 	UFSItemDefinition* Pebble = MakeItem(FIntPoint(1, 1));
 	Pebble->ItemType = EFSItemType::Consumable;
 
-	// Without a backpack there's nowhere but the organizing grid
+	// Without a backpack there's nowhere to put it away
 	Inventory->CarryNewItem(Sword);
-	TestTrue(TEXT("Without a backpack an item is still put away"), Inventory->StowCarriedItem());
-	TestTrue(TEXT("By organizing"), Inventory->IsOrganizing());
-	const FFSInventoryItem* Organized = Inventory->FindItemAt(FIntPoint(0, 0), EFSItemGrid::Organize);
-	TestTrue(TEXT("In the organizing grid's first open space"), Organized && Organized->Definition == Sword);
-	TArray<FFSInventoryItem> Dropped;
-	Inventory->StopOrganizing(Dropped);
+	TestFalse(TEXT("Without a backpack an item can't be put away"), Inventory->StowCarriedItem());
+	TestTrue(TEXT("So it stays on the cursor"), Inventory->IsCarryingItem() && Inventory->GetCarriedItem().Definition == Sword);
+	Inventory->ClearCarriedItem();
 
 	// A backpack only as big as a sword, with a pebble in a corner a sword would need
 	Inventory->EquipBackpack(MakeBackpack(nullptr, SwordSize));
@@ -2911,19 +2893,10 @@ bool FFSQuickEquipOrganizeTest::RunTest(const FString& Parameters)
 	Inventory->PlaceCarriedItem(FIntPoint(0, 0));
 	Inventory->PickUpItemAt(FIntPoint(0, 0));
 
-	Inventory->QuickEquipCarriedItem(EFSItemGrid::Backpack, FIntPoint(0, 0), 0);
-	TestTrue(TEXT("The dagger replaces the right hand's sword"), Inventory->GetHandItem(EFSHand::Right).Definition == Dagger);
-	TestTrue(TEXT("Which has no room in the backpack, so organizing starts"), Inventory->IsOrganizing());
-	Organized = Inventory->FindItemAt(FIntPoint(0, 0), EFSItemGrid::Organize);
-	TestTrue(TEXT("With the sword in the organizing grid"), Organized && Organized->Definition == Sword);
-	TestFalse(TEXT("Not on the cursor"), Inventory->IsCarryingItem());
-
-	// Double clicking an item in the organizing grid puts what it replaces back where it lay
-	Inventory->PickUpItemAt(FIntPoint(0, 0), EFSItemGrid::Organize);
-	Inventory->QuickEquipCarriedItem(EFSItemGrid::Organize, FIntPoint(0, 0), 0);
-	TestTrue(TEXT("The sword goes back in the right hand"), Inventory->GetHandItem(EFSHand::Right).Definition == Sword);
-	Organized = Inventory->FindItemAt(FIntPoint(0, 0), EFSItemGrid::Organize);
-	TestTrue(TEXT("And the dagger where the sword lay"), Organized && Organized->Definition == Dagger);
+	TestTrue(TEXT("The dagger is equipped"), Inventory->QuickEquipCarriedItem(FIntPoint(0, 0), 0));
+	TestTrue(TEXT("In place of the right hand's sword"), Inventory->GetHandItem(EFSHand::Right).Definition == Dagger);
+	TestTrue(TEXT("Which has no room in the backpack, so it stays on the cursor"), Inventory->IsCarryingItem() && Inventory->GetCarriedItem().Definition == Sword);
+	TestEqual(TEXT("With the backpack as it was, less the dagger"), Inventory->GetItems().Num(), 1);
 
 	return true;
 }

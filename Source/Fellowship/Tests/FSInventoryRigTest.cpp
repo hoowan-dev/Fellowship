@@ -264,10 +264,17 @@ bool FFSInventoryRigSpacingTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("The armor column's top is level with the grid's"), Rig->GetArmorSlotCentre(0).Y + ArmorSlotSize * 0.5, HalfGrid, 0.001);
 	TestEqual(TEXT("And its bottom"), Rig->GetArmorSlotCentre(AFSInventoryRig::ArmorSlotCount - 1).Y - ArmorSlotSize * 0.5, -HalfGrid, 0.001);
 
-	const FVector2D OrganizeCentre = Rig->GetButtonCentre(AFSInventoryRig::OrganizeInventoryButton);
-	const double HalfOrganizeWidth = Rig->GetButtonSize(AFSInventoryRig::OrganizeInventoryButton).X * 0.5;
-	TestEqual(TEXT("Right column to Organize Inventory"), OrganizeCentre.X - HalfOrganizeWidth - (RightHand.X + SlotSize.X * 0.5), Spacing, 0.001);
-	TestEqual(TEXT("Organize Inventory to the organizing grid"), Rig->GetOrganizeGridOffset() - UFSInventoryComponent::OrganizeGridSize * CellSize * 0.5 - (OrganizeCentre.X + HalfOrganizeWidth), Spacing, 0.001);
+	const FVector2D ListCentre = Rig->GetNearbyListCentre();
+	const FVector2D ListSize = Rig->GetNearbyListSize();
+	TestEqual(TEXT("Right column to the nearby list"), ListCentre.X - ListSize.X * 0.5 - (RightHand.X + SlotSize.X * 0.5), Spacing, 0.001);
+	TestEqual(TEXT("The list's top is level with the grid's"), ListCentre.Y + ListSize.Y * 0.5, HalfGrid, 0.001);
+	TestEqual(TEXT("And its bottom"), ListCentre.Y - ListSize.Y * 0.5, -HalfGrid, 0.001);
+
+	// Its name is in the middle of the gap above it, as a slot's is
+	const FVector2D LabelCentre = Rig->GetNearbyLabelCentre();
+	TestEqual(TEXT("The list's name is over the list"), LabelCentre.X, ListCentre.X, 0.001);
+	TestEqual(TEXT("In the middle of the gap above it"), LabelCentre.Y - (ListCentre.Y + ListSize.Y * 0.5), Spacing * 0.5, 0.001);
+	TestEqual(TEXT("As high above it as a slot's name is"), LabelCentre.Y - (ListCentre.Y + ListSize.Y * 0.5), Rig->GetSlotLabelHeight(), 0.001);
 
 	return true;
 }
@@ -280,15 +287,13 @@ bool FFSInventoryRigButtonsTest::RunTest(const FString& Parameters)
 	const UInstancedStaticMeshComponent* Buttons = Test.Rig->GetButtons();
 	const double HalfGrid = GridSize * CellSize * 0.5;
 
-	TestEqual(TEXT("Four buttons"), Buttons->GetInstanceCount(), AFSInventoryRig::ButtonCount);
+	TestEqual(TEXT("Two buttons"), Buttons->GetInstanceCount(), AFSInventoryRig::ButtonCount);
 	TestEqual(TEXT("They have the same custom data as the grid's cells"), Buttons->NumCustomDataFloats, AFSInventoryRig::CellDataCount);
 
 	FTransform Drop;
 	FTransform Use;
-	FTransform Organize;
 	Buttons->GetInstanceTransform(AFSInventoryRig::DropBackpackButton, Drop);
 	Buttons->GetInstanceTransform(AFSInventoryRig::UseItemButton, Use);
-	Buttons->GetInstanceTransform(AFSInventoryRig::OrganizeInventoryButton, Organize);
 
 	// The plane mesh is 100cm across, and its X axis runs up the screen. Returns a button's half width and half height.
 	const auto HalfSize = [](const FTransform& Button) { return FVector2D(Button.GetScale3D().Y * 50.0, Button.GetScale3D().X * 50.0); };
@@ -301,49 +306,15 @@ bool FFSInventoryRigButtonsTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("So is Drop Backpack"), HalfSize(Drop).X, HalfGrid, 0.001);
 	TestEqual(TEXT("Use Item is as tall as Drop Backpack"), HalfSize(Use).Y, HalfSize(Drop).Y, 0.001);
 
-	const FVector2D SlotSize = Test.Rig->GetSideSlotSize();
-	const FVector2D QuickSlot = Test.Rig->GetQuickSlotCentre(AFSInventoryRig::RightQuickSlot);
-	const FVector2D Hand = Test.Rig->GetHandSlotCentre(AFSInventoryRig::RightHandSlot);
-	TestTrue(TEXT("Organize Inventory is right of the right column"), Organize.GetLocation().Y - HalfSize(Organize).X > Hand.X + SlotSize.X * 0.5);
-	TestEqual(TEXT("Its top is level with the quick slot's"), Organize.GetLocation().Z + HalfSize(Organize).Y, QuickSlot.Y + SlotSize.Y * 0.5, 0.001);
-	TestEqual(TEXT("And its bottom with the hand's"), Organize.GetLocation().Z - HalfSize(Organize).Y, Hand.Y - SlotSize.Y * 0.5, 0.001);
-	TestEqual(TEXT("It's as wide as Use Item is tall, standing on end"), HalfSize(Organize).X, HalfSize(Use).Y, 0.001);
-	TestEqual(TEXT("And as long as Use Item is wide"), HalfSize(Organize).Y, HalfSize(Use).X, 0.001);
-	TestTrue(TEXT("With its label running down it"), Test.Rig->IsButtonUpright(AFSInventoryRig::OrganizeInventoryButton));
-	TestFalse(TEXT("Unlike the others'"), Test.Rig->IsButtonUpright(AFSInventoryRig::UseItemButton) || Test.Rig->IsButtonUpright(AFSInventoryRig::DropBackpackButton));
-
 	// 90 degrees across a 16:9 screen, with the grid 40cm away
 	constexpr double HalfScreenWidth = 40.0;
 	constexpr double HalfScreenHeight = 22.5;
 	TestTrue(TEXT("They're on a 16:9 screen"), Use.GetLocation().Z - HalfSize(Use).Y > -HalfScreenHeight && Drop.GetLocation().Z + HalfSize(Drop).Y < HalfScreenHeight);
-	TestTrue(TEXT("All the way across"), Organize.GetLocation().Y + HalfSize(Organize).X < HalfScreenWidth);
 
-	// Close Inventory, in the top right corner
-	FTransform Close;
-	Buttons->GetInstanceTransform(AFSInventoryRig::CloseInventoryButton, Close);
-	TestEqual(TEXT("Close Inventory lines up with Organize Inventory's right edge"), Close.GetLocation().Y + HalfSize(Close).X, Organize.GetLocation().Y + HalfSize(Organize).X, 0.001);
-	TestEqual(TEXT("And is level with Drop Backpack"), Close.GetLocation().Z, Drop.GetLocation().Z, 0.001);
-	TestEqual(TEXT("It's square"), HalfSize(Close).X, HalfSize(Close).Y, 0.001);
-	TestEqual(TEXT("As tall as Drop Backpack"), HalfSize(Close).Y, HalfSize(Drop).Y, 0.001);
-	TestTrue(TEXT("Clear of Drop Backpack"), Close.GetLocation().Y - HalfSize(Close).X > Drop.GetLocation().Y + HalfSize(Drop).X);
-	TestFalse(TEXT("Its label isn't turned"), Test.Rig->IsButtonUpright(AFSInventoryRig::CloseInventoryButton));
-
-	// Its solid colour, in front of its cell
-	const UInstancedStaticMeshComponent* CloseFill = Test.Rig->GetCloseButtonFill();
-	TestEqual(TEXT("It has one solid fill"), CloseFill->GetInstanceCount(), 1);
-	FTransform Fill;
-	CloseFill->GetInstanceTransform(0, Fill);
-	TestTrue(TEXT("Covering the button exactly"), Fill.GetLocation().Equals(Close.GetLocation(), 0.001) && Fill.GetScale3D().Equals(Close.GetScale3D(), 0.001));
-	TestTrue(TEXT("In front of it"), CloseFill->GetRelativeLocation().X < Buttons->GetRelativeLocation().X);
-	TestTrue(TEXT("With the borders' material, which isn't see-through"), CloseFill->GetMaterial(0) == Test.Rig->GetItemBorders()->GetMaterial(0));
-
-	const auto FillColor = [CloseFill]() { return FLinearColor(CloseFill->PerInstanceSMCustomData[0], CloseFill->PerInstanceSMCustomData[1], CloseFill->PerInstanceSMCustomData[2]); };
-	const FLinearColor Red = FillColor();
-	TestTrue(TEXT("Which is red"), Red.R > 0.5f && Red.G < 0.2f && Red.B < 0.2f);
-	Test.Rig->SetHoveredButton(AFSInventoryRig::CloseInventoryButton);
-	TestTrue(TEXT("And brighter while hovered"), FillColor().G > Red.G);
-	Test.Rig->SetHoveredButton(INDEX_NONE);
-	TestTrue(TEXT("Going back after"), FillColor().Equals(Red));
+	// The nearby list, the furthest right of anything, is on it too
+	const FVector2D ListCentre = Test.Rig->GetNearbyListCentre();
+	const FVector2D ListSize = Test.Rig->GetNearbyListSize();
+	TestTrue(TEXT("All the way across"), ListCentre.X + ListSize.X * 0.5 < HalfScreenWidth);
 
 	for (int32 Button = 0; Button < AFSInventoryRig::ButtonCount; ++Button)
 	{
@@ -370,9 +341,7 @@ bool FFSInventoryRigButtonsTest::RunTest(const FString& Parameters)
 	const FVector2D Centre = Test.Rig->GetButtonCentre(AFSInventoryRig::UseItemButton);
 	TestEqual(TEXT("So does one near its end"), ButtonAt(Centre + FVector2D(HalfSize(Use).X - 0.1, 0.0)), AFSInventoryRig::UseItemButton);
 	TestEqual(TEXT("A ray past its end misses it"), ButtonAt(Centre + FVector2D(HalfSize(Use).X + 0.1, 0.0)), INDEX_NONE);
-	const FVector2D OrganizeCentre = Test.Rig->GetButtonCentre(AFSInventoryRig::OrganizeInventoryButton);
-	TestEqual(TEXT("One near the top of the upright button finds it"), ButtonAt(OrganizeCentre + FVector2D(0.0, HalfSize(Organize).Y - 0.1)), AFSInventoryRig::OrganizeInventoryButton);
-	TestEqual(TEXT("And one just beside it misses"), ButtonAt(OrganizeCentre + FVector2D(HalfSize(Organize).X + 0.1, 0.0)), INDEX_NONE);
+	TestEqual(TEXT("A ray through the nearby list misses them"), ButtonAt(ListCentre), INDEX_NONE);
 	TestEqual(TEXT("A ray through the grid misses them"), ButtonAt(FVector2D::ZeroVector), INDEX_NONE);
 
 	FIntPoint Cell = NoCell;
@@ -387,13 +356,13 @@ bool FFSInventoryRigButtonsTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Hovering remembers it"), Test.Rig->GetHoveredButton(), AFSInventoryRig::UseItemButton);
 	TestTrue(TEXT("And highlights it"), IsHighlighted(AFSInventoryRig::UseItemButton));
 
-	Test.Rig->SetHoveredButton(AFSInventoryRig::OrganizeInventoryButton);
+	Test.Rig->SetHoveredButton(AFSInventoryRig::DropBackpackButton);
 	TestFalse(TEXT("Moving to another clears it"), IsHighlighted(AFSInventoryRig::UseItemButton));
-	TestTrue(TEXT("And highlights that one"), IsHighlighted(AFSInventoryRig::OrganizeInventoryButton));
+	TestTrue(TEXT("And highlights that one"), IsHighlighted(AFSInventoryRig::DropBackpackButton));
 
 	Test.Rig->SetHoveredButton(INDEX_NONE);
 	TestEqual(TEXT("And can be cleared"), Test.Rig->GetHoveredButton(), INDEX_NONE);
-	TestFalse(TEXT("Along with the highlight"), IsHighlighted(AFSInventoryRig::OrganizeInventoryButton));
+	TestFalse(TEXT("Along with the highlight"), IsHighlighted(AFSInventoryRig::DropBackpackButton));
 
 	return true;
 }
@@ -519,172 +488,270 @@ bool FFSInventoryRigArmorArmsTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSInventoryRigOrganizeTest, "Fellowship.Inventory.Rig.SlidesOverForTheOrganizingGrid", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSInventoryRigNearbyTest, "Fellowship.Inventory.Rig.ListsNearbyItemsInBoxes", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
-bool FFSInventoryRigOrganizeTest::RunTest(const FString& Parameters)
+bool FFSInventoryRigNearbyTest::RunTest(const FString& Parameters)
 {
-	USkeletalMesh* Mesh = LoadObject<USkeletalMesh>(nullptr, TEXT("/Game/Meshes/TinyHero/OneMeshCharacter/OneMeshCharacter01_SK.OneMeshCharacter01_SK"));
 	UStaticMesh* Cube = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
-	if (!TestNotNull(TEXT("The character's mesh loads"), Mesh) || !TestNotNull(TEXT("The test mesh loads"), Cube))
+	if (!TestNotNull(TEXT("The test mesh loads"), Cube))
 	{
 		return false;
 	}
 
 	FInventoryRigTestWorld Test;
 	AFSInventoryRig* Rig = Test.Rig;
-	ACharacter* Character = Test.World->SpawnActor<ACharacter>();
-	Character->GetMesh()->SetSkeletalMeshAsset(Mesh);
 	UFSInventoryComponent* Inventory = Test.World->SpawnActor<AFSPlayerState>()->GetInventory();
+	const FVector Origin = Rig->GetActorLocation();
 
-	UFSItemDefinition* Backpack = NewObject<UFSItemDefinition>();
-	Backpack->ItemType = EFSItemType::Backpack;
-	Backpack->InventoryDimensions = FIntPoint(GridSize, GridSize);
-	Backpack->Mesh = Cube;
-	Inventory->EquipBackpack(Backpack);
-
-	UFSItemDefinition* Sword = NewObject<UFSItemDefinition>();
-	Sword->InventoryDimensions = FIntPoint(1, 2);
-	Sword->Mesh = Cube;
-
-	Rig->AttachToCharacter(Character);
+	// Without a backpack, which the list doesn't need
 	Rig->ShowInventory(*Inventory);
 	Rig->SetPackVisible(true);
 	Rig->SetGridVisible(true);
 	Rig->Tick(1.0f);
 
-	const FTransform CameraToWorld = Rig->GetViewCamera()->GetComponentTransform();
-	const FVector Origin = CameraToWorld.GetLocation();
+	const UInstancedStaticMeshComponent* List = Rig->GetNearbyList();
+	const FVector2D ListCentre = Rig->GetNearbyListCentre();
+	const FVector2D ListSize = Rig->GetNearbyListSize();
 
-	// Where a point seen from the camera lands on the plane of the grid, in cm from the middle of the screen
-	const auto OnScreen = [&CameraToWorld](const FVector& World)
+	// The plane mesh is 100cm across, and its X axis runs up the screen. Returns a box's half width and half height.
+	const auto HalfSize = [](const FTransform& Box) { return FVector2D(Box.GetScale3D().Y * 50.0, Box.GetScale3D().X * 50.0); };
+	const auto CentreOf = [](const FTransform& Box) { return FVector2D(Box.GetLocation().Y, Box.GetLocation().Z); };
+	const auto IsSet = [List](int32 Box, int32 Data) { return List->PerInstanceSMCustomData[Box * AFSInventoryRig::CellDataCount + Data] > 0.5f; };
+	const auto ItemAt = [&Test, &Origin](const FVector2D& Point, int32& OutItem)
 	{
-		const FVector Point = CameraToWorld.InverseTransformPositionNoScale(World);
-		return FVector2D(Point.Y, Point.Z) * (GridDistance / Point.X);
+		return Test.Rig->GetNearbyItemFromWorldRay(Origin, Test.DirectionToGridPoint(Point.X, Point.Y), OutItem);
 	};
 
-	// The first person scale doesn't apply here, because the test doesn't render
-	const FVector2D PackAtRest = OnScreen(Rig->GetPack()->Bounds.Origin);
+	TestTrue(TEXT("The list is there without a backpack"), List->GetVisibleFlag());
+	TestEqual(TEXT("With the same custom data as the grid's cells"), List->NumCustomDataFloats, AFSInventoryRig::CellDataCount);
+	TestEqual(TEXT("With nothing nearby there are no boxes"), List->GetInstanceCount(), 0);
+	TestEqual(TEXT("Four boxes fit down it"), Rig->GetNearbyCapacity(), 4);
 
-	// What the rig lines up with the hand's cell. Matches its default, and a right hand's X axis runs towards the wrist.
-	const auto GetPalm = [Rig]()
+	int32 Item = 7;
+	TestTrue(TEXT("A ray through the empty list finds it"), ItemAt(ListCentre, Item));
+	TestEqual(TEXT("But no item"), Item, INDEX_NONE);
+	TestFalse(TEXT("One just beside it misses"), ItemAt(ListCentre + FVector2D(ListSize.X * 0.5 + 0.1, 0.0), Item));
+
+	// Six items, two more than fit, the first of them legendary
+	TArray<UFSItemDefinition*> Items;
+	for (int32 Index = 0; Index < 6; ++Index)
 	{
-		constexpr double WristToPalm = 10.0;
-		const FTransform Hand = Rig->GetArms()->GetBoneTransformByName(TEXT("hand_r"), EBoneSpaces::WorldSpace);
-		return Hand.GetLocation() - Hand.GetUnitAxis(EAxis::X) * WristToPalm;
-	};
+		UFSItemDefinition* Definition = NewObject<UFSItemDefinition>();
+		Definition->InventoryDimensions = FIntPoint(1, 2);
+		Definition->Mesh = Cube;
+		Definition->Rarity = Index == 0 ? EFSItemRarity::Legendary : EFSItemRarity::Common;
+		Items.Add(Definition);
+	}
 
-	const FVector2D HandAtRest = OnScreen(GetPalm());
+	Rig->ShowNearbyItems(Items);
+	TestEqual(TEXT("Six are listed"), Rig->GetNearbyItemCount(), 6);
+	TestEqual(TEXT("With a box for each of those that fit"), List->GetInstanceCount(), 4);
+	TestEqual(TEXT("Each bordered by four bars"), Rig->GetNearbyBorders()->GetInstanceCount(), 16);
 
-	TestFalse(TEXT("The organizing grid isn't there yet"), Rig->GetOrganizeGrid()->GetVisibleFlag());
-	TestEqual(TEXT("The display is where it always is"), Rig->GetDisplaySlide(), 0.0);
-	FIntPoint Cell = NoCell;
-	TestFalse(TEXT("And the grid can't be pointed at"), Rig->GetOrganizeCellFromWorldRay(Origin, Test.DirectionToGridPoint(20.0, 0.0), Cell));
+	const double BoxSize = Rig->GetNearbyBoxSize();
+	TestEqual(TEXT("The boxes are as wide as the list"), BoxSize, ListSize.X, 0.001);
+	for (int32 Box = 0; Box < 4; ++Box)
+	{
+		FTransform Placed;
+		List->GetInstanceTransform(Box, Placed);
+		TestTrue(TEXT("Each is square"), (HalfSize(Placed) * 2.0).Equals(FVector2D(BoxSize), 0.001));
+		TestTrue(TEXT("And placed where its centre is"), CentreOf(Placed).Equals(Rig->GetNearbyBoxCentre(Box), 0.001));
+	}
 
-	Inventory->StartOrganizing();
+	TestEqual(TEXT("The top box is at the top of the list"), Rig->GetNearbyBoxCentre(0).Y + BoxSize * 0.5, ListCentre.Y + ListSize.Y * 0.5, 0.001);
+	TestEqual(TEXT("And the bottom one at its bottom"), Rig->GetNearbyBoxCentre(3).Y - BoxSize * 0.5, ListCentre.Y - ListSize.Y * 0.5, 0.001);
+	TestTrue(TEXT("At least the spacing apart"), Rig->GetNearbyBoxCentre(0).Y - Rig->GetNearbyBoxCentre(1).Y - BoxSize >= Rig->GetSpacing() - 0.001);
+
+	TestTrue(TEXT("A taken box looks it"), IsSet(0, AFSInventoryRig::CellTakenData));
+	const FLinearColor Legendary = UFSItemDefinition::GetRarityColor(EFSItemRarity::Legendary);
+	TestEqual(TEXT("In its item's rarity's colour"), List->PerInstanceSMCustomData[AFSInventoryRig::CellItemColorData], Legendary.R);
+
+	const UStaticMeshComponent* TopMesh = Rig->GetNearbyItemMesh(0);
+	if (TestNotNull(TEXT("The top box has a mesh"), TopMesh))
+	{
+		TestTrue(TEXT("Its item's"), TopMesh->GetStaticMesh() == Cube);
+		TestTrue(TEXT("Which shows"), TopMesh->GetVisibleFlag());
+
+		// Seen from the camera, in front of its box. It sways about its middle, which stays put.
+		const FVector MeshCentre = TopMesh->GetRelativeTransform().TransformPosition(Cube->GetBounds().Origin);
+		const FVector2D OnGrid = FVector2D(MeshCentre.Y, MeshCentre.Z) * (GridDistance / (GridDistance + MeshCentre.X));
+		TestTrue(TEXT("In front of the grid"), MeshCentre.X < 0.0);
+		TestTrue(TEXT("Over its box"), OnGrid.Equals(Rig->GetNearbyBoxCentre(0), 0.01));
+	}
+	TestNull(TEXT("There are only as many meshes as boxes"), Rig->GetNearbyItemMesh(4));
+
+	TestTrue(TEXT("A ray through the second box finds it"), ItemAt(Rig->GetNearbyBoxCentre(1), Item));
+	TestEqual(TEXT("And its item"), Item, 1);
+	TestTrue(TEXT("A ray between two boxes is on the list"), ItemAt((Rig->GetNearbyBoxCentre(0) + Rig->GetNearbyBoxCentre(1)) * 0.5, Item));
+	TestEqual(TEXT("But on no item"), Item, INDEX_NONE);
+
+	Rig->SetHoveredNearbyItem(true, 1);
+	TestTrue(TEXT("Hovering an item highlights its box"), IsSet(1, AFSInventoryRig::CellHoveredData));
+	TestTrue(TEXT("Which is remembered"), Rig->IsNearbyListHovered() && Rig->GetHoveredNearbyItem() == 1);
+	Rig->SetHoveredNearbyItem(true, INDEX_NONE);
+	TestFalse(TEXT("Between boxes nothing is highlighted"), IsSet(1, AFSInventoryRig::CellHoveredData) || IsSet(0, AFSInventoryRig::CellHoveredData));
+	TestTrue(TEXT("Though the list is hovered"), Rig->IsNearbyListHovered());
+	Rig->SetHoveredNearbyItem(false, INDEX_NONE);
+	TestFalse(TEXT("And it can be cleared"), Rig->IsNearbyListHovered());
+
+	Inventory->CarryNewItem(Items[5]);
 	Rig->ShowInventory(*Inventory);
+	Rig->SetHoveredNearbyItem(true, 1);
+	TestTrue(TEXT("Carrying, an item's box shows it would swap"), IsSet(1, AFSInventoryRig::CellCanSwapData));
+	Rig->SetHoveredNearbyItem(false, INDEX_NONE);
+	TestFalse(TEXT("Which clears"), IsSet(1, AFSInventoryRig::CellCanSwapData));
 
-	TestTrue(TEXT("The grid shows as soon as it starts"), Rig->GetOrganizeGrid()->GetVisibleFlag());
-	TestEqual(TEXT("It hasn't moved yet"), Rig->GetDisplaySlide(), 0.0);
+	TestFalse(TEXT("At the top, it can't scroll up"), Rig->CanScrollNearbyUp());
+	TestTrue(TEXT("But it can scroll down"), Rig->CanScrollNearbyDown());
+	Rig->ScrollNearbyItems(-1);
+	TestEqual(TEXT("So it doesn't go above the top"), Rig->GetNearbyScroll(), 0);
+	Rig->ScrollNearbyItems(1);
+	TestEqual(TEXT("Scrolling moves it a box"), Rig->GetNearbyScroll(), 1);
+	TestTrue(TEXT("Showing the next item at the top"), ItemAt(Rig->GetNearbyBoxCentre(0), Item) && Item == 1);
+	TestTrue(TEXT("Both ways"), Rig->CanScrollNearbyUp() && Rig->CanScrollNearbyDown());
+	Rig->ScrollNearbyItems(10);
+	TestEqual(TEXT("Going no further than the last item in the bottom box"), Rig->GetNearbyScroll(), 2);
+	TestTrue(TEXT("Which is that item"), ItemAt(Rig->GetNearbyBoxCentre(3), Item) && Item == 5);
+	TestFalse(TEXT("With nothing more below"), Rig->CanScrollNearbyDown());
 
-	Rig->Tick(0.1f);
-	const double PartWay = Rig->GetDisplaySlide();
+	Rig->SetHoveredNearbyItem(true, 5);
+	TestTrue(TEXT("Scrolled, an item's box is still the one it's in"), IsSet(3, AFSInventoryRig::CellCanSwapData));
+	Rig->SetHoveredNearbyItem(false, INDEX_NONE);
+
+	Items.SetNum(3);
+	Rig->ShowNearbyItems(Items);
+	TestEqual(TEXT("With fewer items it scrolls back to fit them"), Rig->GetNearbyScroll(), 0);
+	TestEqual(TEXT("With a box for each"), List->GetInstanceCount(), 3);
+	TestTrue(TEXT("And the spare mesh emptied"), Rig->GetNearbyItemMesh(3) && !Rig->GetNearbyItemMesh(3)->GetStaticMesh());
+
+	Rig->ShowNearbyItems(TArray<UFSItemDefinition*>());
+	TestEqual(TEXT("With none, there are no boxes"), List->GetInstanceCount(), 0);
+	TestEqual(TEXT("Or borders"), Rig->GetNearbyBorders()->GetInstanceCount(), 0);
+	TestFalse(TEXT("Or anywhere to scroll"), Rig->CanScrollNearbyUp() || Rig->CanScrollNearbyDown());
+	Rig->SetHoveredNearbyItem(true, INDEX_NONE);
+	TestTrue(TEXT("The list can still be hovered, to drop what's carried"), Rig->IsNearbyListHovered());
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSInventoryRigNearbyScrollbarTest, "Fellowship.Inventory.Rig.ScrollsNearbyItemsWithAScrollbar", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FFSInventoryRigNearbyScrollbarTest::RunTest(const FString& Parameters)
+{
+	FInventoryRigTestWorld Test;
+	AFSInventoryRig* Rig = Test.Rig;
+	UFSInventoryComponent* Inventory = Test.World->SpawnActor<AFSPlayerState>()->GetInventory();
+	const FVector Origin = Rig->GetActorLocation();
+
+	Rig->ShowInventory(*Inventory);
+	Rig->SetPackVisible(true);
+	Rig->SetGridVisible(true);
 	Rig->Tick(1.0f);
-	const double Slide = Rig->GetDisplaySlide();
-	const double Scale = Rig->GetDisplayScale();
-	TestTrue(TEXT("It ends up to the left"), Slide < 0.0);
-	TestTrue(TEXT("Having slid there rather than jumping"), PartWay < 0.0 && PartWay > Slide);
-	TestTrue(TEXT("And smaller, to make room"), Scale < 1.0);
 
-	const UInstancedStaticMeshComponent* Organize = Rig->GetOrganizeGrid();
-	TestEqual(TEXT("A cell for each of 10 by 10"), Organize->GetInstanceCount(), UFSInventoryComponent::OrganizeGridSize * UFSInventoryComponent::OrganizeGridSize);
-
-	const double HalfOrganize = UFSInventoryComponent::OrganizeGridSize * CellSize * 0.5;
-	const double OrganizeOffset = Rig->GetOrganizeGridOffset();
-
-	// Where a point on the display lands on the plane of the grid's usual distance, seen from the camera
-	const auto ToScreenPoint = [Slide, Scale](const FVector2D& OnDisplay) { return (OnDisplay + FVector2D(Slide, 0.0)) * Scale; };
-	const auto RayTo = [&Test, &ToScreenPoint](const FVector2D& OnDisplay)
+	// The plane mesh is 100cm across, and its X axis runs up the screen. Returns a bar's half width and half height.
+	const auto HalfSize = [](const FTransform& Bar) { return FVector2D(Bar.GetScale3D().Y * 50.0, Bar.GetScale3D().X * 50.0); };
+	const auto CentreOf = [](const FTransform& Bar) { return FVector2D(Bar.GetLocation().Y, Bar.GetLocation().Z); };
+	const auto RayTo = [&Test](const FVector2D& Point) { return Test.DirectionToGridPoint(Point.X, Point.Y); };
+	const auto ThumbRed = [Rig]() { return Rig->GetNearbyScrollThumb()->PerInstanceSMCustomData[0]; };
+	const auto MakeItems = [](int32 Count)
 	{
-		const FVector2D Screen = ToScreenPoint(OnDisplay);
-		return Test.DirectionToGridPoint(Screen.X, Screen.Y);
+		TArray<UFSItemDefinition*> Items;
+		for (int32 Index = 0; Index < Count; ++Index)
+		{
+			UFSItemDefinition* Definition = NewObject<UFSItemDefinition>();
+			Definition->InventoryDimensions = FIntPoint(1, 1);
+			Items.Add(Definition);
+		}
+		return Items;
 	};
 
-	const double ButtonEdge = Rig->GetButtonCentre(AFSInventoryRig::OrganizeInventoryButton).X + Rig->GetButtonSize(AFSInventoryRig::OrganizeInventoryButton).X * 0.5;
-	TestTrue(TEXT("It's right of the Organize Inventory button"), OrganizeOffset - HalfOrganize > ButtonEdge);
+	const FVector2D TrackCentre = Rig->GetNearbyScrollTrackCentre();
+	const FVector2D TrackSize = Rig->GetNearbyScrollTrackSize();
 
-	// The top left corner's cell
-	const FVector2D TopLeftCell(OrganizeOffset - HalfOrganize + CellSize * 0.5, HalfOrganize - CellSize * 0.5);
-	TestTrue(TEXT("A ray finds its cell"), Rig->GetOrganizeCellFromWorldRay(Origin, RayTo(TopLeftCell), Cell));
-	TestEqual(TEXT("The top left"), Cell, FIntPoint(0, 0));
-	TestTrue(TEXT("And its bottom right"), Rig->GetOrganizeCellFromWorldRay(Origin, RayTo(FVector2D(OrganizeOffset + HalfOrganize - 0.1, -HalfOrganize + 0.1)), Cell));
-	TestEqual(TEXT("The bottom right"), Cell, FIntPoint(UFSInventoryComponent::OrganizeGridSize - 1));
-	TestFalse(TEXT("A ray past it misses"), Rig->GetOrganizeCellFromWorldRay(Origin, RayTo(FVector2D(OrganizeOffset + HalfOrganize + 0.1, 0.0)), Cell));
+	Rig->ShowNearbyItems(MakeItems(Rig->GetNearbyCapacity()));
+	TestFalse(TEXT("With no more items than fit there's no scrollbar"), Rig->IsNearbyScrollbarShown());
+	FTransform Track;
+	Rig->GetNearbyScrollTrack()->GetInstanceTransform(0, Track);
+	TestTrue(TEXT("Its track shrinks away"), HalfSize(Track).X < 0.001 && HalfSize(Track).Y < 0.001);
+	TestFalse(TEXT("And can't be pointed at"), Rig->IsNearbyScrollbarUnderRay(Origin, RayTo(TrackCentre)));
+	TestFalse(TEXT("Or grabbed"), Rig->BeginNearbyScrollbarDrag(Origin, RayTo(TrackCentre)));
 
-	// Things slid along with it are still found where they've gone
-	FIntPoint BackpackCell = NoCell;
-	TestTrue(TEXT("The backpack's grid is found where it's gone"), Rig->GetCellFromWorldRay(Origin, RayTo(FVector2D(-CellSize * 0.5, CellSize * 0.5)), BackpackCell));
-	TestEqual(TEXT("At the right cell"), BackpackCell, FIntPoint(GridSize / 2 - 1, GridSize / 2 - 1));
-	int32 HandSlot = INDEX_NONE;
-	TestTrue(TEXT("So is the right hand's cell"), Rig->GetHandSlotFromWorldRay(Origin, RayTo(Rig->GetHandSlotCentre(AFSInventoryRig::RightHandSlot)), HandSlot));
-	TestEqual(TEXT("Which is that cell"), HandSlot, AFSInventoryRig::RightHandSlot);
-	int32 Button = INDEX_NONE;
-	TestTrue(TEXT("And the button to stop"), Rig->GetButtonFromWorldRay(Origin, RayTo(Rig->GetButtonCentre(AFSInventoryRig::OrganizeInventoryButton)), Button));
-	TestEqual(TEXT("Which is that button"), Button, AFSInventoryRig::OrganizeInventoryButton);
-	TestEqual(TEXT("Which keeps its size beside the organizing grid"), Rig->GetButtonSize(AFSInventoryRig::OrganizeInventoryButton).X, Rig->GetButtonSize(AFSInventoryRig::UseItemButton).Y, 0.001);
-
-	// Further away than the grid, so sliding the same distance alone would leave them behind it
-	TestTrue(TEXT("The pack goes as far on screen as the grid does"), (OnScreen(Rig->GetPack()->Bounds.Origin) - ToScreenPoint(PackAtRest)).Size() < 0.01);
-	TestTrue(TEXT("So does the hand"), (OnScreen(GetPalm()) - ToScreenPoint(HandAtRest)).Size() < 0.01);
-
-	const auto IsSet = [Organize](const FIntPoint& At, int32 Data)
+	// Eight items, twice as many as fit
+	Rig->ShowNearbyItems(MakeItems(8));
+	if (!TestTrue(TEXT("With more items than fit there's a scrollbar"), Rig->IsNearbyScrollbarShown()))
 	{
-		return Organize->PerInstanceSMCustomData[(At.Y * UFSInventoryComponent::OrganizeGridSize + At.X) * AFSInventoryRig::CellDataCount + Data] > 0.5f;
-	};
+		return false;
+	}
 
-	Rig->SetHoveredOrganizeCell(FIntPoint(2, 3));
-	TestTrue(TEXT("Hovering highlights a cell"), IsSet(FIntPoint(2, 3), AFSInventoryRig::CellHoveredData));
-	Rig->SetHoveredOrganizeCell(NoCell);
-	TestFalse(TEXT("And can be cleared"), IsSet(FIntPoint(2, 3), AFSInventoryRig::CellHoveredData));
+	const FVector2D ListCentre = Rig->GetNearbyListCentre();
+	const FVector2D ListSize = Rig->GetNearbyListSize();
+	TestEqual(TEXT("Half the spacing right of the list"), TrackCentre.X - TrackSize.X * 0.5 - (ListCentre.X + ListSize.X * 0.5), Rig->GetSpacing() * 0.5, 0.001);
+	TestEqual(TEXT("As tall as the list"), TrackSize.Y, ListSize.Y, 0.001);
+	TestEqual(TEXT("And level with it"), TrackCentre.Y, ListCentre.Y, 0.001);
+	TestTrue(TEXT("On the screen"), TrackCentre.X + TrackSize.X * 0.5 < 40.0);
 
-	Inventory->CarryNewItem(Sword);
-	Rig->ShowInventory(*Inventory);
-	Rig->SetHoveredOrganizeCell(FIntPoint(2, 3));
-	TestTrue(TEXT("Carrying, it previews each cell"), IsSet(FIntPoint(2, 3), AFSInventoryRig::CellCanPlaceData) && IsSet(FIntPoint(2, 4), AFSInventoryRig::CellCanPlaceData));
-	const FIntPoint BottomRow(2, UFSInventoryComponent::OrganizeGridSize - 1);
-	Rig->SetHoveredOrganizeCell(BottomRow);
-	TestTrue(TEXT("And shows what won't fit"), IsSet(BottomRow, AFSInventoryRig::CellCannotPlaceData));
-	Rig->SetHoveredOrganizeCell(NoCell);
+	Rig->GetNearbyScrollTrack()->GetInstanceTransform(0, Track);
+	TestTrue(TEXT("The track is placed there"), CentreOf(Track).Equals(TrackCentre, 0.001) && (HalfSize(Track) * 2.0).Equals(TrackSize, 0.001));
 
-	Inventory->PlaceCarriedItem(FIntPoint(2, 3), EFSItemGrid::Organize);
-	Rig->ShowInventory(*Inventory);
+	const FVector2D ThumbSize = Rig->GetNearbyScrollThumbSize();
+	TestEqual(TEXT("The thumb is as long as the share of the items that show"), ThumbSize.Y, TrackSize.Y * 0.5, 0.001);
+	TestEqual(TEXT("And as wide as the track"), ThumbSize.X, TrackSize.X, 0.001);
+	TestEqual(TEXT("At the top of the track to begin with"), Rig->GetNearbyScrollThumbCentre().Y + ThumbSize.Y * 0.5, TrackCentre.Y + TrackSize.Y * 0.5, 0.001);
+	FTransform Thumb;
+	Rig->GetNearbyScrollThumb()->GetInstanceTransform(0, Thumb);
+	TestTrue(TEXT("The thumb is placed there"), CentreOf(Thumb).Equals(Rig->GetNearbyScrollThumbCentre(), 0.001) && (HalfSize(Thumb) * 2.0).Equals(ThumbSize, 0.001));
+	TestTrue(TEXT("In front of the track"), Rig->GetNearbyScrollThumb()->GetRelativeLocation().X < Rig->GetNearbyScrollTrack()->GetRelativeLocation().X);
 
-	TestEqual(TEXT("The item gets a mesh"), Rig->GetItemMeshes().Num(), 1);
-	TestEqual(TEXT("And a border's four bars"), Rig->GetItemBorders()->GetInstanceCount(), 4);
-	TestTrue(TEXT("Its cell is taken"), IsSet(FIntPoint(2, 3), AFSInventoryRig::CellTakenData));
+	Rig->ScrollNearbyItems(4);
+	TestEqual(TEXT("Scrolled to the end, the thumb is at the bottom"), Rig->GetNearbyScrollThumbCentre().Y - ThumbSize.Y * 0.5, TrackCentre.Y - TrackSize.Y * 0.5, 0.001);
+	Rig->GetNearbyScrollThumb()->GetInstanceTransform(0, Thumb);
+	TestTrue(TEXT("Where it's moved to"), CentreOf(Thumb).Equals(Rig->GetNearbyScrollThumbCentre(), 0.001));
+	Rig->ScrollNearbyItems(-4);
 
-	const FVector ItemCentre = Rig->GetItemMeshes()[0]->GetRelativeTransform().TransformPosition(Cube->GetBounds().Origin);
-	const FVector2D ExpectedOnDisplay(OrganizeOffset - HalfOrganize + 2.5 * CellSize, HalfOrganize - 4.0 * CellSize);
-	TestTrue(TEXT("The mesh sits over its cells"), (FVector2D(ItemCentre.Y, ItemCentre.Z) - ExpectedOnDisplay).Size() < 0.01);
+	TestTrue(TEXT("A ray through the track finds it"), Rig->IsNearbyScrollbarUnderRay(Origin, RayTo(TrackCentre)));
+	TestFalse(TEXT("One just beside it misses"), Rig->IsNearbyScrollbarUnderRay(Origin, RayTo(TrackCentre + FVector2D(TrackSize.X * 0.5 + 0.1, 0.0))));
+	int32 Item = INDEX_NONE;
+	TestFalse(TEXT("It isn't part of the list"), Rig->GetNearbyItemFromWorldRay(Origin, RayTo(TrackCentre), Item));
 
-	Rig->SetHoveredOrganizeCell(FIntPoint(2, 3));
-	TestTrue(TEXT("Hovering an item highlights all of it"), IsSet(FIntPoint(2, 3), AFSInventoryRig::CellHoveredData) && IsSet(FIntPoint(2, 4), AFSInventoryRig::CellHoveredData));
+	const float RestingRed = ThumbRed();
+	Rig->SetNearbyScrollbarHovered(true);
+	TestTrue(TEXT("Hovering the scrollbar lightens the thumb"), ThumbRed() > RestingRed);
+	Rig->SetNearbyScrollbarHovered(false);
+	TestEqual(TEXT("Going back after"), ThumbRed(), RestingRed);
 
-	TArray<FFSInventoryItem> Left;
-	Inventory->StopOrganizing(Left);
-	Rig->ShowInventory(*Inventory);
+	// Grabbed a little below its middle, and dragged
+	const FVector2D GrabPoint = Rig->GetNearbyScrollThumbCentre() - FVector2D(0.0, ThumbSize.Y * 0.25);
+	const double Travel = TrackSize.Y - ThumbSize.Y;
+	TestTrue(TEXT("The thumb can be grabbed"), Rig->BeginNearbyScrollbarDrag(Origin, RayTo(GrabPoint)));
+	TestTrue(TEXT("Which drags it"), Rig->IsDraggingNearbyScrollbar());
+	TestEqual(TEXT("Grabbing it doesn't move it"), Rig->GetNearbyScroll(), 0);
+	TestTrue(TEXT("It's lighter while held"), ThumbRed() > RestingRed);
 
-	TestEqual(TEXT("Stopping clears the hover"), Rig->GetHoveredOrganizeCell(), NoCell);
-	TestEqual(TEXT("And the mesh"), Rig->GetItemMeshes().Num(), 0);
-	TestFalse(TEXT("And the cell"), IsSet(FIntPoint(2, 3), AFSInventoryRig::CellTakenData));
-	TestTrue(TEXT("The grid stays while it slides away"), Rig->GetOrganizeGrid()->GetVisibleFlag());
-	TestFalse(TEXT("Though it can't be pointed at"), Rig->GetOrganizeCellFromWorldRay(Origin, RayTo(TopLeftCell), Cell));
+	Rig->DragNearbyScrollbar(Origin, RayTo(GrabPoint - FVector2D(0.0, Travel * 0.5)));
+	TestEqual(TEXT("Dragging it halfway down scrolls halfway"), Rig->GetNearbyScroll(), 2);
+	Rig->DragNearbyScrollbar(Origin, RayTo(GrabPoint - FVector2D(0.0, Travel * 0.6)));
+	TestEqual(TEXT("A little further stays on the nearest box"), Rig->GetNearbyScroll(), 2);
+	Rig->DragNearbyScrollbar(Origin, RayTo(GrabPoint - FVector2D(0.0, Travel * 3.0)));
+	TestEqual(TEXT("Past the bottom it stops at the end"), Rig->GetNearbyScroll(), 4);
+	Rig->DragNearbyScrollbar(Origin, RayTo(GrabPoint + FVector2D(0.0, Travel)));
+	TestEqual(TEXT("And past the top at the start"), Rig->GetNearbyScroll(), 0);
 
-	Rig->Tick(1.0f);
-	TestEqual(TEXT("It all slides back"), Rig->GetDisplaySlide(), 0.0);
-	TestEqual(TEXT("Back to its full size"), Rig->GetDisplayScale(), 1.0);
-	TestFalse(TEXT("And then the grid goes"), Rig->GetOrganizeGrid()->GetVisibleFlag());
-	TestTrue(TEXT("The pack is back"), (OnScreen(Rig->GetPack()->Bounds.Origin) - PackAtRest).Size() < 0.01);
-	TestTrue(TEXT("And the hand"), (OnScreen(GetPalm()) - HandAtRest).Size() < 0.01);
+	Rig->EndNearbyScrollbarDrag();
+	TestFalse(TEXT("It can be let go"), Rig->IsDraggingNearbyScrollbar());
+	TestEqual(TEXT("Going back to its colour"), ThumbRed(), RestingRed);
+	Rig->DragNearbyScrollbar(Origin, RayTo(GrabPoint - FVector2D(0.0, Travel)));
+	TestEqual(TEXT("After which it doesn't follow"), Rig->GetNearbyScroll(), 0);
+
+	const FVector2D NearBottom(TrackCentre.X, TrackCentre.Y - TrackSize.Y * 0.5 + 0.1);
+	TestTrue(TEXT("Pressing the track off the thumb grabs it too"), Rig->BeginNearbyScrollbarDrag(Origin, RayTo(NearBottom)));
+	TestEqual(TEXT("Jumping the thumb there"), Rig->GetNearbyScroll(), 4);
+	Rig->EndNearbyScrollbarDrag();
+
+	// Fewer items, and it goes away
+	Rig->ShowNearbyItems(MakeItems(2));
+	TestFalse(TEXT("With few enough items, it goes"), Rig->IsNearbyScrollbarShown());
+	Rig->GetNearbyScrollThumb()->GetInstanceTransform(0, Thumb);
+	TestTrue(TEXT("Thumb and all"), HalfSize(Thumb).X < 0.001 && HalfSize(Thumb).Y < 0.001);
 
 	return true;
 }
@@ -707,7 +774,7 @@ bool FFSInventoryRigOnScreenTest::RunTest(const FString& Parameters)
 	const auto TestBoxOnScreen = [this, Rig, HalfScreenWidth, HalfScreenHeight](const FString& What, const FVector2D& Centre, double Width, double Height)
 	{
 		const double Scale = Rig->GetDisplayScale();
-		const FVector2D Screen = (Centre + FVector2D(Rig->GetDisplaySlide(), 0.0)) * Scale;
+		const FVector2D Screen = Centre * Scale;
 		TestTrue(What + TEXT(": left"), Screen.X - Width * 0.5 * Scale >= -HalfScreenWidth);
 		TestTrue(What + TEXT(": right"), Screen.X + Width * 0.5 * Scale <= HalfScreenWidth);
 		TestTrue(What + TEXT(": top"), Screen.Y + Height * 0.5 * Scale <= HalfScreenHeight);
@@ -745,6 +812,9 @@ bool FFSInventoryRigOnScreenTest::RunTest(const FString& Parameters)
 			{
 				TestBoxOnScreen(Prefix + TEXT("button"), Rig->GetButtonCentre(Button), Rig->GetButtonSize(Button).X, Rig->GetButtonSize(Button).Y);
 			}
+
+			TestBoxOnScreen(Prefix + TEXT("nearby list"), Rig->GetNearbyListCentre(), Rig->GetNearbyListSize().X, Rig->GetNearbyListSize().Y);
+			TestBoxOnScreen(Prefix + TEXT("nearby scrollbar"), Rig->GetNearbyScrollTrackCentre(), Rig->GetNearbyScrollTrackSize().X, Rig->GetNearbyScrollTrackSize().Y);
 		};
 
 		Rig->ShowInventory(*Inventory);
@@ -755,26 +825,6 @@ bool FFSInventoryRigOnScreenTest::RunTest(const FString& Parameters)
 		{
 			TestEqual(TEXT("A normal backpack needs no shrinking at rest"), Rig->GetDisplayScale(), 1.0);
 		}
-
-		Inventory->StartOrganizing();
-		Rig->ShowInventory(*Inventory);
-
-		// Part way there, leaving out the organizing grid, which is on its way in from off the screen
-		Rig->Tick(0.1f);
-		TestAllBoxes(TEXT("sliding one way"));
-		Rig->Tick(0.1f);
-		TestAllBoxes(TEXT("sliding further"));
-
-		Rig->Tick(1.0f);
-		TestAllBoxes(TEXT("organizing"));
-
-		const double OrganizeSide = UFSInventoryComponent::OrganizeGridSize * CellSize;
-		TestBoxOnScreen(FString::Printf(TEXT("%dx%d organizing grid"), Size.X, Size.Y), FVector2D(Rig->GetOrganizeGridOffset(), 0.0), OrganizeSide, OrganizeSide);
-
-		TArray<FFSInventoryItem> Left;
-		Inventory->StopOrganizing(Left);
-		Rig->ShowInventory(*Inventory);
-		Rig->Tick(1.0f);
 
 		FFSBackpackContents Contents;
 		Inventory->RemoveBackpack(Contents);

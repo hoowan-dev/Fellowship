@@ -23,16 +23,15 @@ struct FFSInventoryItem;
 enum class EFSHand : uint8;
 enum class EFSQuickSlot : uint8;
 enum class EFSArmorType : uint8;
-enum class EFSItemGrid : uint8;
 
 /**
  * What the player sees with the inventory open: a first person camera looking at the held backpack, with the grid floating between them,
  * a column of two cells either side of it, with that side's quick slot on top and its hand below, the player's forearms raised behind the hands' cells,
  * and a row of buttons below it. The backpack sways gently, with what's in the quick slots hanging off it. The player can walk slowly with it open,
  * which bobs the camera and jiggles the items, the arms and the pack. The grids, cells and buttons stay still.
- * While organizing, all of that slides to the left to make room for a second grid on the right.
+ * Right of the right column is a list of the items nearby, a box each, which scrolls a box at a time when there are more than fit.
  * The display moves away from the camera by however much it takes to keep every box on a 16:9 screen.
- * Without a backpack only the forearms, the hands' cells and the armor slots are there.
+ * Without a backpack only the forearms, the hands' cells, the armor slots and the nearby list are there.
  * Exists only on the owning client. The grid's cells run from (0, 0) at the top left.
  */
 UCLASS()
@@ -68,12 +67,10 @@ public:
 	static constexpr int32 RightQuickSlot = 1;
 	static constexpr int32 QuickSlotCount = 2;
 
-	// The buttons around the grid. Close Inventory is the red X in the top right corner.
+	// The buttons around the grid
 	static constexpr int32 DropBackpackButton = 0;
 	static constexpr int32 UseItemButton = 1;
-	static constexpr int32 OrganizeInventoryButton = 2;
-	static constexpr int32 CloseInventoryButton = 3;
-	static constexpr int32 ButtonCount = 4;
+	static constexpr int32 ButtonCount = 2;
 
 	// Which of the inventory's quick slots an instance of the quick slots is for
 	static EFSQuickSlot GetQuickSlotOfIndex(int32 QuickSlotIndex);
@@ -124,11 +121,50 @@ public:
 	// Finds the button a world space ray passes through. Returns false if it misses them all. There are no buttons without a backpack.
 	bool GetButtonFromWorldRay(const FVector& RayOrigin, const FVector& RayDirection, int32& OutButton) const;
 
-	// Finds the cell of the organizing grid a world space ray passes through. Returns false if it misses, or if the player isn't organizing.
-	bool GetOrganizeCellFromWorldRay(const FVector& RayOrigin, const FVector& RayDirection, FIntPoint& OutCell) const;
+	// Shows these items in the nearby list, from the top, keeping the scroll where it was if they still reach that far. Clears the list's highlight.
+	void ShowNearbyItems(const TArray<UFSItemDefinition*>& Items);
 
-	// Highlights a cell of the organizing grid, and any item it covers, or previews where the carried item would go. Cells outside that grid clear the highlight.
-	void SetHoveredOrganizeCell(const FIntPoint& Cell);
+	// Moves the nearby list along by this many boxes, positive towards the bottom of it, stopping with the last box at the bottom or the first at the top
+	void ScrollNearbyItems(int32 Boxes);
+
+	// How many boxes down the list the top box is
+	FORCEINLINE int32 GetNearbyScroll() const { return NearbyScroll; }
+
+	FORCEINLINE int32 GetNearbyItemCount() const { return NearbyItems.Num(); }
+
+	// How many boxes fit in the list at once: as many as fit down it with the spacing between them, and at least one
+	int32 GetNearbyCapacity() const;
+
+	// Whether a ray passes through the nearby list. OutItem is which of the items it shows the ray is on, counting from the top of the whole list,
+	// or INDEX_NONE between boxes or with nothing nearby. Returns false, leaving OutItem alone, if it misses the list.
+	bool GetNearbyItemFromWorldRay(const FVector& RayOrigin, const FVector& RayDirection, int32& OutItem) const;
+
+	// Highlights the box of one of the nearby items, as a hand's cell is. Item counts from the top of the whole list.
+	// bOverList is whether the mouse is over the list at all, which it can be between boxes or with nothing in it. INDEX_NONE with bOverList false clears it.
+	void SetHoveredNearbyItem(bool bOverList, int32 Item);
+
+	// Whether the mouse is over the nearby list, and which item's box it's over, or INDEX_NONE
+	FORCEINLINE bool IsNearbyListHovered() const { return bNearbyListHovered; }
+	FORCEINLINE int32 GetHoveredNearbyItem() const { return HoveredNearbyItem; }
+
+	// Whether the list has a scrollbar beside it, which it does while there are more items than fit
+	FORCEINLINE bool IsNearbyScrollbarShown() const { return NearbyItems.Num() > GetNearbyCapacity(); }
+
+	// Whether a ray passes through the scrollbar's track, thumb and all. Always false while it isn't shown.
+	bool IsNearbyScrollbarUnderRay(const FVector& RayOrigin, const FVector& RayDirection) const;
+
+	// Grabs the scrollbar's thumb where a ray meets the track. Off the thumb, the thumb jumps there first, centred on the ray.
+	// Returns false, grabbing nothing, if the ray misses the track or it isn't shown.
+	bool BeginNearbyScrollbarDrag(const FVector& RayOrigin, const FVector& RayDirection);
+
+	// Moves the grabbed thumb up and down with the ray, keeping hold of it where it was grabbed, and scrolls the list to match a box at a time
+	void DragNearbyScrollbar(const FVector& RayOrigin, const FVector& RayDirection);
+
+	void EndNearbyScrollbarDrag();
+	FORCEINLINE bool IsDraggingNearbyScrollbar() const { return bDraggingNearbyScrollbar; }
+
+	// Lightens the thumb while the mouse is over the scrollbar
+	void SetNearbyScrollbarHovered(bool bHovered);
 
 	// Highlights a button. INDEX_NONE clears the highlight.
 	void SetHoveredButton(int32 Button);
@@ -155,11 +191,11 @@ public:
 	FTransform GetHandSlotItemTransform(const FFSInventoryItem& Item, int32 HandSlot) const;
 	FTransform GetArmorSlotItemTransform(const FFSInventoryItem& Item, int32 ArmorSlot) const;
 
+	// The same for a nearby item in one of the list's boxes, counted from the top box showing
+	FTransform GetNearbyItemTransform(const UFSItemDefinition& Item, int32 Box) const;
+
 	// Where an item's mesh sits relative to the grid, fitted to the cells it covers
 	FTransform GetItemTransform(const FFSInventoryItem& Item) const;
-
-	// The same for an item in the organizing grid
-	FTransform GetOrganizeItemTransform(const FFSInventoryItem& Item) const;
 
 	// Where a carried item's mesh sits relative to the grid, with the top left of its cells at a point on the grid. It's closer to the camera
 	// than every item in the grid, and shrunk by just enough to look the same size and in the same place as if it were on the grid.
@@ -174,20 +210,24 @@ public:
 	FORCEINLINE int32 GetHoveredHandSlot() const { return HoveredHandSlot; }
 	FORCEINLINE UPointLightComponent* GetCursorLight() const { return CursorLight; }
 	FORCEINLINE const FIntPoint& GetHoveredCell() const { return HoveredCell; }
-	FORCEINLINE const FIntPoint& GetHoveredOrganizeCell() const { return HoveredOrganizeCell; }
-	FORCEINLINE UInstancedStaticMeshComponent* GetOrganizeGrid() const { return OrganizeGrid; }
 
-	// Whether the last inventory shown was being organized
-	FORCEINLINE bool IsOrganizing() const { return bOrganizing; }
+	// A box for each nearby item showing. With none, there are no boxes, only the list's label.
+	FORCEINLINE UInstancedStaticMeshComponent* GetNearbyList() const { return NearbyList; }
 
-	// How far the display is across the screen right now, in cm of the display. On screen, that's this much smaller.
-	FORCEINLINE double GetDisplaySlide() const { return DisplaySlide; }
+	// The borders around the nearby items' boxes, in the colours of their rarities
+	FORCEINLINE UInstancedStaticMeshComponent* GetNearbyBorders() const { return NearbyBorders; }
 
-	// How big the plane of the grid looks right now, as a fraction of how big it looks at its usual distance
+	// The scrollbar's track, a cell like the slots', and its thumb, a solid bar in front of it. One instance each, shrunk away while the scrollbar isn't shown.
+	FORCEINLINE UInstancedStaticMeshComponent* GetNearbyScrollTrack() const { return NearbyScrollTrack; }
+	FORCEINLINE UInstancedStaticMeshComponent* GetNearbyScrollThumb() const { return NearbyScrollThumb; }
+
+	// The mesh in one of the list's boxes, counted from the top box showing. Null past the last box there's been an item in.
+	FORCEINLINE UStaticMeshComponent* GetNearbyItemMesh(int32 Box) const { return NearbyItemMeshes.IsValidIndex(Box) ? NearbyItemMeshes[Box].Get() : nullptr; }
+
+	// How big the plane of the grid looks, as a fraction of how big it looks at its usual distance
 	FORCEINLINE double GetDisplayScale() const { return DisplayScale; }
 	FORCEINLINE UInstancedStaticMeshComponent* GetGrid() const { return Grid; }
 	FORCEINLINE UInstancedStaticMeshComponent* GetItemBorders() const { return ItemBorders; }
-	FORCEINLINE UInstancedStaticMeshComponent* GetCloseButtonFill() const { return CloseButtonFill; }
 	FORCEINLINE int32 GetCellIndex(const FIntPoint& Cell) const { return Cell.Y * GridWidth + Cell.X; }
 	FORCEINLINE UInstancedStaticMeshComponent* GetHandSlots() const { return HandSlots; }
 	FORCEINLINE UInstancedStaticMeshComponent* GetQuickSlots() const { return QuickSlots; }
@@ -265,21 +305,47 @@ public:
 	FVector GetArmorSlotLabelLocation(int32 ArmorSlot) const;
 
 	// The centre of a button on the plane of the grid, in cm from the grid's centre: X to the right and Y up.
-	// Drop Backpack is above the grid and Use Item below it, both as wide as it. Organize Inventory is right of the right column, as tall as it.
+	// Drop Backpack is above the grid and Use Item below it, both as wide as it.
 	FVector2D GetButtonSize(int32 Button) const;
 	FVector2D GetButtonCentre(int32 Button) const;
 
 	// Whether a button is there to see and press. Drop Backpack needs a backpack, and the others are always there.
 	FORCEINLINE bool IsButtonShown(int32 Button) const { return bHasBackpack || Button != DropBackpackButton; }
 
-	// Whether a button stands on end, with its label running down it. Organize Inventory does, beside the right column.
-	FORCEINLINE bool IsButtonUpright(int32 Button) const { return Button == OrganizeInventoryButton; }
-
 	// The point in the world to centre a button's label on
 	FVector GetButtonLabelLocation(int32 Button) const;
 
-	// How far the middle of the organizing grid is to the right of the middle of the grid, just clear of the Organize Inventory button. It slides along with everything else, starting off screen.
-	double GetOrganizeGridOffset() const;
+	// The nearby list on the plane of the grid, in cm from the grid's centre: X to the right and Y up. It's right of the right column, from the top of the quick slot to the bottom of the hand.
+	FVector2D GetNearbyListCentre() const;
+	FVector2D GetNearbyListSize() const;
+
+	// Where the list's name is centred: in the gap just above it, as a slot's name is in the gap above the slot
+	FVector2D GetNearbyLabelCentre() const;
+
+	// The boxes are square, as wide as the list
+	FORCEINLINE double GetNearbyBoxSize() const { return NearbyItemSize; }
+
+	// The centre of one of the list's boxes, counted from the top box showing. The boxes fill the list from its top to its bottom, spread evenly.
+	FVector2D GetNearbyBoxCentre(int32 Box) const;
+
+	// The point in the world to centre the list's name on
+	FVector GetNearbyListLabelLocation() const;
+
+	// Whether the list goes on past its top or bottom box
+	FORCEINLINE bool CanScrollNearbyUp() const { return NearbyScroll > 0; }
+	FORCEINLINE bool CanScrollNearbyDown() const { return NearbyScroll + GetNearbyCapacity() < NearbyItems.Num(); }
+
+	// The scrollbar's track, just right of the list and as tall as it, on the plane of the grid
+	FVector2D GetNearbyScrollTrackCentre() const;
+	FVector2D GetNearbyScrollTrackSize() const;
+
+	// The thumb, as long as the share of the list that shows and as far down the track as the list is scrolled. ScrollFraction is how far, from 0 at the top to 1 at the bottom.
+	FVector2D GetNearbyScrollThumbSize() const;
+	FVector2D GetNearbyScrollThumbCentre(double ScrollFraction) const;
+	FORCEINLINE FVector2D GetNearbyScrollThumbCentre() const { return GetNearbyScrollThumbCentre(GetNearbyScrollFraction()); }
+
+	// How far down the list is scrolled, from 0 at the top to 1 with the last item in the bottom box
+	double GetNearbyScrollFraction() const;
 
 protected:
 	virtual void BeginPlay() override;
@@ -290,9 +356,15 @@ protected:
 	void BuildArmorSlots();
 	void BuildButtons();
 
-	// Brightens Close Inventory while it's hovered, as its solid colour hides its cell's highlight
-	void UpdateCloseButtonColor();
-	void BuildOrganizeGrid();
+	// Puts a box in the nearby list for each item showing, with its mesh and its border, and matches the scrollbar to the list
+	void BuildNearbyList();
+
+	// Places the scrollbar's track and thumb, or shrinks them away while it isn't shown, and colours the thumb
+	void UpdateNearbyScrollbar();
+
+	// Where a world space ray meets the plane of the grid, for the scrollbar. Returns false if it never does.
+	bool GetNearbyScrollbarPoint(const FVector& RayOrigin, const FVector& RayDirection, FVector2D& OutPoint) const;
+
 	// Matches the arms to the character, or to what's worn on its body
 	void RefreshArmsMesh();
 
@@ -305,7 +377,7 @@ protected:
 	// Places the pack where it rests, plus where the slide and its jiggle take it, turned by its sway
 	void UpdatePackTransform();
 
-	// Places the display where the slide takes it
+	// Places the display as far from the camera as it has to be to fit on the screen
 	void UpdateDisplayPlacement();
 
 	// Moves the camera's bob and the jiggles on by a frame, from how fast the character the rig is attached to is walking
@@ -322,39 +394,33 @@ protected:
 	// Borders a slot in the colour of what's in it. An empty slot gets none. Size is X across and Y up.
 	void AddSlotBorder(const FFSInventoryItem& Item, const FVector2D& SlotCentre, const FVector2D& SlotSize);
 
-	void AddBorder(double Left, double Top, double Width, double Height, double Thickness, const FLinearColor& Color);
+	// Adds the four bars of a border to Bars, which is ItemBorders unless given
+	void AddBorder(double Left, double Top, double Width, double Height, double Thickness, const FLinearColor& Color, UInstancedStaticMeshComponent* Bars = nullptr);
 	bool IsCellInGrid(const FIntPoint& Cell) const;
 
 	// Finds where a world space ray meets the plane of the grid, in cm from the grid's centre: X to the right and Y up. Returns false if it never does.
 	bool GetGridPointFromWorldRay(const FVector& RayOrigin, const FVector& RayDirection, FVector2D& OutGridPoint) const;
 	FIntPoint GetCellFromGridPoint(const FVector2D& GridPoint) const;
 	FTransform GetItemTransformAt(const FFSInventoryItem& Item, const FVector2D& TopLeft) const;
-	// Matches the highlight on one of the grids to a newly hovered cell
-	void UpdateCellHighlight(UInstancedStaticMeshComponent& Cells, EFSItemGrid Which, const FIntPoint& NewCell, FIntPoint& Hovered, TArray<FIntPoint>& Highlighted, int32& HighlightedData);
+	// Matches the grid's highlight to a newly hovered cell
+	void UpdateCellHighlight(const FIntPoint& NewCell);
 
 	// The top left of an item's cells on the plane of the grid, in cm from the grid's centre: X to the right and Y up
 	FVector2D GetItemTopLeft(const FFSInventoryItem& Item) const;
-	FVector2D GetOrganizeItemTopLeft(const FFSInventoryItem& Item) const;
 
-	bool IsCellInOrganizeGrid(const FIntPoint& Cell) const;
-	FIntPoint GetOrganizeCellFromGridPoint(const FVector2D& GridPoint) const;
-
-	// Where the display goes to keep every box on the screen, either at rest or making room for the organizing grid: how far across it is, and how big it looks
-	void GetDisplayLayout(bool bForOrganizing, double& OutSlide, double& OutScale) const;
+	// How big the display has to look to keep every box on the screen
+	double GetDisplayScaleToFit() const;
 
 	// How much further from the camera something at a depth in the display is than the grid is
 	double GetDepthRatio(double Depth) const;
 
-	// How far something at a depth has to move across the display to stay lined up with the grid on screen. Sliding the display moves everything the same distance, which looks like less the further away it is.
-	double GetSlideCorrection(double Depth) const;
+	// Puts the display as far away as it has to be to fit, and everything that has to stay lined up with its cell from the camera
+	void ApplyDisplayLayout();
 
-	// Puts the display where the slide has got to, and everything that has to stay lined up with its cell as it goes
-	void ApplySlide();
-
-	// Where the slot items rest depends on the slide
+	// Where the slot items rest depends on how far away the display is
 	void UpdateSlotItemRests();
 	// Size is X across and Y up
-	FTransform GetSlotItemTransform(const FFSInventoryItem& Item, const FVector2D& SlotCentre, const FVector2D& SlotSize) const;
+	FTransform GetSlotItemTransform(const UFSItemDefinition* Item, const FVector2D& SlotCentre, const FVector2D& SlotSize) const;
 	FVector GetSlotLabelLocation(const FVector2D& SlotCentre, double SlotHeight) const;
 	FVector GetLocationOnGrid(const FVector2D& GridPoint) const;
 
@@ -447,12 +513,20 @@ protected:
 	UPROPERTY(VisibleAnywhere, Category = "Inventory")
 	TObjectPtr<UInstancedStaticMeshComponent> Buttons;
 
-	// Close Inventory's solid colour, drawn just in front of its cell with the item borders' material, as the cells' material is see-through
+	// A box for each nearby item showing, right of the right column. Attached to the grid so they scale in and out along with it, but they stay without a backpack.
 	UPROPERTY(VisibleAnywhere, Category = "Inventory")
-	TObjectPtr<UInstancedStaticMeshComponent> CloseButtonFill;
+	TObjectPtr<UInstancedStaticMeshComponent> NearbyList;
+
+	// Kept apart from ItemBorders, so the list can change without the rest of the inventory being shown again
+	UPROPERTY(VisibleAnywhere, Category = "Inventory")
+	TObjectPtr<UInstancedStaticMeshComponent> NearbyBorders;
 
 	UPROPERTY(VisibleAnywhere, Category = "Inventory")
-	TObjectPtr<UInstancedStaticMeshComponent> OrganizeGrid;
+	TObjectPtr<UInstancedStaticMeshComponent> NearbyScrollTrack;
+
+	// Drawn with the item borders' material, as the cells' material is see-through, just in front of the track
+	UPROPERTY(VisibleAnywhere, Category = "Inventory")
+	TObjectPtr<UInstancedStaticMeshComponent> NearbyScrollThumb;
 
 	// Fills the screen just behind the grid and everything on it, shading the arms, the pack and the world beyond them
 	UPROPERTY(VisibleAnywhere, Category = "Inventory")
@@ -591,20 +665,32 @@ protected:
 	FVector UpperArmDirection = FVector(0.55, -0.3, 0.75);
 
 
-	// How thick every button is: the height of Use Item below the grid and Drop Backpack above it, and the width of Organize Inventory standing on end beside the right column
+	// How thick every button is: the height of Use Item below the grid and Drop Backpack above it
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Buttons", meta = (ClampMin = "0.1", Units = cm))
 	float ButtonHeight = 5.0f;
 
-	// The colour of Close Inventory, the square in the top right corner, and its colour under the mouse
-	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Buttons")
-	FLinearColor CloseButtonColor = FLinearColor(0.8f, 0.03f, 0.03f);
+	// How wide the nearby list is, and so how big each of its square boxes is
+	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Nearby Items", meta = (ClampMin = "0.1", Units = cm))
+	float NearbyItemSize = 5.0f;
 
-	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Buttons")
-	FLinearColor CloseButtonHoveredColor = FLinearColor(1.0f, 0.25f, 0.25f);
+	// How wide the scrollbar beside the list is. It's half the spacing away from the list, so it reads as part of it.
+	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Nearby Items", meta = (ClampMin = "0.1", Units = cm))
+	float NearbyScrollbarWidth = 0.6f;
+
+	// The scrollbar's thumb is never shorter than this, however long the list
+	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Nearby Items", meta = (ClampMin = "0.1", Units = cm))
+	float NearbyScrollThumbMinLength = 1.5f;
+
+	// The thumb's colour, and its colour while the mouse is over the scrollbar or dragging it
+	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Nearby Items")
+	FLinearColor NearbyScrollThumbColor = FLinearColor(0.55f, 0.55f, 0.55f);
+
+	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Nearby Items")
+	FLinearColor NearbyScrollThumbHoveredColor = FLinearColor(0.9f, 0.9f, 0.9f);
 
 	// Between every pair of neighbours, across and up and down: the grid and the buttons above and below it, the grid and the columns either side,
-	// a quick slot and the hand below it, the left column and the armor slots, one armor slot and the next, the right column and Organize Inventory,
-	// and Organize Inventory and the organizing grid. The names over the cells sit in the middle of the gap above them.
+	// a quick slot and the hand below it, the left column and the armor slots, one armor slot and the next, the right column and the nearby list,
+	// and the list and the space above it for its name. The list's boxes are at least this far apart. The names over the cells sit in the middle of the gap above them.
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Layout", meta = (ClampMin = "0.0", Units = cm))
 	float Spacing = 1.0f;
 
@@ -615,9 +701,6 @@ protected:
 	// How far up and down from the middle of the screen they can go. A 16:9 screen's edge is 22.5cm away.
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Layout", meta = (ClampMin = "1.0", Units = cm))
 	float ScreenHalfHeight = 22.0f;
-
-	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Organizing", meta = (ClampMin = "0.01", Units = s))
-	float OrganizeSlideTime = 0.35f;
 
 	// From the camera to the centre of the pack
 	UPROPERTY(EditDefaultsOnly, Category = "Inventory|Pack", meta = (ClampMin = "1.0", Units = cm))
@@ -709,16 +792,32 @@ private:
 
 	int32 HoveredButton = INDEX_NONE;
 
-	FIntPoint HoveredOrganizeCell = FIntPoint(INDEX_NONE, INDEX_NONE);
-	TArray<FIntPoint> HighlightedOrganizeCells;
-	int32 HighlightedOrganizeCellData = CellHoveredData;
+	// What the nearby list shows, from the top of the whole list, and how far down it's scrolled
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UFSItemDefinition>> NearbyItems;
 
-	bool bOrganizing = false;
+	int32 NearbyScroll = 0;
 
-	// How far through the slide the display is, from 0 at rest to 1 making room for the organizing grid
-	float SlideAmount = 0.0f;
+	// One for each box there's been an item in, reused as the list changes
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UStaticMeshComponent>> NearbyItemMeshes;
 
-	double DisplaySlide = 0.0;
+	// Where each box's item sits, which it sways about
+	TArray<FTransform> NearbyItemRests;
+
+	bool bNearbyListHovered = false;
+	int32 HoveredNearbyItem = INDEX_NONE;
+
+	// The box of the list that's highlighted, counted from the top box showing, and which of the cell custom data values it has set
+	int32 HighlightedNearbyBox = INDEX_NONE;
+	int32 HighlightedNearbyBoxData = CellHoveredData;
+
+	bool bNearbyScrollbarHovered = false;
+	bool bDraggingNearbyScrollbar = false;
+
+	// While dragging, how far above the thumb's centre the ray first met it, on the plane of the grid
+	double NearbyScrollGrabOffset = 0.0;
+
 	double DisplayScale = 1.0;
 
 	// How far the display is further from the camera than usual, which is what makes it look smaller
