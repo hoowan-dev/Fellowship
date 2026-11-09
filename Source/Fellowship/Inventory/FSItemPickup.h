@@ -33,6 +33,12 @@ public:
 
 	virtual void OnConstruction(const FTransform& Transform) override;
 
+	// Where a dropped item's mesh sits relative to its pickup
+	static FTransform GetDiscardedMeshTransform(const UFSItemDefinition& DroppedItem);
+
+	// How far above the floor a dropped item's pickup sits, so that its mesh rests on the floor
+	static double GetFloorClearance(const UFSItemDefinition& DroppedItem);
+
 	// Decides this pickup's name, inventory size and mesh
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, BlueprintSetter = SetItem, Category = "Pickup")
 	TObjectPtr<UFSItemDefinition> Item;

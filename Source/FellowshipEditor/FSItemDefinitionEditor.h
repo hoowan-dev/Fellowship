@@ -8,7 +8,7 @@
 class UFSItemDefinition;
 
 /**
- * The window an item opens in: its details beside a 3D preview of its mesh.
+ * The window an item opens in: its details beside 3D previews of it lying on the floor, in the inventory, stored on a backpack and equipped on the character.
  */
 class FFSItemDefinitionEditor : public FAssetEditorToolkit
 {

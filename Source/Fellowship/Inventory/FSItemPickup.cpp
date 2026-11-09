@@ -19,12 +19,6 @@ namespace
 {
 	// How far below a character to look for a floor. With none in reach, the item is left at the character's feet.
 	constexpr double MaxFloorDistance = 10000.0;
-
-	// Mesh pivots are wherever suited the character holding them, so the mesh is centred on the actor by its bounds, and turned about its middle
-	FTransform GetDiscardedMeshTransform(const UFSItemDefinition& Item, const UStaticMesh& Mesh)
-	{
-		return FTransform(-Mesh.GetBounds().Origin) * Item.DiscardedTransform;
-	}
 }
 
 AFSItemPickup::AFSItemPickup()
@@ -63,19 +57,7 @@ AFSItemPickup* AFSItemPickup::DropAtFeet(TSubclassOf<AFSItemPickup> PickupClass,
 		Feet = Floor.ImpactPoint;
 	}
 
-	// The actor sits as far off the floor as the mesh reaches below it. The offset's own location moves it from there, so it's left out.
-	double FloorClearance = 0.0;
-	const UStaticMesh* DroppedMesh = DroppedItem ? DroppedItem->Mesh : nullptr;
-	if (DroppedMesh)
-	{
-		FTransform Resting = GetDiscardedMeshTransform(*DroppedItem, *DroppedMesh);
-		Resting.AddToTranslation(-DroppedItem->DiscardedTransform.GetTranslation());
-
-		const FBoxSphereBounds Bounds = DroppedMesh->GetBounds();
-		FloorClearance = -FBox(Bounds.Origin - Bounds.BoxExtent, Bounds.Origin + Bounds.BoxExtent).TransformBy(Resting).Min.Z;
-	}
-
-	const FVector Location = Feet + FVector(0.0, 0.0, FloorClearance);
+	const FVector Location = Feet + FVector(0.0, 0.0, DroppedItem ? GetFloorClearance(*DroppedItem) : 0.0);
 
 	FActorSpawnParameters SpawnParameters;
 	SpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
@@ -108,7 +90,30 @@ void AFSItemPickup::SetItem(UFSItemDefinition* NewItem)
 	UStaticMesh* ItemMesh = Item ? Item->Mesh : nullptr;
 	Mesh->SetStaticMesh(ItemMesh);
 
-	Mesh->SetRelativeTransform(ItemMesh ? GetDiscardedMeshTransform(*Item, *ItemMesh) : FTransform::Identity);
+	Mesh->SetRelativeTransform(Item ? GetDiscardedMeshTransform(*Item) : FTransform::Identity);
+}
+
+FTransform AFSItemPickup::GetDiscardedMeshTransform(const UFSItemDefinition& DroppedItem)
+{
+	// Mesh pivots are wherever suited the character holding them, so the mesh is centred on the actor by its bounds, and turned about its middle
+	const UStaticMesh* ItemMesh = DroppedItem.Mesh;
+	return ItemMesh ? FTransform(-ItemMesh->GetBounds().Origin) * DroppedItem.DiscardedTransform : FTransform::Identity;
+}
+
+double AFSItemPickup::GetFloorClearance(const UFSItemDefinition& DroppedItem)
+{
+	const UStaticMesh* ItemMesh = DroppedItem.Mesh;
+	if (!ItemMesh)
+	{
+		return 0.0;
+	}
+
+	// The actor sits as far off the floor as the mesh reaches below it. The offset's own location moves it from there, so it's left out.
+	FTransform Resting = GetDiscardedMeshTransform(DroppedItem);
+	Resting.AddToTranslation(-DroppedItem.DiscardedTransform.GetTranslation());
+
+	const FBoxSphereBounds Bounds = ItemMesh->GetBounds();
+	return -FBox(Bounds.Origin - Bounds.BoxExtent, Bounds.Origin + Bounds.BoxExtent).TransformBy(Resting).Min.Z;
 }
 
 bool AFSItemPickup::IsBackpack() const

@@ -405,18 +405,11 @@ void AFSInventoryRig::BuildGrid()
 	Grid->ClearInstances();
 	Grid->SetNumCustomDataFloats(CellDataCount);
 
-	const FVector CellScale(CellSize / CellMeshSize);
-
 	for (int32 Row = 0; Row < GridHeight; ++Row)
 	{
 		for (int32 Column = 0; Column < GridWidth; ++Column)
 		{
-			const FVector CellCentre(
-				0.0f,
-				(Column + 0.5f - GridWidth * 0.5f) * CellSize,
-				(GridHeight * 0.5f - Row - 0.5f) * CellSize);
-
-			Grid->AddInstance(FTransform(FacingCamera, CellCentre, CellScale));
+			Grid->AddInstance(GetCellTransform(FIntPoint(Column, Row), FIntPoint(GridWidth, GridHeight), CellSize));
 		}
 	}
 
@@ -1510,27 +1503,32 @@ FTransform AFSInventoryRig::GetCarriedItemTransform(const FFSInventoryItem& Item
 
 FTransform AFSInventoryRig::GetItemTransformAt(const FFSInventoryItem& Item, const FVector2D& TopLeft) const
 {
-	const UStaticMesh* Mesh = Item.Definition ? Item.Definition->Mesh : nullptr;
+	return Item.Definition ? GetItemTransformOnGrid(*Item.Definition, Item.Rotation, TopLeft, CellSize, ItemFillFraction) : FTransform::Identity;
+}
+
+FTransform AFSInventoryRig::GetItemTransformOnGrid(const UFSItemDefinition& Item, uint8 Rotation, const FVector2D& TopLeft, double CellSize, double FillFraction)
+{
+	const UStaticMesh* Mesh = Item.Mesh;
 	if (!Mesh)
 	{
 		return FTransform::Identity;
 	}
 
 	const FBoxSphereBounds Bounds = Mesh->GetBounds();
-	const FTransform& MeshTransform = Item.Definition->InventoryMeshTransform;
+	const FTransform& MeshTransform = Item.InventoryMeshTransform;
 	const FQuat Upright = MeshTransform.GetRotation();
 
 	const FVector UprightSize = GetUprightSize(Bounds, MeshTransform.GetScale3D(), Upright);
-	const FIntPoint& ItemSize = Item.Definition->InventoryDimensions;
-	const double Fit = ItemFillFraction * CellSize * FMath::Min(
+	const FIntPoint& ItemSize = Item.InventoryDimensions;
+	const double Fit = FillFraction * CellSize * FMath::Min(
 		ItemSize.X / FMath::Max(UprightSize.Y, UE_KINDA_SMALL_NUMBER),
 		ItemSize.Y / FMath::Max(UprightSize.Z, UE_KINDA_SMALL_NUMBER));
 
 	// Turning about the camera's view axis. A negative angle is clockwise as seen from the camera.
-	const FQuat Turn(FVector::ForwardVector, FMath::DegreesToRadians(-90.0 * Item.Rotation));
-	const FQuat Rotation = Turn * Upright;
+	const FQuat Turn(FVector::ForwardVector, FMath::DegreesToRadians(-90.0 * Rotation));
+	const FQuat MeshRotation = Turn * Upright;
 
-	const FIntPoint Footprint = FFSInventoryGrid::GetFootprint(ItemSize, Item.Rotation);
+	const FIntPoint Footprint = FFSInventoryGrid::GetFootprint(ItemSize, Rotation);
 	const FVector FootprintCentre(
 		// The back of the mesh rests just in front of the grid lines
 		-(UprightSize.X * Fit * 0.5 + 0.1),
@@ -1538,7 +1536,23 @@ FTransform AFSInventoryRig::GetItemTransformAt(const FFSInventoryItem& Item, con
 		TopLeft.Y - Footprint.Y * 0.5 * CellSize);
 
 	const FVector Scale = MeshTransform.GetScale3D() * Fit;
-	return FTransform(Rotation, FootprintCentre - Rotation.RotateVector(Bounds.Origin * Scale) + Turn.RotateVector(MeshTransform.GetLocation() * Fit), Scale);
+	return FTransform(MeshRotation, FootprintCentre - MeshRotation.RotateVector(Bounds.Origin * Scale) + Turn.RotateVector(MeshTransform.GetLocation() * Fit), Scale);
+}
+
+FTransform AFSInventoryRig::GetCellTransform(const FIntPoint& Cell, const FIntPoint& GridSize, double CellSize)
+{
+	const FVector CellCentre(
+		0.0,
+		(Cell.X + 0.5 - GridSize.X * 0.5) * CellSize,
+		(GridSize.Y * 0.5 - Cell.Y - 0.5) * CellSize);
+
+	return FTransform(FacingCamera, CellCentre, FVector(CellSize / CellMeshSize));
+}
+
+void AFSInventoryRig::SetCellTakenBy(UInstancedStaticMeshComponent& Cells, int32 Cell, const UFSItemDefinition& Item)
+{
+	Cells.SetCustomDataValue(Cell, CellTakenData, 1.0f, true);
+	SetCellItemColor(Cells, Cell, Item);
 }
 
 void AFSInventoryRig::AttachToCharacter(ACharacter* Character)

@@ -8,6 +8,7 @@
 #include "PropertyEditorModule.h"
 #include "SFSItemPreviewViewport.h"
 #include "Widgets/Docking/SDockTab.h"
+#include "Widgets/Layout/SSplitter.h"
 
 #define LOCTEXT_NAMESPACE "FSItemDefinitionEditor"
 
@@ -91,7 +92,24 @@ TSharedRef<SDockTab> FFSItemDefinitionEditor::SpawnDetailsTab(const FSpawnTabArg
 
 TSharedRef<SDockTab> FFSItemDefinitionEditor::SpawnPreviewTab(const FSpawnTabArgs& Args)
 {
-	return SNew(SDockTab)[SNew(SFSItemPreviewViewport, EditedItem.Get())];
+	UFSItemDefinition* Item = EditedItem.Get();
+
+	// Dropped and in the inventory along the top, stored on the backpack and on the character along the bottom
+	const auto MakeRow = [Item](EFSItemPreviewView Left, EFSItemPreviewView Right)
+	{
+		return SNew(SSplitter)
+			.Orientation(Orient_Horizontal)
+			+ SSplitter::Slot()[SNew(SFSItemPreviewViewport, Item, Left)]
+			+ SSplitter::Slot()[SNew(SFSItemPreviewViewport, Item, Right)];
+	};
+
+	return SNew(SDockTab)
+	[
+		SNew(SSplitter)
+		.Orientation(Orient_Vertical)
+		+ SSplitter::Slot()[MakeRow(EFSItemPreviewView::Discarded, EFSItemPreviewView::Inventory)]
+		+ SSplitter::Slot()[MakeRow(EFSItemPreviewView::Backpack, EFSItemPreviewView::Character)]
+	];
 }
 
 #undef LOCTEXT_NAMESPACE

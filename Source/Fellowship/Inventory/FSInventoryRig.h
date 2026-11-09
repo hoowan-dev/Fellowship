@@ -262,6 +262,20 @@ public:
 	// Each armor slot is square, sized so the column of them, with the spacing between, is exactly as tall as the grid
 	FORCEINLINE double GetArmorSlotSize() const { return FMath::Max(GridHeight * CellSize - Spacing * (ArmorSlotCount - 1), 0.1) / ArmorSlotCount; }
 
+	FORCEINLINE float GetCellSize() const { return CellSize; }
+	FORCEINLINE float GetItemFillFraction() const { return ItemFillFraction; }
+	FORCEINLINE UMaterialInterface* GetGridCellMaterial() const { return GridCellMaterial; }
+
+	// Where an item's mesh sits on a grid of cells this size, relative to the grid's middle, with its top left corner at TopLeft: in cm, X to the right and Y up.
+	// Rotation is in clockwise quarter turns. The grid's cells face -X, towards the camera.
+	static FTransform GetItemTransformOnGrid(const UFSItemDefinition& Item, uint8 Rotation, const FVector2D& TopLeft, double CellSize, double FillFraction);
+
+	// Where a grid cell sits relative to the grid's middle, for the engine's plane mesh, on a grid this many cells across and down
+	static FTransform GetCellTransform(const FIntPoint& Cell, const FIntPoint& GridSize, double CellSize);
+
+	// Shows a grid cell as covered by an item, in its rarity's colour
+	static void SetCellTakenBy(UInstancedStaticMeshComponent& Cells, int32 Cell, const UFSItemDefinition& Item);
+
 	// From the top of a slot's cell to the middle of its name, halfway across the gap above it
 	FORCEINLINE double GetSlotLabelHeight() const { return Spacing * 0.5; }
 
