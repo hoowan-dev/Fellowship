@@ -6,6 +6,7 @@
 #include "Components/ArrowComponent.h"
 #include "Components/BoxComponent.h"
 #include "Components/CapsuleComponent.h"
+#include "Game/FSEventLog.h"
 #include "GameFramework/Character.h"
 #include "Player/FSPlayerController.h"
 
@@ -35,6 +36,9 @@ void AFSTeleporter::Interact_Implementation(AFSPlayerController* PlayerControlle
 
 	if (Destination->Receive(Character))
 	{
+		UE_LOG(LogTemp, Log, TEXT("Teleported %s from %s to %s"), *Character->GetName(), *GetActorNameOrLabel(), *Destination->GetActorNameOrLabel());
+		UFSEventLog::Add(this, FText::Format(NSLOCTEXT("FSTeleporter", "TeleportedEvent", "Used {0} teleporter"), DisplayName));
+
 		// The camera looks the way the character now faces
 		PlayerController->SetControlRotation(FRotator(0.0, Character->GetActorRotation().Yaw, 0.0));
 	}

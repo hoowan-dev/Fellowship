@@ -566,9 +566,11 @@ void AFSHUD::DrawInteractionLabels()
 			Centre.Y += LabelHeight + BackdropPadding * 2.0f + InteractionPromptGap;
 		}
 
-		if (Actor == Target)
+		// An empty verb, such as an open chest's, means there's nothing to prompt for
+		const FText Verb = Actor == Target ? Interactable->GetInteractionVerb(PlayerController->GetInventory()) : FText::GetEmpty();
+		if (!Verb.IsEmpty())
 		{
-			const FText Prompt = FText::Format(LOCTEXT("InteractionPrompt", "[F / X] {0}"), Interactable->GetInteractionVerb(PlayerController->GetInventory()));
+			const FText Prompt = FText::Format(LOCTEXT("InteractionPrompt", "[F / X] {0}"), Verb);
 			DrawCentredText(Prompt.ToString(), Centre, true);
 		}
 	}

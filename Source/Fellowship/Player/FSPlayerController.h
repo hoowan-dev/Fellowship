@@ -131,6 +131,12 @@ class FELLOWSHIP_API AFSPlayerController : public APlayerController
 		FIntPoint Cell = FIntPoint::ZeroValue;
 		FIntPoint Footprint = FIntPoint::ZeroValue;
 		uint8 Rotation = 0;
+
+		// The pickup it was, from the nearby list, so that it can go back there if there's no room for it
+		TSubclassOf<AFSItemPickup> PickupClass;
+		FTransform PickupTransform;
+		TWeakObjectPtr<AActor> PickupOwner;
+		bool bPickupShownInWorld = true;
 	};
 	FInventoryPickup LastInventoryPickup;
 
@@ -172,6 +178,9 @@ public:
 	// Moves the camera back to the character, tossing any carried item at their feet
 	UFUNCTION(BlueprintCallable, Category = "Inventory")
 	void CloseInventory();
+
+	// Broadcast as the inventory starts to close, once the carried item has been tossed, such as for an open chest to close with it
+	FSimpleMulticastDelegate OnInventoryClosed;
 
 	// Picks up the nearest item, if there's one in range and the inventory is closed. For an item with no room, the inventory opens
 	// with it at the top of the nearby list, so the player can make room for it. A backpack replaces the one being worn, which is left on the ground.
@@ -222,6 +231,8 @@ public:
 	// What a click does in the open inventory, at Time in seconds. Usually the same as selecting that place, but a second click on an item that the first just picked up,
 	// within InventoryDoubleClickTime, is a double click instead. An item from a grid is then equipped or used, as UFSInventoryComponent::QuickEquipCarriedItem does,
 	// and one from a hand, quick slot, armor slot or the nearby list is put away, as UFSInventoryComponent::StowCarriedItem does.
+	// Taking the bottom item from the nearby list leaves no box where it was, so a second click on the list's empty space there still counts.
+	// An item from the nearby list with no room in the backpack goes back where it was, at the top of the list, rather than staying on the cursor.
 	void ClickInventory(const FFSInventoryClick& Click, double Time);
 
 protected:
@@ -237,6 +248,9 @@ private:
 	void SelectAtInventoryCursor();
 
 	void TossCarriedItem();
+
+	// Puts the carried item back as the pickup it was taken from, pinned to the top of the nearby list. Leaves it on the cursor if it didn't come from one.
+	void ReturnCarriedItemToNearby(const FInventoryPickup& From);
 
 	// Scrolls the nearby list a box for each notch of the wheel
 	void ScrollNearbyItems(const FInputActionValue& Value);

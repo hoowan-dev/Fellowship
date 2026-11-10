@@ -52,6 +52,11 @@ public:
 	// What a dropped backpack still has inside it, which goes back on with it. Its quick slots' items hang off its mesh.
 	void SetBackpackContents(const FFSBackpackContents& Contents);
 
+	// Hidden, it has no mesh or label in the world and isn't what interacting picks up, but it's still in the open inventory's nearby list,
+	// such as an item inside an open chest
+	void SetShownInWorld(bool bShown);
+	FORCEINLINE bool IsShownInWorld() const { return bShownInWorld; }
+
 	// Moves the item into the inventory and removes this actor. Returns false, changing nothing, if it doesn't fit, or if it's a backpack and one is already on.
 	bool TryPickUp(UFSInventoryComponent* Inventory);
 
@@ -96,4 +101,6 @@ private:
 
 	UPROPERTY(Transient)
 	FFSHungItemMeshes HungItemMeshes;
+
+	bool bShownInWorld = true;
 };

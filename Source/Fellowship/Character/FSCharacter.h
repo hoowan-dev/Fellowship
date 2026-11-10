@@ -250,7 +250,7 @@ public:
 	void AddNearbyPickup(AFSItemPickup* Pickup);
 	void RemoveNearbyPickup(AFSItemPickup* Pickup);
 
-	// The closest pickup in range, or null if there are none
+	// The closest pickup in range that's shown in the world, or null if there are none. Hidden ones, such as inside an open chest, are only in GetNearbyPickups.
 	AFSItemPickup* GetNearestPickup() const;
 
 	// Every pickup in range, in the order they came into it

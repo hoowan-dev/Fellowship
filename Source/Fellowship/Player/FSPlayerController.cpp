@@ -357,9 +357,10 @@ void AFSPlayerController::ClickInventory(const FFSInventoryClick& Click, double 
 
 	// The second click of a double click lands on the item the first picked up, which is still on the cursor
 	const FInventoryPickup& Pickup = LastInventoryPickup;
+	// Taking the bottom item from the nearby list takes its box away too, leaving the list's empty space where it was
 	const bool bSamePlace = Click.Place == Pickup.Click.Place && (bFromGrid
 		? Click.Cell.X >= Pickup.Cell.X && Click.Cell.Y >= Pickup.Cell.Y && Click.Cell.X < Pickup.Cell.X + Pickup.Footprint.X && Click.Cell.Y < Pickup.Cell.Y + Pickup.Footprint.Y
-		: Click.Index == Pickup.Click.Index);
+		: Click.Index == Pickup.Click.Index || (Click.Place == EFSInventoryClickPlace::NearbyItem && Click.Index == INDEX_NONE));
 
 	if (bSamePlace && Time - Pickup.Time <= InventoryDoubleClickTime && Inventory->IsCarryingItem() && Inventory->GetCarriedItem().Id == Pickup.ItemId)
 	{
@@ -371,10 +372,10 @@ void AFSPlayerController::ClickInventory(const FFSInventoryClick& Click, double 
 				Inventory->PlaceCarriedItem(Pickup.Cell);
 			}
 		}
-		else
+		else if (!Inventory->StowCarriedItem() && Pickup.Click.Place == EFSInventoryClickPlace::NearbyItem)
 		{
-			// Without room in the backpack, it stays on the cursor
-			Inventory->StowCarriedItem();
+			// Without room in the backpack, one from a hand or a slot stays on the cursor, and one from the nearby list goes back there
+			ReturnCarriedItemToNearby(Pickup);
 		}
 
 		LastInventoryPickup = FInventoryPickup();
@@ -391,6 +392,18 @@ void AFSPlayerController::ClickInventory(const FFSInventoryClick& Click, double 
 		NewPickup.Cell = Item->Cell;
 		NewPickup.Rotation = Item->Rotation;
 		NewPickup.Footprint = FFSInventoryGrid::GetFootprint(Item->Definition->InventoryDimensions, Item->Rotation);
+	}
+
+	// And the pickup it is in the nearby list, before taking it destroys it
+	const AFSItemPickup* NearbyPickup = Click.Place == EFSInventoryClickPlace::NearbyItem && !Inventory->IsCarryingItem() && NearbyItems.IsValidIndex(Click.Index)
+		? NearbyItems[Click.Index].Get()
+		: nullptr;
+	if (NearbyPickup)
+	{
+		NewPickup.PickupClass = NearbyPickup->GetClass();
+		NewPickup.PickupTransform = NearbyPickup->GetActorTransform();
+		NewPickup.PickupOwner = NearbyPickup->GetOwner();
+		NewPickup.bPickupShownInWorld = NearbyPickup->IsShownInWorld();
 	}
 
 	const bool bWasCarrying = Inventory->IsCarryingItem();
@@ -557,6 +570,34 @@ void AFSPlayerController::TossCarriedItem()
 	{
 		Inventory->ClearCarriedItem();
 	}
+}
+
+void AFSPlayerController::ReturnCarriedItemToNearby(const FInventoryPickup& From)
+{
+	UFSInventoryComponent* Inventory = GetInventory();
+	if (!Inventory || !Inventory->IsCarryingItem() || !From.PickupClass)
+	{
+		return;
+	}
+
+	// Back as it was: where it lay, and owned by what it was in, such as a chest
+	FActorSpawnParameters SpawnParameters;
+	SpawnParameters.Owner = From.PickupOwner.Get();
+	SpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	AFSItemPickup* Returned = GetWorld()->SpawnActor<AFSItemPickup>(From.PickupClass, From.PickupTransform, SpawnParameters);
+	if (!Returned)
+	{
+		return;
+	}
+
+	UFSItemDefinition* Item = Inventory->GetCarriedItem().Definition;
+	Returned->SetItem(Item);
+	Returned->SetShownInWorld(From.bPickupShownInWorld);
+	Inventory->ClearCarriedItem();
+	UFSEventLog::Add(this, FFSItemText::Format(NSLOCTEXT("FSPlayerController", "NoRoomEvent", "No room for {0}"), Item));
+
+	// At the top of the list, like an item the player tried to pick up without room for it
+	PinnedNearbyItem = Returned;
 }
 
 void AFSPlayerController::DropBackpack()
@@ -750,6 +791,7 @@ void AFSPlayerController::CloseInventory()
 	InventoryRig->EndNearbyScrollbarDrag();
 
 	InventoryViewState = EFSInventoryViewState::Closing;
+	OnInventoryClosed.Broadcast();
 	InventoryRig->SetGridVisible(false);
 	SetInventoryInputActive(false);
 	StartInventoryBlend(FSCharacter, ClosingSwapFraction);
@@ -777,6 +819,7 @@ void AFSPlayerController::CloseInventoryImmediately()
 	SetViewTarget(FSCharacter);
 
 	InventoryViewState = EFSInventoryViewState::Closed;
+	OnInventoryClosed.Broadcast();
 }
 
 void AFSPlayerController::SetInventoryInputActive(bool bActive)

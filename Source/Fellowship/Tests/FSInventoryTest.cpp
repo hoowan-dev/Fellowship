@@ -16,6 +16,7 @@
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "Game/FSEventLog.h"
+#include "Game/FSInteractableRegistry.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/WorldSettings.h"
 #include "Inventory/FSInventoryComponent.h"
@@ -25,6 +26,7 @@
 #include "Camera/CameraComponent.h"
 #include "Inventory/FSItemDefinition.h"
 #include "Inventory/FSItemPickup.h"
+#include "Inventory/FSLootContainer.h"
 #include "HUD/FSEquipmentDisplay.h"
 #include "Engine/SkeletalMesh.h"
 #include "Character/FSEquipmentComponent.h"
@@ -2962,6 +2964,187 @@ bool FFSQuickEquipClickTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Double clicking it empties the hand"), Inventory->GetHandItem(EFSHand::Right).Definition == nullptr);
 	TestFalse(TEXT("Off the cursor"), Inventory->IsCarryingItem());
 	TestTrue(TEXT("Into the backpack"), Inventory->GetItems().ContainsByPredicate([Sword](const FFSInventoryItem& Item) { return Item.Definition == Sword; }));
+
+	return true;
+}
+
+namespace
+{
+	bool IsInBackpack(const UFSInventoryComponent& Inventory, const UFSItemDefinition* Definition)
+	{
+		return Inventory.GetItems().ContainsByPredicate([Definition](const FFSInventoryItem& Item) { return Item.Definition == Definition; });
+	}
+
+	bool WasLogged(const UWorld& World, const FString& Message)
+	{
+		return World.GetSubsystem<UFSEventLog>()->GetEvents().ContainsByPredicate([&Message](const FFSItemText& Event) { return Event.ToString() == Message; });
+	}
+
+	// The camera blend runs on timers, which the bare test world doesn't tick by itself
+	void FinishInventoryBlend(UWorld& World)
+	{
+		World.GetTimerManager().Tick(0.0f);
+		++GFrameCounter;
+		World.GetTimerManager().Tick(1.0f);
+	}
+
+	FFSInventoryClick NearbyClick(int32 Index)
+	{
+		FFSInventoryClick Click;
+		Click.Place = EFSInventoryClickPlace::NearbyItem;
+		Click.Index = Index;
+		return Click;
+	}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSNearbyDoubleClickTest, "Fellowship.Inventory.Controller.DoubleClickingNearbyItemsStowsThemIfThereIsRoom", TestFlags)
+
+bool FFSNearbyDoubleClickTest::RunTest(const FString& Parameters)
+{
+	FInventoryPlayerTestWorld Test;
+	AFSPlayerController* Controller = Test.Controller;
+	UFSInventoryComponent* Inventory = Test.Inventory;
+	const TArray<TWeakObjectPtr<AFSItemPickup>>& Nearby = Controller->GetNearbyItems();
+
+	UFSItemDefinition* Apple = MakeItem(FIntPoint(1, 1));
+	Test.SpawnPickup(Apple, FVector(50.0, 0.0, 0.0));
+	Test.OpenInventory();
+	if (!TestTrue(TEXT("The inventory opens"), Controller->GetInventoryViewState() == EFSInventoryViewState::Open))
+	{
+		return false;
+	}
+
+	// Taking the only item takes its box away, so the second click lands on the list's empty space
+	Controller->ClickInventory(NearbyClick(0), 10.0);
+	TestTrue(TEXT("The first click carries the only nearby item"), Inventory->IsCarryingItem() && Nearby.IsEmpty());
+	Controller->ClickInventory(NearbyClick(INDEX_NONE), 10.1);
+	TestFalse(TEXT("A quick second click where its box was still puts it away"), Inventory->IsCarryingItem());
+	TestTrue(TEXT("In the backpack"), IsInBackpack(*Inventory, Apple));
+	TestEqual(TEXT("Rather than dropping it back on the ground"), Test.CountPickups(), 0);
+
+	// Fill the backpack, leaving no room for anything
+	UFSItemDefinition* Filler = MakeItem(FIntPoint(InventoryWidth, InventoryHeight));
+	Inventory->PickUpItemAt(FIntPoint(0, 0));
+	Inventory->ClearCarriedItem();
+	if (!TestTrue(TEXT("The backpack can be filled"), Inventory->AddItem(Filler)))
+	{
+		return false;
+	}
+
+	UFSItemDefinition* Sword = MakeItem(SwordSize);
+	UFSItemDefinition* Bread = MakeItem(FIntPoint(1, 1));
+	const FVector SwordLocation(60.0, 20.0, 0.0);
+	Test.SpawnPickup(Bread, FVector(-50.0, 0.0, 0.0));
+	Test.SpawnPickup(Sword, SwordLocation);
+	Controller->UpdateNearbyItems();
+	TestTrue(TEXT("Both are listed, the sword second"), Nearby.Num() == 2 && Nearby[1].IsValid() && Nearby[1]->Item == Sword);
+
+	Controller->ClickInventory(NearbyClick(1), 20.0);
+	TestTrue(TEXT("The first click carries the sword"), Inventory->IsCarryingItem() && Inventory->GetCarriedItem().Definition == Sword);
+	Controller->ClickInventory(NearbyClick(1), 20.1);
+	TestFalse(TEXT("With no room, a double click doesn't leave it on the cursor"), Inventory->IsCarryingItem());
+	TestFalse(TEXT("Or put it in the backpack"), IsInBackpack(*Inventory, Sword));
+	TestTrue(TEXT("It's back in the list, at the top"), Nearby.Num() == 2 && Nearby[0].IsValid() && Nearby[0]->Item == Sword);
+	TestTrue(TEXT("Lying where it was"), Nearby.Num() > 0 && Nearby[0].IsValid() && Nearby[0]->GetActorLocation().Equals(SwordLocation));
+	TestTrue(TEXT("And the player is told there's no room"), WasLogged(*Test.World, TEXT("No room for Test Item")));
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSLootContainerTest, "Fellowship.Inventory.LootContainer.OpensIntoTheInventoryAndKeepsWhatIsLeft", TestFlags)
+
+bool FFSLootContainerTest::RunTest(const FString& Parameters)
+{
+	FInventoryPlayerTestWorld Test;
+	AFSPlayerController* Controller = Test.Controller;
+	UFSInventoryComponent* Inventory = Test.Inventory;
+	const TArray<TWeakObjectPtr<AFSItemPickup>>& Nearby = Controller->GetNearbyItems();
+
+	UFSItemDefinition* Apple = MakeItem(FIntPoint(1, 1));
+	UFSItemDefinition* Potion = MakeItem(FIntPoint(1, 2));
+	UFSItemDefinition* Boulder = MakeItem(FIntPoint(20, 20));
+
+	AFSLootContainer* Chest = Test.World->SpawnActor<AFSLootContainer>(FVector(100.0, 0.0, 0.0), FRotator::ZeroRotator);
+	Chest->Items = { Apple, Potion, Boulder };
+
+	Chest->Interact(Controller);
+	TestTrue(TEXT("Interacting opens it"), Chest->IsOpen());
+	TestEqual(TEXT("Laying its items out inside it"), Chest->GetItemPickups().Num(), 3);
+	TestTrue(TEXT("Which are no longer in its list while they're out"), Chest->Items.IsEmpty());
+	FinishInventoryBlend(*Test.World);
+	if (!TestTrue(TEXT("And opens the player's inventory"), Controller->GetInventoryViewState() == EFSInventoryViewState::Open))
+	{
+		return false;
+	}
+	TestEqual(TEXT("With the items in the nearby list"), Nearby.Num(), 3);
+
+	const TArray<TWeakObjectPtr<AActor>>& Interactables = Test.World->GetSubsystem<UFSInteractableRegistry>()->GetInteractables();
+	TestFalse(TEXT("But not in the world"), Chest->GetItemPickups().ContainsByPredicate([](const AFSItemPickup* Pickup) { return Pickup->IsShownInWorld(); }));
+	TestFalse(TEXT("Where the HUD would label them"), Chest->GetItemPickups().ContainsByPredicate([&Interactables](AFSItemPickup* Pickup) { return Interactables.Contains(Pickup); }));
+	TestNull(TEXT("Or interacting would pick one up"), Test.Character->GetNearestPickup());
+	TestTrue(TEXT("And the open chest has no label or prompt of its own"), Chest->GetInteractionLabel().ToString().IsEmpty() && Chest->GetInteractionVerb(Inventory).IsEmpty());
+
+	Chest->Interact(Controller);
+	TestEqual(TEXT("Interacting again while it's open does nothing"), Chest->GetItemPickups().Num(), 3);
+
+	const auto IndexOf = [&Nearby](const UFSItemDefinition* Item) { return Nearby.IndexOfByPredicate([Item](const TWeakObjectPtr<AFSItemPickup>& Pickup) { return Pickup.IsValid() && Pickup->Item == Item; }); };
+
+	const int32 AppleIndex = IndexOf(Apple);
+	Controller->ClickInventory(NearbyClick(AppleIndex), 10.0);
+	Controller->ClickInventory(NearbyClick(AppleIndex), 10.1);
+	TestTrue(TEXT("Double clicking an item in it puts it in the backpack"), IsInBackpack(*Inventory, Apple));
+
+	const int32 BoulderIndex = IndexOf(Boulder);
+	Controller->ClickInventory(NearbyClick(BoulderIndex), 20.0);
+	Controller->ClickInventory(NearbyClick(BoulderIndex), 20.1);
+	TestFalse(TEXT("One with no room isn't left on the cursor"), Inventory->IsCarryingItem());
+	TestTrue(TEXT("It goes back in the chest"), Chest->GetItemPickups().ContainsByPredicate([Boulder](const AFSItemPickup* Pickup) { return Pickup->Item == Boulder; }));
+	TestFalse(TEXT("Still hidden from the world"), Chest->GetItemPickups().ContainsByPredicate([](const AFSItemPickup* Pickup) { return Pickup->IsShownInWorld(); }));
+
+	Controller->CloseInventory();
+	TestFalse(TEXT("Closing the inventory closes it"), Chest->IsOpen());
+	TestTrue(TEXT("Keeping what wasn't taken"), Chest->Items.Num() == 2 && Chest->Items.Contains(Potion) && Chest->Items.Contains(Boulder));
+	TestTrue(TEXT("Taking it out of the world"), Chest->GetItemPickups().IsEmpty());
+	TestEqual(TEXT("Leaving no pickups behind"), Test.CountPickups(), 0);
+
+	// The blend back to the character finishes on a timer
+	FinishInventoryBlend(*Test.World);
+	Chest->Interact(Controller);
+	TestEqual(TEXT("It opens again with what's left"), Chest->GetItemPickups().Num(), 2);
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSLootContainerWalkAwayTest, "Fellowship.Inventory.LootContainer.ClosesWhenThePlayerWalksAway", TestFlags)
+
+bool FFSLootContainerWalkAwayTest::RunTest(const FString& Parameters)
+{
+	FInventoryPlayerTestWorld Test;
+	AFSPlayerController* Controller = Test.Controller;
+
+	UFSItemDefinition* Apple = MakeItem(FIntPoint(1, 1));
+	UFSItemDefinition* Potion = MakeItem(FIntPoint(1, 2));
+	AFSLootContainer* Chest = Test.World->SpawnActor<AFSLootContainer>(FVector(100.0, 0.0, 0.0), FRotator::ZeroRotator);
+	Chest->Items = { Apple, Potion };
+
+	Chest->Interact(Controller);
+	FinishInventoryBlend(*Test.World);
+	if (!TestTrue(TEXT("The chest opens into the inventory"), Chest->IsOpen() && Controller->GetInventoryViewState() == EFSInventoryViewState::Open))
+	{
+		return false;
+	}
+	TestEqual(TEXT("With its items in the nearby list"), Controller->GetNearbyItems().Num(), 2);
+
+	// Walking with the inventory open, out of the chest's area
+	Test.Character->SetActorLocation(FVector(2000.0, 0.0, 0.0));
+	TestFalse(TEXT("Leaving its area closes it"), Chest->IsOpen());
+	TestTrue(TEXT("Its items go back inside"), Chest->Items.Num() == 2 && Chest->GetItemPickups().IsEmpty());
+	Controller->UpdateNearbyItems();
+	TestEqual(TEXT("And out of the nearby list"), Controller->GetNearbyItems().Num(), 0);
+	TestTrue(TEXT("While the inventory stays open"), Controller->GetInventoryViewState() == EFSInventoryViewState::Open);
+
+	Controller->CloseInventory();
+	TestTrue(TEXT("Closing the inventory after that changes nothing"), !Chest->IsOpen() && Chest->Items.Num() == 2);
 
 	return true;
 }

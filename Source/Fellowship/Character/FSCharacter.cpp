@@ -161,7 +161,8 @@ AFSItemPickup* AFSCharacter::GetNearestPickup() const
 
 	for (const TWeakObjectPtr<AFSItemPickup>& Pickup : NearbyPickups)
 	{
-		if (Pickup.IsValid())
+		// One hidden from the world, such as inside an open chest, is only taken from the inventory's nearby list
+		if (Pickup.IsValid() && Pickup->IsShownInWorld())
 		{
 			const double DistanceSquared = FVector::DistSquared(GetActorLocation(), Pickup->GetActorLocation());
 			if (DistanceSquared < NearestDistanceSquared)

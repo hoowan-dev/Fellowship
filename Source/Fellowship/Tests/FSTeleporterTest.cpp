@@ -10,6 +10,7 @@
 #include "Engine/CollisionProfile.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
+#include "Game/FSEventLog.h"
 #include "Game/FSTeleporter.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/WorldSettings.h"
@@ -105,8 +106,13 @@ bool FFSTeleporterTest::RunTest(const FString& Parameters)
 	Test.Controller->Interact();
 	TestTrue(TEXT("With no destination, interacting does nothing"), Test.Character->GetActorLocation().Equals(Before));
 
+	TestEqual(TEXT("Or logs anything"), Test.World->GetSubsystem<UFSEventLog>()->GetEvents().Num(), 0);
+
+	Start->DisplayName = FText::FromString(TEXT("Inventory Test"));
 	Start->Destination = End;
 	Test.Controller->Interact();
+	const TArray<FFSItemText>& Events = Test.World->GetSubsystem<UFSEventLog>()->GetEvents();
+	TestTrue(TEXT("Teleporting is logged by the teleporter's name"), Events.Num() == 1 && Events[0].ToString() == TEXT("Used Inventory Test teleporter"));
 	TestEqual(TEXT("Arriving, not moving"), Test.Character->GetVelocity().Size(), 0.0, 0.01);
 	Test.Settle();
 	const FVector After = Test.Character->GetActorLocation();

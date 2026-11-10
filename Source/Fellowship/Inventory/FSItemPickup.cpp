@@ -128,6 +128,27 @@ void AFSItemPickup::SetBackpackContents(const FFSBackpackContents& Contents)
 	HungItemMeshes.Show(*Mesh, Item, Contents.QuickSlotItems[static_cast<int32>(EFSQuickSlot::Left)].Definition, Contents.QuickSlotItems[static_cast<int32>(EFSQuickSlot::Right)].Definition);
 }
 
+void AFSItemPickup::SetShownInWorld(bool bShown)
+{
+	bShownInWorld = bShown;
+
+	// Its hung items go with it
+	Mesh->SetVisibility(bShown, true);
+
+	// Out of the registry, the HUD doesn't label it
+	if (HasActorBegunPlay())
+	{
+		if (bShown)
+		{
+			UFSInteractableRegistry::Register(this);
+		}
+		else
+		{
+			UFSInteractableRegistry::Unregister(this);
+		}
+	}
+}
+
 bool AFSItemPickup::TryPickUp(UFSInventoryComponent* Inventory)
 {
 	const bool bPickedUp = Inventory && (IsBackpack() ? Inventory->EquipBackpack(Item, BackpackContents) : Inventory->AddItem(Item));
@@ -177,7 +198,10 @@ void AFSItemPickup::BeginPlay()
 {
 	Super::BeginPlay();
 
-	UFSInteractableRegistry::Register(this);
+	if (bShownInWorld)
+	{
+		UFSInteractableRegistry::Register(this);
+	}
 }
 
 void AFSItemPickup::EndPlay(const EEndPlayReason::Type EndPlayReason)
