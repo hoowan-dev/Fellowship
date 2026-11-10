@@ -664,6 +664,7 @@ bool UFSCharacterMovementComponent::TryStartInsideClimbCorner(const FVector& Mov
 	Corner.StartLocation = Center;
 	Corner.EndLocation = CapsuleHit.Location + SurfaceHit.ImpactNormal * ClimbSurfaceGap;
 	Corner.EndNormal = SurfaceHit.ImpactNormal;
+	Corner.StartMoveDirection = MoveDirection;
 	return StartClimbCorner(Corner);
 }
 
@@ -713,6 +714,7 @@ bool UFSCharacterMovementComponent::TryStartOutsideClimbCorner(const FVector& Mo
 	Corner.StartLocation = Center;
 	Corner.EndLocation = CapsuleHit.Location + NewNormal * ClimbSurfaceGap;
 	Corner.EndNormal = NewNormal;
+	Corner.StartMoveDirection = MoveDirection;
 	return StartClimbCorner(Corner);
 }
 
@@ -747,7 +749,12 @@ bool UFSCharacterMovementComponent::StartClimbCorner(FClimbCorner Corner)
 
 void UFSCharacterMovementComponent::UpdateClimbCorner(float DeltaTime)
 {
-	ClimbCorner.Alpha = FMath::Min(ClimbCorner.Alpha + DeltaTime / ClimbCorner.Duration, 1.0f);
+	// Sideways input moves around the corner, back the way it came, or not at all, gripping it where it is
+	const float FullInputAcceleration = GetMaxAcceleration();
+	const float Input = FullInputAcceleration > 0.0f
+		? FMath::Clamp(static_cast<float>(FVector::DotProduct(Acceleration, ClimbCorner.GetMoveDirection(ClimbCorner.Alpha)) / FullInputAcceleration), -1.0f, 1.0f)
+		: 0.0f;
+	ClimbCorner.Alpha = FMath::Clamp(ClimbCorner.Alpha + Input * DeltaTime / ClimbCorner.Duration, 0.0f, 1.0f);
 	ClimbSurfaceNormal = ClimbCorner.GetNormal(ClimbCorner.Alpha);
 
 	bJustTeleported = false;
@@ -758,12 +765,19 @@ void UFSCharacterMovementComponent::UpdateClimbCorner(float DeltaTime)
 
 	Velocity = ((UpdatedComponent->GetComponentLocation() - OldLocation) / DeltaTime).GetClampedToMaxSize(ClimbSpeed);
 
-	if (ClimbCorner.Alpha >= 1.0f)
+	// All the way around is on the new surface, and all the way back is on the one it came from
+	if (ClimbCorner.Alpha >= 1.0f || (ClimbCorner.Alpha <= 0.0f && Input < 0.0f))
 	{
 		bInClimbCorner = false;
 	}
 
 	DrawDebugClimbing();
+}
+
+FVector UFSCharacterMovementComponent::FClimbCorner::GetMoveDirection(float InAlpha) const
+{
+	// Turns with the surface: along the start surface at the start, along the new one at the end
+	return FQuat::Slerp(FQuat::Identity, FQuat::FindBetweenNormals(StartNormal, EndNormal), InAlpha).RotateVector(StartMoveDirection).GetSafeNormal();
 }
 
 bool UFSCharacterMovementComponent::TryStartClimbLedge(double SurfaceDistance)

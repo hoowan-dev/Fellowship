@@ -1182,6 +1182,67 @@ bool FFSClimbingInsideCornerTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSClimbingCornerGripTest, "Fellowship.Climbing.GripsCornersPartwayRound", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FFSClimbingCornerGripTest::RunTest(const FString& Parameters)
+{
+	for (const bool bOutside : { true, false })
+	{
+		const FString Kind = bOutside ? TEXT("Outside corner: ") : TEXT("Inside corner: ");
+		FClimbingTestWorld Test;
+		if (bOutside)
+		{
+			// A block with its near face at X = 100 and a side face at Y = 300
+			Test.AddBox(FVector(200.0f, 0.0f, 1000.0f), FVector(100.0f, 300.0f, 1000.0f));
+		}
+		else
+		{
+			// A second wall across the first, with its face at Y = 300
+			Test.AddWall();
+			Test.AddBox(FVector(-1000.0f, 400.0f, 500.0f), FVector(1100.0f, 100.0f, 500.0f));
+		}
+		Test.JumpForward();
+		Test.Climb(1.0f, 0.0f, 1.0f);
+		Test.Step(0.5f, FVector::ZeroVector);
+		const FVector StartNormal = Test.Movement->GetClimbSurfaceNormal();
+
+		// Sideways until partway round the corner
+		for (int32 Frame = 0; Frame < 600 && !(Test.Movement->IsClimbingAroundCorner() && Test.Movement->GetClimbCornerProgress() > 0.4f); ++Frame)
+		{
+			Test.Climb(TickTime, 1.0f, 0.0f);
+		}
+		if (!TestTrue(Kind + TEXT("Gets partway round the corner"), Test.Movement->IsClimbingAroundCorner()))
+		{
+			continue;
+		}
+
+		const float Gripped = Test.Movement->GetClimbCornerProgress();
+		const FVector GrippedAt = Test.Location();
+		Test.Step(1.0f, FVector::ZeroVector);
+		TestTrue(Kind + TEXT("Letting go of the input grips the corner"), Test.Movement->IsClimbingAroundCorner());
+		TestEqual(Kind + TEXT("Without going any further round"), Test.Movement->GetClimbCornerProgress(), Gripped);
+		TestTrue(Kind + TEXT("Or moving"), Test.Location().Equals(GrippedAt, 1.0f));
+		TestFalse(Kind + TEXT("Facing between the two surfaces"), Test.Movement->GetClimbSurfaceNormal().Equals(StartNormal, 0.05f));
+
+		Test.Climb(0.05f, -1.0f, 0.0f);
+		TestTrue(Kind + TEXT("The other way goes back round"), Test.Movement->GetClimbCornerProgress() < Gripped);
+
+		Test.Climb(1.0f, -1.0f, 0.0f);
+		TestFalse(Kind + TEXT("All the way back leaves the corner"), Test.Movement->IsClimbingAroundCorner());
+		TestTrue(Kind + TEXT("On the surface it came from"), Test.Movement->GetClimbSurfaceNormal().Equals(StartNormal, 0.01f));
+		TestTrue(Kind + TEXT("Still climbing"), Test.Movement->IsClimbing());
+
+		// Until it's gone round, not on for so long that it reaches the block's next corner
+		for (int32 Frame = 0; Frame < 600 && (Test.Movement->IsClimbingAroundCorner() || Test.Movement->GetClimbSurfaceNormal().Equals(StartNormal, 0.01f)); ++Frame)
+		{
+			Test.Climb(TickTime, 1.0f, 0.0f);
+		}
+		TestFalse(Kind + TEXT("Carrying on goes all the way round"), Test.Movement->IsClimbingAroundCorner());
+		TestFalse(Kind + TEXT("Onto the next surface"), Test.Movement->GetClimbSurfaceNormal().Equals(StartNormal, 0.01f));
+		TestTrue(Kind + TEXT("Still climbing after it"), Test.Movement->IsClimbing());
+	}
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSClimbingCornerLimitsTest, "Fellowship.Climbing.OnlyTurnsOntoClimbableSurfaces", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FFSClimbingCornerLimitsTest::RunTest(const FString& Parameters)
 {

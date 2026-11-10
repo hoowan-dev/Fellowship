@@ -130,7 +130,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Movement: Climbing", meta = (ClampMin = "0.0", UIMin = "0.0", ForceUnits = "cm"))
 	float ClimbCornerReach = 20.0f;
 
-	// How quickly the character turns around a corner. Once started, a turn always finishes.
+	// How quickly the character goes around a corner with full sideways input. Input moves it around, back, or nowhere: with none, it grips the corner where it is.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Movement: Climbing", meta = (ClampMin = "1.0", UIMin = "1.0", ForceUnits = "deg/s"))
 	float ClimbCornerTurnRate = 240.0f;
 
@@ -207,6 +207,14 @@ public:
 	// Whether the character is on its path up and over a ledge. It counts as climbing until it reaches the top.
 	UFUNCTION(BlueprintPure, Category = "Character Movement: Climbing")
 	bool IsClimbingOntoLedge() const { return IsClimbing() && bOnClimbLedgePath; }
+
+	// Whether the character is on a corner between two surfaces, moving around it or gripping it partway
+	UFUNCTION(BlueprintPure, Category = "Character Movement: Climbing")
+	bool IsClimbingAroundCorner() const { return IsClimbing() && bInClimbCorner; }
+
+	// How far around the corner the character is, from 0 on the surface it came from to 1 on the next. Only meaningful while climbing around a corner.
+	UFUNCTION(BlueprintPure, Category = "Character Movement: Climbing")
+	float GetClimbCornerProgress() const { return ClimbCorner.Alpha; }
 
 	// Lets go of the surface and starts falling. Does nothing when not climbing.
 	UFUNCTION(BlueprintCallable, Category = "Character Movement: Climbing")
@@ -301,7 +309,7 @@ private:
 	// Whether the character's feet have come back down to the floor since climbing away from it
 	bool ShouldDismountOntoFloor();
 
-	// A turn from one surface onto another, moving along a path that's fixed when it starts
+	// A path around a corner from one surface onto another, fixed when the character reaches the corner. Sideways input moves it along the path either way.
 	struct FClimbCorner
 	{
 		FVector StartLocation = FVector::ZeroVector;
@@ -309,15 +317,24 @@ private:
 		FVector StartNormal = FVector::ZeroVector;
 		FVector EndNormal = FVector::ZeroVector;
 
+		// Which way along the start surface leads around the corner
+		FVector StartMoveDirection = FVector::ZeroVector;
+
 		// The edge an outside corner swings around. Inside corners move straight to the end.
 		FVector Pivot = FVector::ZeroVector;
 		bool bOutside = false;
 
+		// How far around, from 0 on the start surface to 1 on the new one
 		float Alpha = 0.0f;
+
+		// How long going all the way around takes with full input
 		float Duration = 0.0f;
 
 		FVector GetLocation(float InAlpha) const;
 		FVector GetNormal(float InAlpha) const;
+
+		// Which way leads further around the corner at this point along it
+		FVector GetMoveDirection(float InAlpha) const;
 	};
 
 	// Starts a turn if input is pushing the character sideways into an inside corner or past an outside one
