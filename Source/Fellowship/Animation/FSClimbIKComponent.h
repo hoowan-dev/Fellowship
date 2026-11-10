@@ -103,6 +103,10 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Climb IK|Ledges", meta = (ClampMin = "0.0", ForceUnits = "cm"))
 	float LedgeHandInset = 10.0f;
 
+	// How far past the edge of a lip the hands hold it while hanging from it. Less than on a ledge, since a lip can be a narrow beam.
+	UPROPERTY(EditAnywhere, Category = "Climb IK|Ledges", meta = (ClampMin = "0.0", ForceUnits = "cm"))
+	float LipHandInset = 5.0f;
+
 	// How far along the path over a ledge, from 0 to 1, the climbing animation starts blending into standing (Get Ledge Stand Alpha), which brings the head up to face forward.
 	UPROPERTY(EditAnywhere, Category = "Climb IK|Ledges", meta = (ClampMin = "0.0", ClampMax = "1.0"))
 	float LedgeStandStart = 0.45f;
@@ -174,8 +178,11 @@ public:
 private:
 	void UpdateLimb(FFSClimbLimb& Limb, const UFSCharacterMovementComponent& Movement, float DeltaTime);
 
-	// Steps the limb onto the top of the ledge the character is getting over
-	void GripLedge(FFSClimbLimb& Limb, const UFSCharacterMovementComponent& Movement) const;
+	// Moves the limb onto the top of a ledge or lip with this edge, stepping there if bStep. Returns whether there was a top to hold.
+	bool GripLedge(FFSClimbLimb& Limb, const UFSCharacterMovementComponent& Movement, const FVector& Edge, float Inset, bool bStep) const;
+
+	// Grips the top of the lip being hung from
+	bool GripLip(FFSClimbLimb& Limb, const UFSCharacterMovementComponent& Movement, bool bStep) const;
 
 	// How much the limb should be holding on right now
 	float GetLimbTargetWeight(const FFSClimbLimb& Limb, const UFSCharacterMovementComponent& Movement) const;
@@ -200,6 +207,7 @@ private:
 	float Alpha = 0.0f;
 
 	bool bWasOnLedge = false;
+	bool bWasHangingFromLip = false;
 
 	float LedgeBendAlpha = 0.0f;
 

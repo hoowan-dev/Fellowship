@@ -32,6 +32,21 @@ namespace
 	// How directly input has to point sideways along the surface to take a corner
 	constexpr double ClimbCornerMinInputDot = 0.5;
 
+	// How far below a lip's top its face is looked for, which is as short as a lip can be
+	constexpr double ClimbLipProbeDepth = 2.0;
+
+	// How far in from a lip's face its top is looked for
+	constexpr double ClimbLipInset = 5.0;
+
+	// How far a lip's top can rise or fall from one move to the next and still be the same lip
+	constexpr double ClimbLipStepTolerance = 15.0;
+
+	// Spacing of the traces looking down for a lip in front of the character
+	constexpr double ClimbLipSearchStep = 5.0;
+
+	// How far input has to point up or down to climb onto a lip or down off it
+	constexpr float ClimbLipMinVerticalInput = 0.5f;
+
 	void SetConsoleVariable(const TCHAR* Name, bool bValue)
 	{
 		// Only registered in builds with animation debugging. Set by console priority so the toggles also win over a value typed in the console.
@@ -242,9 +257,15 @@ bool UFSCharacterMovementComponent::IsClimbableHit(const FHitResult& Hit)
 bool UFSCharacterMovementComponent::TryGrabClimbSurface()
 {
 	FHitResult Hit;
-	if (!FindClimbGrab(Hit))
+	FClimbLip Lip;
+	if (!FindClimbGrab(Hit, &Lip))
 	{
 		return false;
+	}
+
+	if (!Lip.Normal.IsZero())
+	{
+		return TryStartHangingFromLip(Lip, false);
 	}
 
 	DrawDebugClimbEvent(TEXT("Grabbed"), FColor::Green);
@@ -284,6 +305,12 @@ void UFSCharacterMovementComponent::UpdateCharacterStateBeforeMovement(float Del
 {
 	Super::UpdateCharacterStateBeforeMovement(DeltaSeconds);
 
+	// Where the floor is touched, which at a ledge is its top edge even while the capsule rolls over it
+	if (IsMovingOnGround() && CurrentFloor.bBlockingHit)
+	{
+		LastWalkFloorZ = CurrentFloor.HitResult.ImpactPoint.Z;
+	}
+
 	const double Time = GetWorld()->GetTimeSeconds();
 	if (Time < ClimbGrabBufferEndTime || (bHoldingClimbGrip && Time >= ClimbGripStartTime))
 	{
@@ -292,6 +319,12 @@ void UFSCharacterMovementComponent::UpdateCharacterStateBeforeMovement(float Del
 }
 
 bool UFSCharacterMovementComponent::FindClimbGrab(FHitResult& OutHit)
+{
+	FClimbLip Lip;
+	return FindClimbGrab(OutHit, &Lip);
+}
+
+bool UFSCharacterMovementComponent::FindClimbGrab(FHitResult& OutHit, FClimbLip* OutLip)
 {
 	// Walking into a surface only stops the character. It has to be in the air to grab on.
 	if (!IsFalling())
@@ -368,7 +401,211 @@ bool UFSCharacterMovementComponent::FindClimbGrab(FHitResult& OutHit)
 		}
 	}
 
+	// Nothing to climb, but maybe the top edge of something too short for its face to be climbed, from level with the middle up to above the head
+	FClimbLip Lip;
+	if (OutLip && FindClimbLip(ReachDirection, Center.Z, Center.Z + HalfHeight + ClimbLipReachAbove, Lip))
+	{
+		*OutLip = Lip;
+		OutHit = FHitResult(1.0f);
+		OutHit.bBlockingHit = true;
+		OutHit.ImpactPoint = Lip.Edge;
+		OutHit.ImpactNormal = Lip.Normal;
+		OutHit.Location = Center;
+		return true;
+	}
+
 	return false;
+}
+
+bool UFSCharacterMovementComponent::TraceClimbLipTop(const FVector& Start, const FVector& End, double& OutTopZ) const
+{
+	FHitResult Hit;
+	if (!ClimbLineTrace(Hit, Start, End) || Hit.bStartPenetrating || Hit.ImpactNormal.Z < GetWalkableFloorZ())
+	{
+		return false;
+	}
+
+	OutTopZ = Hit.ImpactPoint.Z;
+	return true;
+}
+
+bool UFSCharacterMovementComponent::TraceClimbLipFace(const FVector& From, const FVector& Direction, double Distance, double TopZ, FClimbLip& OutLip) const
+{
+	const FVector Start(From.X, From.Y, TopZ - ClimbLipProbeDepth);
+	FHitResult Hit;
+	if (!TraceClimbableSurface(Hit, Start, Start + Direction * Distance) || Hit.bStartPenetrating)
+	{
+		return false;
+	}
+
+	const FVector Normal = Hit.ImpactNormal.GetSafeNormal2D();
+	if (Normal.IsZero() || FVector::DotProduct(Normal, -Direction) < 0.5)
+	{
+		return false;
+	}
+
+	OutLip.Edge = FVector(Hit.ImpactPoint.X, Hit.ImpactPoint.Y, TopZ);
+	OutLip.Normal = Normal;
+	return true;
+}
+
+bool UFSCharacterMovementComponent::FindClimbLip(const FVector& Direction, double MinTopZ, double MaxTopZ, FClimbLip& OutLip) const
+{
+	const FVector Ahead = Direction.GetSafeNormal2D();
+	if (Ahead.IsZero())
+	{
+		return false;
+	}
+
+	const float Radius = CharacterOwner->GetCapsuleComponent()->GetScaledCapsuleRadius();
+	const FVector Center = UpdatedComponent->GetComponentLocation();
+
+	// The nearest top in reach, then the face below it, which can be closer than the top was found if the lip is over the capsule
+	for (double Distance = Radius + ClimbLipSearchStep; Distance <= Radius + ClimbAttachDistance; Distance += ClimbLipSearchStep)
+	{
+		const FVector Point = Center + Ahead * Distance;
+		double TopZ;
+		if (TraceClimbLipTop(FVector(Point.X, Point.Y, MaxTopZ), FVector(Point.X, Point.Y, MinTopZ), TopZ))
+		{
+			return TraceClimbLipFace(Center, Ahead, Distance + ClimbLipSearchStep, TopZ, OutLip);
+		}
+	}
+
+	return false;
+}
+
+FVector UFSCharacterMovementComponent::GetClimbLipHangLocation(const FClimbLip& Lip) const
+{
+	const float Radius = CharacterOwner->GetCapsuleComponent()->GetScaledCapsuleRadius();
+	return Lip.Edge + Lip.Normal * (Radius + ClimbSurfaceGap) - FVector::UpVector * ClimbLipHangDepth;
+}
+
+bool UFSCharacterMovementComponent::TryStartHangingFromLip(const FClimbLip& Lip, bool bTeleport)
+{
+	const UCapsuleComponent* Capsule = CharacterOwner->GetCapsuleComponent();
+	const float Radius = Capsule->GetScaledCapsuleRadius();
+	const float HalfHeight = Capsule->GetScaledCapsuleHalfHeight();
+	const float ClimbingHalfHeight = IsClimbing() ? HalfHeight : HalfHeight * ClimbCapsuleHalfHeightScale;
+
+	const FVector Hang = GetClimbLipHangLocation(Lip);
+	const FQuat Facing = (-Lip.Normal).Rotation().Quaternion();
+
+	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(ClimbLipHang), false, CharacterOwner);
+	FCollisionResponseParams ResponseParams;
+	UpdatedPrimitive->InitSweepCollisionParams(QueryParams, ResponseParams);
+	const FCollisionShape ClimbingShape = FCollisionShape::MakeCapsule(Radius - 1.0f, ClimbingHalfHeight - 1.0f);
+	if (GetWorld()->OverlapBlockingTestByChannel(Hang, Facing, UpdatedComponent->GetCollisionObjectType(), ClimbingShape, QueryParams, ResponseParams))
+	{
+		DrawDebugClimbStatus(TEXT("Can't hang from lip: no room"), FColor::Orange);
+		return false;
+	}
+
+	ClimbSurfaceNormal = Lip.Normal;
+	if (!IsClimbing())
+	{
+		SetMovementMode(MOVE_Custom, static_cast<uint8>(EFSCustomMovementMode::Climbing));
+	}
+
+	ClimbLip = Lip;
+	bHangingFromLip = true;
+	bInClimbCorner = false;
+	Velocity = FVector::ZeroVector;
+
+	if (bTeleport)
+	{
+		TeleportWithMeshCatchUp(Hang, Facing);
+	}
+
+	DrawDebugClimbEvent(TEXT("Hanging from lip"), FColor::Green);
+	return true;
+}
+
+bool UFSCharacterMovementComponent::FindClimbLipAt(const FVector& Center, FClimbLip& OutLip) const
+{
+	// Across from the point on the face of the lip being hung from, which the character may not have got close to yet
+	const FVector Into = -ClimbLip.Normal;
+	const double FaceDistance = FVector::DotProduct(Center - ClimbLip.Edge, ClimbLip.Normal);
+	const FVector TopPoint = Center + Into * (FaceDistance + ClimbLipInset);
+
+	double TopZ;
+	if (!TraceClimbLipTop(FVector(TopPoint.X, TopPoint.Y, ClimbLip.Edge.Z + ClimbLipStepTolerance), FVector(TopPoint.X, TopPoint.Y, ClimbLip.Edge.Z - ClimbLipStepTolerance), TopZ))
+	{
+		return false;
+	}
+
+	return TraceClimbLipFace(Center, Into, FaceDistance + ClimbLipInset, TopZ, OutLip);
+}
+
+void UFSCharacterMovementComponent::UpdateClimbLipHang(float DeltaTime)
+{
+	const float FullInputAcceleration = GetMaxAcceleration();
+	const FVector Right = GetClimbRightDirection();
+	const float SideInput = FullInputAcceleration > 0.0f ? FMath::Clamp(static_cast<float>(FVector::DotProduct(Acceleration, Right) / FullInputAcceleration), -1.0f, 1.0f) : 0.0f;
+	const float UpInput = FullInputAcceleration > 0.0f ? static_cast<float>(FVector::DotProduct(Acceleration, GetClimbUpDirection()) / FullInputAcceleration) : 0.0f;
+	const FVector Center = UpdatedComponent->GetComponentLocation();
+
+	// Up climbs onto it if there's somewhere to stand on top
+	if (UpInput >= ClimbLipMinVerticalInput && TryStartClimbLedge(FVector::DotProduct(Center - ClimbLip.Edge, ClimbLip.Normal)))
+	{
+		bHangingFromLip = false;
+		UpdateClimbLedge(DeltaTime);
+		return;
+	}
+
+	// Down climbs down the face below if there is one to climb
+	if (UpInput <= -ClimbLipMinVerticalInput && SenseClimbSurface().bBottomHalfOnSurface)
+	{
+		bHangingFromLip = false;
+		DrawDebugClimbEvent(TEXT("Climbing down from lip"), FColor::Green);
+		return;
+	}
+
+	// Only shimmies sideways, as far as the lip goes
+	Acceleration = Right * SideInput * FullInputAcceleration;
+	Velocity = Right * FVector::DotProduct(Velocity, Right);
+	CalcVelocity(DeltaTime, ClimbFriction, false, GetMaxBrakingDeceleration());
+
+	FVector Delta = Velocity * DeltaTime;
+	const double Along = FVector::DotProduct(Delta, Right);
+	FClimbLip Lip;
+	if (!FMath::IsNearlyZero(Along) && !FindClimbLipAt(Center + Delta + Right * (FMath::Sign(Along) * ClimbLipEndMargin), Lip))
+	{
+		Delta = FVector::ZeroVector;
+		Velocity = FVector::ZeroVector;
+		DrawDebugClimbStatus(TEXT("Hanging: the lip ends here"), FColor::Yellow);
+	}
+
+	if (!FindClimbLipAt(Center + Delta, Lip))
+	{
+		LoseClimbGrip(TEXT("Fell: lip gone"));
+		return;
+	}
+
+	ClimbLip = Lip;
+	ClimbSurfaceNormal = FMath::VInterpTo(ClimbSurfaceNormal, Lip.Normal, DeltaTime, ClimbNormalInterpSpeed).GetSafeNormal();
+	const FQuat Rotation = GetClimbFacingRotation(DeltaTime);
+
+	// Towards where it hangs, out from under the lip before rising, so as not to catch on its underside
+	const FVector Snap = (GetClimbLipHangLocation(Lip) - (Center + Delta)).GetClampedToMaxSize(ClimbSnapSpeed * DeltaTime);
+	const FVector Rise = FVector::UpVector * Snap.Z;
+
+	bJustTeleported = false;
+	for (const FVector& Move : { Delta + Snap - Rise, Rise })
+	{
+		FHitResult Hit(1.0f);
+		SafeMoveUpdatedComponent(Move, Rotation, true, Hit);
+		if (Hit.Time < 1.0f)
+		{
+			SlideAlongSurface(Move, 1.0f - Hit.Time, Hit.Normal, Hit, true);
+		}
+	}
+
+	if (!bJustTeleported)
+	{
+		Velocity = ((UpdatedComponent->GetComponentLocation() - Center) / DeltaTime).GetClampedToMaxSize(ClimbSpeed);
+	}
+
+	DrawDebugClimbing();
 }
 
 void UFSCharacterMovementComponent::DrawDebugClimbGrab()
@@ -404,6 +641,7 @@ void UFSCharacterMovementComponent::OnMovementModeChanged(EMovementMode Previous
 			NextClimbAttachTime = GetWorld()->GetTimeSeconds() + ClimbReattachDelay;
 			bInClimbCorner = false;
 			bOnClimbLedgePath = false;
+			bHangingFromLip = false;
 		}
 	}
 
@@ -412,6 +650,14 @@ void UFSCharacterMovementComponent::OnMovementModeChanged(EMovementMode Previous
 	{
 		AirTime = 0.0f;
 		bJumpArc = false;
+	}
+
+	// Stepping off the ground might call for grabbing the edge, which is decided once it's known whether this was a jump
+	bPendingWalkOffGrab = HasValidData() && IsFalling() && PreviousMovementMode == MOVE_Walking;
+	if (bPendingWalkOffGrab)
+	{
+		WalkOffDirection = Velocity.GetSafeNormal2D();
+		WalkOffFloorZ = LastWalkFloorZ;
 	}
 
 	Super::OnMovementModeChanged(PreviousMovementMode, PreviousCustomMode);
@@ -492,6 +738,12 @@ void UFSCharacterMovementComponent::PhysClimbing(float DeltaTime)
 		return;
 	}
 
+	if (bHangingFromLip)
+	{
+		UpdateClimbLipHang(DeltaTime);
+		return;
+	}
+
 	// Checked first because sensing stops finding a surface once the character is past an outside corner
 	if (bInClimbCorner || TryStartClimbCorner())
 	{
@@ -509,6 +761,16 @@ void UFSCharacterMovementComponent::PhysClimbing(float DeltaTime)
 
 	if (!Sense.bBottomHalfOnSurface)
 	{
+		// The surface has run out below the hands, which can still hang from its top if it has one in reach
+		const FVector Center = UpdatedComponent->GetComponentLocation();
+		const double HalfHeight = CharacterOwner->GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
+		FClimbLip Lip;
+		if (FindClimbLip(-ClimbSurfaceNormal, Center.Z - HalfHeight - ClimbLipStepTolerance, Center.Z + HalfHeight, Lip) && TryStartHangingFromLip(Lip, false))
+		{
+			UpdateClimbLipHang(DeltaTime);
+			return;
+		}
+
 		LoseClimbGrip(TEXT("Fell: bottom half off the surface"));
 		return;
 	}
@@ -528,6 +790,18 @@ void UFSCharacterMovementComponent::PhysClimbing(float DeltaTime)
 
 	bJustTeleported = false;
 	const FVector OldLocation = UpdatedComponent->GetComponentLocation();
+
+	// The bottom of the surface, less a margin for the hands to hold, is as low as climbing down goes: the character hangs off its end rather than climbing off it
+	const FVector Up = GetClimbUpDirection();
+	const double UpSpeed = FVector::DotProduct(Velocity, Up);
+	if (UpSpeed < 0.0 && !IsClimbSurfaceAt(OldLocation + Velocity * DeltaTime - Up * ClimbBottomEdgeMargin))
+	{
+		Velocity -= Up * UpSpeed;
+		DrawDebugClimbStatus(TEXT("Bottom of the surface"), FColor::Yellow);
+	}
+
+	GuardClimbGrip(DeltaTime);
+
 	const FVector Delta = Velocity * DeltaTime;
 
 	FHitResult Hit(1.0f);
@@ -590,6 +864,116 @@ FQuat UFSCharacterMovementComponent::GetClimbFacingRotation(float DeltaTime) con
 	return FacingDirection.IsZero()
 		? UpdatedComponent->GetComponentQuat()
 		: FMath::RInterpTo(UpdatedComponent->GetComponentRotation(), FacingDirection.Rotation(), DeltaTime, ClimbRotationInterpSpeed).Quaternion();
+}
+
+bool UFSCharacterMovementComponent::TryGrabFaceWalkedOff()
+{
+	const UCapsuleComponent* Capsule = CharacterOwner->GetCapsuleComponent();
+	const float Radius = Capsule->GetScaledCapsuleRadius();
+	const float HalfHeight = Capsule->GetScaledCapsuleHalfHeight();
+	const FVector Away = WalkOffDirection;
+	if (Away.IsNearlyZero())
+	{
+		return false;
+	}
+
+	const FVector Center = UpdatedComponent->GetComponentLocation();
+
+	// Only a drop deeper than the character is tall, looking down just past the edge
+	FHitResult Below;
+	const FVector DropStart = Center + Away * Radius;
+	ClimbLineTrace(Below, DropStart, FVector(DropStart.X, DropStart.Y, WalkOffFloorZ - HalfHeight * 2.0f));
+	if (Below.bBlockingHit)
+	{
+		return false;
+	}
+
+	// The face it walked off, looking back at it from out past the edge, a little below the top
+	const double HangZ = WalkOffFloorZ - ClimbWalkOffHangDepth;
+	const FVector FaceStart = FVector(Center.X, Center.Y, HangZ) + Away * Radius;
+	FHitResult Face;
+	if (!TraceClimbableSurface(Face, FaceStart, FaceStart - Away * (Radius * 2.0f + ClimbSenseDistance))
+		|| FVector::DotProduct(Face.ImpactNormal, Away) < 0.5)
+	{
+		// Too thin to climb down its face, but its edge can still be hung from
+		FClimbLip Lip;
+		if (TraceClimbLipFace(FaceStart, -Away, Radius * 2.0f + ClimbSenseDistance, WalkOffFloorZ, Lip) && TryStartHangingFromLip(Lip, true))
+		{
+			return true;
+		}
+
+		DrawDebugClimbStatus(TEXT("Can't grab the ledge walked off: no climbable face"), FColor::Orange);
+		return false;
+	}
+
+	// Hanging off the face, with room for the climbing capsule
+	const FVector Normal = Face.ImpactNormal;
+	const FQuat Facing = (-Normal).Rotation().Quaternion();
+	FVector Hang = Face.ImpactPoint + Normal * (Radius + ClimbSurfaceGap);
+	Hang.Z = HangZ;
+
+	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(WalkOffGrab), false, CharacterOwner);
+	FCollisionResponseParams ResponseParams;
+	UpdatedPrimitive->InitSweepCollisionParams(QueryParams, ResponseParams);
+	const FCollisionShape ClimbingShape = FCollisionShape::MakeCapsule(Radius - 1.0f, HalfHeight * ClimbCapsuleHalfHeightScale - 1.0f);
+	if (GetWorld()->OverlapBlockingTestByChannel(Hang, Facing, UpdatedComponent->GetCollisionObjectType(), ClimbingShape, QueryParams, ResponseParams))
+	{
+		DrawDebugClimbStatus(TEXT("Can't grab the ledge walked off: no room"), FColor::Orange);
+		return false;
+	}
+
+	ClimbSurfaceNormal = Normal;
+	SetMovementMode(MOVE_Custom, static_cast<uint8>(EFSCustomMovementMode::Climbing));
+	TeleportWithMeshCatchUp(Hang, Facing);
+	Velocity = FVector::ZeroVector;
+
+	DrawDebugClimbEvent(TEXT("Grabbed the ledge walked off"), FColor::Green);
+	return true;
+}
+
+void UFSCharacterMovementComponent::TeleportWithMeshCatchUp(const FVector& Location, const FQuat& Rotation)
+{
+	USkeletalMeshComponent* Mesh = CharacterOwner->GetMesh();
+	const FTransform Seen = Mesh ? Mesh->GetComponentTransform() : FTransform::Identity;
+
+	UpdatedComponent->SetWorldLocationAndRotation(Location, Rotation, false, nullptr, ETeleportType::TeleportPhysics);
+
+	if (!Mesh || ClimbWalkOffGrabBlendTime <= 0.0f)
+	{
+		return;
+	}
+
+	// Measured from where the mesh belongs, without whatever's left of an earlier catch up
+	Mesh->SetRelativeLocationAndRotation(CharacterOwner->GetBaseTranslationOffset(), CharacterOwner->GetBaseRotationOffset());
+	const FTransform Belongs = Mesh->GetComponentTransform();
+
+	MeshCatchUpOffset = Seen.GetLocation() - Belongs.GetLocation();
+	MeshCatchUpRotation = Seen.GetRotation() * Belongs.GetRotation().Inverse();
+	MeshCatchUpTimeLeft = ClimbWalkOffGrabBlendTime;
+	UpdateMeshCatchUp(0.0f);
+}
+
+void UFSCharacterMovementComponent::UpdateMeshCatchUp(float DeltaTime)
+{
+	USkeletalMeshComponent* Mesh = CharacterOwner->GetMesh();
+	if (MeshCatchUpTimeLeft <= 0.0f || !Mesh)
+	{
+		return;
+	}
+
+	MeshCatchUpTimeLeft = FMath::Max(MeshCatchUpTimeLeft - DeltaTime, 0.0f);
+
+	// Where it belongs is wherever the capsule has since moved to, so the mesh follows that as well as catching up
+	Mesh->SetRelativeLocationAndRotation(CharacterOwner->GetBaseTranslationOffset(), CharacterOwner->GetBaseRotationOffset());
+	if (MeshCatchUpTimeLeft <= 0.0f)
+	{
+		return;
+	}
+
+	// Eases in and out, from all of the offset down to none of it
+	const float Remaining = FMath::SmoothStep(0.0f, 1.0f, MeshCatchUpTimeLeft / ClimbWalkOffGrabBlendTime);
+	const FTransform Belongs = Mesh->GetComponentTransform();
+	Mesh->SetWorldLocationAndRotation(Belongs.GetLocation() + MeshCatchUpOffset * Remaining, FQuat::Slerp(FQuat::Identity, MeshCatchUpRotation, Remaining) * Belongs.GetRotation());
 }
 
 bool UFSCharacterMovementComponent::ClimbLineTrace(FHitResult& OutHit, const FVector& Start, const FVector& End) const
@@ -754,8 +1138,35 @@ void UFSCharacterMovementComponent::UpdateClimbCorner(float DeltaTime)
 	const float Input = FullInputAcceleration > 0.0f
 		? FMath::Clamp(static_cast<float>(FVector::DotProduct(Acceleration, ClimbCorner.GetMoveDirection(ClimbCorner.Alpha)) / FullInputAcceleration), -1.0f, 1.0f)
 		: 0.0f;
-	ClimbCorner.Alpha = FMath::Clamp(ClimbCorner.Alpha + Input * DeltaTime / ClimbCorner.Duration, 0.0f, 1.0f);
+	const float UpInput = FullInputAcceleration > 0.0f
+		? FMath::Clamp(static_cast<float>(FVector::DotProduct(Acceleration, GetClimbUpDirection()) / FullInputAcceleration), -1.0f, 1.0f)
+		: 0.0f;
+
+	// Up or down drifts onto the nearer surface, where climbing carries on as usual
+	const float VeerDirection = ClimbCorner.Alpha < 0.5f ? -1.0f : 1.0f;
+	const float Veer = VeerDirection * FMath::Abs(UpInput) * ClimbCornerVeer;
+	ClimbCorner.Alpha = FMath::Clamp(ClimbCorner.Alpha + (Input + Veer) * DeltaTime / ClimbCorner.Duration, 0.0f, 1.0f);
 	ClimbSurfaceNormal = ClimbCorner.GetNormal(ClimbCorner.Alpha);
+
+	// And moves along the corner's edge, as long as there's still corner to hold there
+	if (!FMath::IsNearlyZero(UpInput))
+	{
+		const FVector Rise = FVector::UpVector * (UpInput * GetMaxSpeed() * DeltaTime);
+		const FVector Raised = ClimbCorner.GetLocation(ClimbCorner.Alpha) + Rise;
+		const float Reach = CharacterOwner->GetCapsuleComponent()->GetScaledCapsuleRadius() + ClimbSurfaceGap + ClimbSenseDistance;
+
+		FHitResult Hit;
+		if (ClimbLineTrace(Hit, Raised, Raised - ClimbSurfaceNormal * Reach))
+		{
+			ClimbCorner.StartLocation += Rise;
+			ClimbCorner.EndLocation += Rise;
+			ClimbCorner.Pivot += Rise;
+		}
+		else
+		{
+			DrawDebugClimbStatus(TEXT("Corner ends here: veering onto a surface"), FColor::Yellow);
+		}
+	}
 
 	bJustTeleported = false;
 	const FVector OldLocation = UpdatedComponent->GetComponentLocation();
@@ -766,7 +1177,7 @@ void UFSCharacterMovementComponent::UpdateClimbCorner(float DeltaTime)
 	Velocity = ((UpdatedComponent->GetComponentLocation() - OldLocation) / DeltaTime).GetClampedToMaxSize(ClimbSpeed);
 
 	// All the way around is on the new surface, and all the way back is on the one it came from
-	if (ClimbCorner.Alpha >= 1.0f || (ClimbCorner.Alpha <= 0.0f && Input < 0.0f))
+	if (ClimbCorner.Alpha >= 1.0f || (ClimbCorner.Alpha <= 0.0f && Input + Veer < 0.0f))
 	{
 		bInClimbCorner = false;
 	}
@@ -921,10 +1332,14 @@ void UFSCharacterMovementComponent::DrawDebugClimbing() const
 
 UFSCharacterMovementComponent::FClimbSense UFSCharacterMovementComponent::SenseClimbSurface() const
 {
+	return SenseClimbSurfaceAt(UpdatedComponent->GetComponentLocation(), true);
+}
+
+UFSCharacterMovementComponent::FClimbSense UFSCharacterMovementComponent::SenseClimbSurfaceAt(const FVector& Center, bool bDrawDebug) const
+{
 	float Radius, HalfHeight;
 	CharacterOwner->GetCapsuleComponent()->GetScaledCapsuleSize(Radius, HalfHeight);
 
-	const FVector Center = UpdatedComponent->GetComponentLocation();
 	const FVector Right = GetClimbRightDirection() * Radius;
 	const FVector Up = GetClimbUpDirection() * HalfHeight;
 
@@ -968,7 +1383,7 @@ UFSCharacterMovementComponent::FClimbSense UFSCharacterMovementComponent::SenseC
 		}
 
 #if ENABLE_DRAW_DEBUG
-		if (bDrawDebugClimb)
+		if (bDrawDebugClimb && bDrawDebug)
 		{
 			DrawDebugLine(GetWorld(), Start, Hit.bBlockingHit ? Hit.ImpactPoint : End, bUsable ? FColor::Green : FColor::Red);
 		}
@@ -978,6 +1393,45 @@ UFSCharacterMovementComponent::FClimbSense UFSCharacterMovementComponent::SenseC
 	Sense.Normal = NormalSum.GetSafeNormal();
 	Sense.bTopHalfAboveLedge = Sense.bBottomHalfOnSurface && !bSurfaceAboveBottom;
 	return Sense;
+}
+
+void UFSCharacterMovementComponent::GuardClimbGrip(float DeltaTime)
+{
+	const FVector Up = GetClimbUpDirection();
+	if (Velocity.IsNearlyZero() || FVector::DotProduct(Velocity, Up) > UE_KINDA_SMALL_NUMBER)
+	{
+		return;
+	}
+
+	const FVector Center = UpdatedComponent->GetComponentLocation();
+	if (SenseClimbSurfaceAt(Center + Velocity * DeltaTime, false).bBottomHalfOnSurface)
+	{
+		return;
+	}
+
+	// Going off the top edge of a surface onto a lip to hang from is still allowed
+	const float HalfHeight = CharacterOwner->GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
+	FClimbLip Lip;
+	if (FindClimbLip(-ClimbSurfaceNormal, Center.Z - HalfHeight - ClimbLipStepTolerance, Center.Z + HalfHeight, Lip))
+	{
+		return;
+	}
+
+	// Without the sideways part if that's what takes it off, otherwise not at all
+	const FVector Right = GetClimbRightDirection();
+	const FVector WithoutSideways = Velocity - Right * FVector::DotProduct(Velocity, Right);
+	Velocity = !WithoutSideways.IsNearlyZero() && SenseClimbSurfaceAt(Center + WithoutSideways * DeltaTime, false).bBottomHalfOnSurface ? WithoutSideways : FVector::ZeroVector;
+	DrawDebugClimbStatus(TEXT("Edge of the surface: holding on"), FColor::Yellow);
+}
+
+bool UFSCharacterMovementComponent::IsClimbSurfaceAt(const FVector& Center) const
+{
+	// The same as the sensing trace at the capsule's center
+	const float HalfHeight = CharacterOwner->GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
+	FHitResult Hit;
+	return ClimbLineTrace(Hit, Center, Center - ClimbSurfaceNormal * (HalfHeight + ClimbSenseDistance))
+		&& IsClimbableNormal(Hit.ImpactNormal)
+		&& FVector::DotProduct(Hit.ImpactNormal, ClimbSurfaceNormal) > 0.0;
 }
 
 bool UFSCharacterMovementComponent::SnapToClimbSurface(float DeltaTime, const FQuat& Rotation)
@@ -1001,7 +1455,9 @@ bool UFSCharacterMovementComponent::SnapToClimbSurface(float DeltaTime, const FQ
 		return true;
 	}
 
-	if (!IsClimbableHit(SurfaceHit))
+	// Whether what's there can be climbed is up to sensing, which has already checked. This only holds the gap, which can be from something
+	// that can't be climbed flush with the surface, such as when the capsule hangs over the surface's edge.
+	if (!SurfaceHit.bBlockingHit)
 	{
 		return false;
 	}
@@ -1022,6 +1478,20 @@ void UFSCharacterMovementComponent::TickComponent(float DeltaTime, ELevelTick Ti
 	if (!HasValidData() || !CharacterOwner->GetMesh())
 	{
 		return;
+	}
+
+	// By now a jump would have said so
+	bool bGrabbedFaceWalkedOff = false;
+	if (bPendingWalkOffGrab)
+	{
+		bPendingWalkOffGrab = false;
+		bGrabbedFaceWalkedOff = bGrabWhenWalkingOffLedges && IsFalling() && !bJumpArc && TryGrabFaceWalkedOff();
+	}
+
+	// Not on the tick that grabbed, which has just left the mesh where it was seen last
+	if (!bGrabbedFaceWalkedOff)
+	{
+		UpdateMeshCatchUp(DeltaTime);
 	}
 
 	UpdateTrajectory(DeltaTime);

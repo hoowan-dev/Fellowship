@@ -134,6 +134,44 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Movement: Climbing", meta = (ClampMin = "1.0", UIMin = "1.0", ForceUnits = "deg/s"))
 	float ClimbCornerTurnRate = 240.0f;
 
+	// Climbing up or down while partway round a corner still moves the character, and veers it onto whichever of the corner's two surfaces is nearer.
+	// How quickly it veers, as a fraction of how quickly full sideways input goes round. Once on a surface, it climbs that as usual.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Movement: Climbing", meta = (ClampMin = "0.0", UIMin = "0.0"))
+	float ClimbCornerVeer = 0.75f;
+
+	// Whether walking off a ledge with a drop below deeper than the character is tall grabs the face it walked off, rather than falling.
+	// Jumping off never does.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Movement: Climbing")
+	bool bGrabWhenWalkingOffLedges = true;
+
+	// How far below the top of a ledge the character's middle hangs after grabbing the face it walked off. Less than the climbing capsule's half height,
+	// so its top half is still on the face; climbing up from there gets back over the ledge.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Movement: Climbing", meta = (ClampMin = "0.0", UIMin = "0.0", ForceUnits = "cm"))
+	float ClimbWalkOffHangDepth = 30.0f;
+
+	// How long the character's mesh takes to catch up after grabbing the ledge it walked off. The grab itself is immediate: the capsule
+	// is in place and climbing straight away, and only what's seen moves there over this time. 0 snaps the mesh there too.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Movement: Climbing", meta = (ClampMin = "0.0", UIMin = "0.0", ForceUnits = "s"))
+	float ClimbWalkOffGrabBlendTime = 0.3f;
+
+	// How far below the top of a lip the character's middle hangs while hanging from it by the hands. A lip is the top edge of anything too short
+	// to climb the face of, such as a beam, slab or sill with nothing below it to put feet on.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Movement: Climbing", meta = (ClampMin = "0.0", UIMin = "0.0", ForceUnits = "cm"))
+	float ClimbLipHangDepth = 40.0f;
+
+	// How far above the top of the capsule the hands can reach to grab a lip from the air.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Movement: Climbing", meta = (ClampMin = "0.0", UIMin = "0.0", ForceUnits = "cm"))
+	float ClimbLipReachAbove = 30.0f;
+
+	// How far a lip has to carry on past the character's middle for it to shimmy that way. Stops it at the lip's ends rather than letting go.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Movement: Climbing", meta = (ClampMin = "0.0", UIMin = "0.0", ForceUnits = "cm"))
+	float ClimbLipEndMargin = 20.0f;
+
+	// Climbing down stops at the bottom of a surface rather than climbing off it. This is how far the surface has to carry on below the character's
+	// middle for it to go lower, which keeps the hands, a little below the middle, on the surface with room to step instead of past its edge.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Movement: Climbing", meta = (ClampMin = "0.0", UIMin = "0.0", ForceUnits = "cm"))
+	float ClimbBottomEdgeMargin = 25.0f;
+
 	// How close the character's standing feet have to get to walkable floor to climb off onto it.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Character Movement: Climbing", meta = (ClampMin = "0.0", UIMin = "0.0", ForceUnits = "cm"))
 	float ClimbDismountFloorDistance = 5.0f;
@@ -241,6 +279,13 @@ public:
 	// How far along its path over a ledge the character is, from 0 to 1. Only meaningful while climbing onto a ledge.
 	float GetClimbLedgeProgress() const;
 
+	// Whether the character is hanging by its hands from a lip, with nothing to put its feet on. Sideways input shimmies along it and up climbs onto it.
+	UFUNCTION(BlueprintPure, Category = "Character Movement: Climbing")
+	bool IsHangingFromLip() const { return IsClimbing() && bHangingFromLip; }
+
+	// The point on the lip's top edge in front of the character. Only meaningful while hanging from a lip.
+	FVector GetClimbLipEdge() const { return ClimbLip.Edge; }
+
 	// Finds what the character could grab right now: a climbable surface in reach while it's in the air, that input is pushing it into or with no input, that it's facing
 	bool FindClimbGrab(FHitResult& OutHit);
 
@@ -300,6 +345,16 @@ private:
 
 	FClimbSense SenseClimbSurface() const;
 
+	// What sensing would find with the capsule's center here, without drawing it
+	FClimbSense SenseClimbSurfaceAt(const FVector& Center, bool bDrawDebug) const;
+
+	// Drops whatever part of a sideways or downward climbing move would take the capsule's bottom half off the surface, so the character
+	// keeps hold at the surface's edges and corners rather than climbing off them. Moves with any upward part are left alone.
+	void GuardClimbGrip(float DeltaTime);
+
+	// Whether the climbed surface carries on behind this point, as the sensing trace at the capsule's center would find it
+	bool IsClimbSurfaceAt(const FVector& Center) const;
+
 	// Moves towards or away from the surface to hold the gap. Returns false if the surface has fallen out of reach.
 	bool SnapToClimbSurface(float DeltaTime, const FQuat& Rotation);
 
@@ -308,6 +363,50 @@ private:
 
 	// Whether the character's feet have come back down to the floor since climbing away from it
 	bool ShouldDismountOntoFloor();
+
+	// Grabs the face of the ledge the character just walked off, if the drop is deeper than the character is tall and the face can be climbed.
+	// Returns false, changing nothing, otherwise.
+	bool TryGrabFaceWalkedOff();
+
+	// The top edge of something to hang from
+	struct FClimbLip
+	{
+		// On the face, level with the top
+		FVector Edge = FVector::ZeroVector;
+
+		// Out of the face, level
+		FVector Normal = FVector::ZeroVector;
+	};
+
+	// FindClimbGrab, also finding lips to hang from when there's no surface to climb. OutLip's normal is left as it was for a surface.
+	bool FindClimbGrab(FHitResult& OutHit, FClimbLip* OutLip);
+
+	// Looks down onto something's top along a line. Only a top that could be stood on counts.
+	bool TraceClimbLipTop(const FVector& Start, const FVector& End, double& OutTopZ) const;
+
+	// Looks horizontally for the face below a top found at TopZ, which has to face back along the trace
+	bool TraceClimbLipFace(const FVector& From, const FVector& Direction, double Distance, double TopZ, FClimbLip& OutLip) const;
+
+	// A lip in front of the character, with its top between these heights
+	bool FindClimbLip(const FVector& Direction, double MinTopZ, double MaxTopZ, FClimbLip& OutLip) const;
+
+	// Where the character's middle hangs from a lip
+	FVector GetClimbLipHangLocation(const FClimbLip& Lip) const;
+
+	// Starts hanging from the lip if the climbing capsule fits there, climbing if it isn't already. With bTeleport it's moved there straight away;
+	// otherwise it gets there at Climb Snap Speed.
+	bool TryStartHangingFromLip(const FClimbLip& Lip, bool bTeleport);
+
+	// The lip carrying on from the one being hung from, in front of this point
+	bool FindClimbLipAt(const FVector& Center, FClimbLip& OutLip) const;
+
+	void UpdateClimbLipHang(float DeltaTime);
+
+	// Moves the capsule straight there, leaving the mesh where it was to catch up over Climb Walk Off Grab Blend Time
+	void TeleportWithMeshCatchUp(const FVector& Location, const FQuat& Rotation);
+
+	// Moves the mesh on from where it was left towards where it belongs on the capsule
+	void UpdateMeshCatchUp(float DeltaTime);
 
 	// A path around a corner from one surface onto another, fixed when the character reaches the corner. Sideways input moves it along the path either way.
 	struct FClimbCorner
@@ -430,8 +529,24 @@ private:
 	FClimbCorner ClimbCorner;
 	bool bInClimbCorner = false;
 
+	// Set when walking turns into falling, and checked once the move that did it is over, when it's known whether it was a jump
+	bool bPendingWalkOffGrab = false;
+	FVector WalkOffDirection = FVector::ZeroVector;
+	double WalkOffFloorZ = 0.0;
+
+	// The height of the floor where the character last touched it walking, which is the top of a ledge it walks off
+	double LastWalkFloorZ = 0.0;
+
 	FClimbLedgePath ClimbLedgePath;
 	bool bOnClimbLedgePath = false;
+
+	FClimbLip ClimbLip;
+	bool bHangingFromLip = false;
+
+	// How far the mesh still is from where it belongs, in world space, at the start of catching up, and how long catching up has left
+	FVector MeshCatchUpOffset = FVector::ZeroVector;
+	FQuat MeshCatchUpRotation = FQuat::Identity;
+	float MeshCatchUpTimeLeft = 0.0f;
 
 	// Whether the feet have been far enough from the floor since grabbing on for reaching it to climb off
 	bool bClimbDismountArmed = false;

@@ -63,6 +63,7 @@ void UFSClimbIKComponent::TickComponent(float DeltaTime, ELevelTick TickType, FA
 
 	const bool bGripping = Movement && Movement->IsClimbing();
 	const bool bOnLedge = bGripping && Movement->IsClimbingOntoLedge();
+	const bool bHangingFromLip = bGripping && Movement->IsHangingFromLip();
 
 	Alpha = FMath::FInterpConstantTo(Alpha, bGripping ? 1.0f : 0.0f, DeltaTime, 1.0f / BlendTime);
 
@@ -72,7 +73,13 @@ void UFSClimbIKComponent::TickComponent(float DeltaTime, ELevelTick TickType, FA
 		{
 			if (bOnLedge && !bWasOnLedge && Limb.bGripsLedge)
 			{
-				GripLedge(Limb, *Movement);
+				Limb.bHolding = GripLedge(Limb, *Movement, Movement->GetClimbLedgeEdge(), LedgeHandInset, true);
+			}
+
+			// From the surface it was on, or from nowhere if it grabbed the lip from the air
+			if (bHangingFromLip && !bWasHangingFromLip && Limb.bGripsLedge)
+			{
+				Limb.bHolding = GripLip(Limb, *Movement, Limb.bHolding);
 			}
 
 			UpdateLimb(Limb, *Movement, DeltaTime);
@@ -101,6 +108,7 @@ void UFSClimbIKComponent::TickComponent(float DeltaTime, ELevelTick TickType, FA
 	}
 
 	bWasOnLedge = bOnLedge;
+	bWasHangingFromLip = bHangingFromLip;
 }
 
 void UFSClimbIKComponent::UpdateLedgeBend(const UFSCharacterMovementComponent* Movement, float DeltaTime)
@@ -147,6 +155,9 @@ void UFSClimbIKComponent::UpdateLimb(FFSClimbLimb& Limb, const UFSCharacterMovem
 {
 	const bool bOnLedge = Movement.IsClimbingOntoLedge();
 
+	// Hanging from a lip, the hands shuffle along its top, and the feet dangle unless there's something below to put them on
+	const bool bGripsLip = Limb.bGripsLedge && Movement.IsHangingFromLip();
+
 	if (Limb.bStepping)
 	{
 		Limb.StepAlpha = FMath::Min(Limb.StepAlpha + DeltaTime / StepDuration, 1.0f);
@@ -166,18 +177,21 @@ void UFSClimbIKComponent::UpdateLimb(FFSClimbLimb& Limb, const UFSCharacterMovem
 		}
 		else if (!Limb.bHolding)
 		{
-			Limb.bHolding = MoveLimbToSurface(Limb, Movement, false);
+			Limb.bHolding = bGripsLip ? GripLip(Limb, Movement, false) : MoveLimbToSurface(Limb, Movement, false);
 		}
 		else
 		{
 			const FVector ToLimb = Limb.Position - GetOwner()->GetActorTransform().TransformPosition(Limb.RestOffset);
 			const bool bOutOfReach = ToLimb.SizeSquared() > FMath::Square(MaxReach);
-			const bool bNeedsStep = FVector::VectorPlaneProject(ToLimb, Limb.SurfaceNormal).SizeSquared() > FMath::Square(StepDistance);
+			// On top of a lip the hand is always out in front of the body, so only how far it's been left behind sideways counts
+			const bool bNeedsStep = bGripsLip
+				? FMath::Abs(FVector::DotProduct(ToLimb, Movement.GetClimbRightDirection())) > StepDistance
+				: FVector::VectorPlaneProject(ToLimb, Limb.SurfaceNormal).SizeSquared() > FMath::Square(StepDistance);
 			bNeedsToMove = bOutOfReach || bNeedsStep;
 
 			if (bOutOfReach || (bNeedsStep && IsStepGroupFree(Limb.StepGroup)))
 			{
-				Limb.bHolding = MoveLimbToSurface(Limb, Movement, true);
+				Limb.bHolding = bGripsLip ? GripLip(Limb, Movement, true) : MoveLimbToSurface(Limb, Movement, true);
 			}
 		}
 	}
@@ -214,28 +228,44 @@ float UFSClimbIKComponent::GetLimbTargetWeight(const FFSClimbLimb& Limb, const U
 	return 1.0f;
 }
 
-void UFSClimbIKComponent::GripLedge(FFSClimbLimb& Limb, const UFSCharacterMovementComponent& Movement) const
+bool UFSClimbIKComponent::GripLip(FFSClimbLimb& Limb, const UFSCharacterMovementComponent& Movement, bool bStep) const
+{
+	return GripLedge(Limb, Movement, Movement.GetClimbLipEdge(), LipHandInset, bStep);
+}
+
+bool UFSClimbIKComponent::GripLedge(FFSClimbLimb& Limb, const UFSCharacterMovementComponent& Movement, const FVector& Edge, float Inset, bool bStep) const
 {
 	const FVector Anchor = GetOwner()->GetActorTransform().TransformPosition(Limb.RestOffset);
 	const FVector Into = (-Movement.GetClimbSurfaceNormal()).GetSafeNormal2D();
 	const FVector Right = Movement.GetClimbRightDirection();
-	const FVector Edge = Movement.GetClimbLedgeEdge();
 
 	// Level with where the limb is across the ledge, a little way in from the edge, looking down onto the top from above any lip
 	const double Across = FVector::DotProduct(Anchor - Edge, Right);
-	const FVector Above = Edge + Right * Across + Into * LedgeHandInset + FVector::UpVector * Movement.MaxStepHeight;
+	const FVector Above = Edge + Right * Across + Into * Inset + FVector::UpVector * Movement.MaxStepHeight;
 
 	FHitResult Hit;
-	Limb.bHolding = Movement.TraceLedgeSurface(Hit, Above, Above - FVector::UpVector * (Movement.MaxStepHeight * 2.0f)) && !Hit.bStartPenetrating;
-	Limb.bStepping = Limb.bHolding;
-
-	if (Limb.bHolding)
+	if (!Movement.TraceLedgeSurface(Hit, Above, Above - FVector::UpVector * (Movement.MaxStepHeight * 2.0f)) || Hit.bStartPenetrating)
 	{
-		Limb.SurfaceNormal = Hit.ImpactNormal;
+		Limb.bStepping = false;
+		return false;
+	}
+
+	const FVector Target = Hit.ImpactPoint + Hit.ImpactNormal * Limb.SurfaceOffset;
+	Limb.SurfaceNormal = Hit.ImpactNormal;
+	Limb.bStepping = bStep;
+
+	if (bStep)
+	{
 		Limb.StepAlpha = 0.0f;
 		Limb.StepStart = Limb.Position;
-		Limb.StepEnd = Hit.ImpactPoint + Hit.ImpactNormal * Limb.SurfaceOffset;
+		Limb.StepEnd = Target;
 	}
+	else
+	{
+		Limb.Position = Target;
+		Limb.StepEnd = Target;
+	}
+	return true;
 }
 
 bool UFSClimbIKComponent::MoveLimbToSurface(FFSClimbLimb& Limb, const UFSCharacterMovementComponent& Movement, bool bStep) const
