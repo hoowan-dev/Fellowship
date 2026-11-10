@@ -73,6 +73,7 @@ void UFSCharacterAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 
 	ClimbIKAlpha = ClimbIK ? ClimbIK->GetAlpha() : 0.0f;
 	ClimbLedgeBendAlpha = ClimbIK ? ClimbIK->GetLedgeBendAlpha() : 0.0f;
+	ClimbStandAlpha = ClimbIK ? ClimbIK->GetLedgeStandAlpha() : 0.0f;
 
 	if (MovementComponent)
 	{

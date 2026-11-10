@@ -103,21 +103,30 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Climb IK|Ledges", meta = (ClampMin = "0.0", ForceUnits = "cm"))
 	float LedgeHandInset = 10.0f;
 
+	// How far along the path over a ledge, from 0 to 1, the climbing animation starts blending into standing (Get Ledge Stand Alpha), which brings the head up to face forward.
+	UPROPERTY(EditAnywhere, Category = "Climb IK|Ledges", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float LedgeStandStart = 0.45f;
+
+	// How far along the path over a ledge, from 0 to 1, it's fully standing. Before Ledge Straighten End, so that the head's last move is from the bend's low angle up to facing forward.
+	UPROPERTY(EditAnywhere, Category = "Climb IK|Ledges", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float LedgeStandEnd = 0.8f;
+
 	// How far along the path over a ledge, from 0 to 1, the hands start moving from the ledge to the character's sides.
 	UPROPERTY(EditAnywhere, Category = "Climb IK|Ledges", meta = (ClampMin = "0.0", ClampMax = "1.0"))
 	float LedgeArmsToSidesStart = 0.5f;
 
 	// How far along the path over a ledge, from 0 to 1, the hands have reached the character's sides, where they stay until it's standing.
 	UPROPERTY(EditAnywhere, Category = "Climb IK|Ledges", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-	float LedgeArmsToSidesEnd = 0.6f;
+	float LedgeArmsToSidesEnd = 0.85f;
 
 	// Where the left hand goes at the character's side, relative to the character. The right hand mirrors it.
+	// Where the unarmed idle holds it, so that letting go of the IK once standing doesn't move it.
 	UPROPERTY(EditAnywhere, Category = "Climb IK|Ledges")
-	FVector LedgeArmsSideOffset = FVector(5.0, -30.0, -50.0);
+	FVector LedgeArmsSideOffset = FVector(4.0, -30.0, -56.0);
 
 	// How far along the path over a ledge, from 0 to 1, the spine starts straightening.
 	UPROPERTY(EditAnywhere, Category = "Climb IK|Ledges", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-	float LedgeStraightenStart = 0.7f;
+	float LedgeStraightenStart = 0.6f;
 
 	// How far along the path over a ledge, from 0 to 1, the spine is straight, ready to stand up.
 	UPROPERTY(EditAnywhere, Category = "Climb IK|Ledges", meta = (ClampMin = "0.0", ClampMax = "1.0"))
@@ -158,6 +167,10 @@ public:
 	// How strongly the spine bends towards the hands, from 0 to 1. For the alpha of the IK Rig node for the ledge bend.
 	float GetLedgeBendAlpha() const { return LedgeBendAlpha; }
 
+	// How far the climbing animation has blended into standing while getting over a ledge, from 0 to 1. It stays at 1 once standing,
+	// so that leaving the climbing state blends from the standing pose, and goes back to 0 on the next grab.
+	float GetLedgeStandAlpha() const { return LedgeStandAlpha; }
+
 private:
 	void UpdateLimb(FFSClimbLimb& Limb, const UFSCharacterMovementComponent& Movement, float DeltaTime);
 
@@ -189,6 +202,8 @@ private:
 	bool bWasOnLedge = false;
 
 	float LedgeBendAlpha = 0.0f;
+
+	float LedgeStandAlpha = 0.0f;
 
 	// Where the spine's being bent towards
 	FVector LedgeBendPosition = FVector::ZeroVector;

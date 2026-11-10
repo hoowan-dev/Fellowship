@@ -89,6 +89,17 @@ void UFSClimbIKComponent::TickComponent(float DeltaTime, ELevelTick TickType, FA
 
 	UpdateLedgeBend(bOnLedge ? Movement : nullptr, DeltaTime);
 
+	// Kept once standing, until the next grab, while the climbing state blends out
+	if (bOnLedge)
+	{
+		const float Stand = FMath::GetMappedRangeValueClamped(FVector2f(LedgeStandStart, LedgeStandEnd), FVector2f(0.0f, 1.0f), Movement->GetClimbLedgeProgress());
+		LedgeStandAlpha = FMath::SmoothStep(0.0f, 1.0f, Stand);
+	}
+	else if (bGripping)
+	{
+		LedgeStandAlpha = 0.0f;
+	}
+
 	bWasOnLedge = bOnLedge;
 }
 

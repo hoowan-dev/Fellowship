@@ -680,10 +680,15 @@ bool FFSClimbIKLedgeTest::RunTest(const FString& Parameters)
 
 	TestEqual(TEXT("The spine bends once getting over the ledge"), Test.ClimbIK()->GetLedgeBendAlpha(), 1.0f);
 
+	TestEqual(TEXT("It starts out in the climbing pose"), Test.ClimbIK()->GetLedgeStandAlpha(), 0.0f);
+	TestTrue(TEXT("Which is fully standing before the spine is straight, so the head's last move is up to facing forward"), Test.ClimbIK()->LedgeStandEnd <= Test.ClimbIK()->LedgeStraightenEnd);
+
 	bool bFootReachedTop = false;
 	bool bHandsHeldLedge = false;
 	bool bHandsReachedSides = false;
 	bool bBentForward = false;
+	bool bStood = false;
+	float PreviousStand = 0.0f;
 	double PreviousAngle = -1.0;
 	for (int32 Frame = 0; Frame < 300 && Test.Movement->IsClimbing(); ++Frame)
 	{
@@ -748,6 +753,17 @@ bool FFSClimbIKLedgeTest::RunTest(const FString& Parameters)
 			{
 				TestEqual(TEXT("And the spine stays bent"), Test.ClimbIK()->GetLedgeBendAlpha(), 1.0f);
 			}
+
+			// The climbing pose turns steadily into standing, without jumping or going back
+			const float Stand = Test.ClimbIK()->GetLedgeStandAlpha();
+			TestTrue(TEXT("Standing only ever goes one way"), Stand >= PreviousStand);
+			TestTrue(TEXT("And doesn't jump"), Stand - PreviousStand < 0.1f);
+			if (Test.Movement->GetClimbLedgeProgress() < Test.ClimbIK()->LedgeStandStart)
+			{
+				TestEqual(TEXT("It's still the climbing pose while pulling up"), Stand, 0.0f);
+			}
+			bStood |= Test.Movement->GetClimbLedgeProgress() >= Test.ClimbIK()->LedgeStandEnd && FMath::IsNearlyEqual(Stand, 1.0f);
+			PreviousStand = Stand;
 		}
 
 		for (const FFSClimbLimb& Limb : Test.ClimbIK()->Limbs)
@@ -771,10 +787,12 @@ bool FFSClimbIKLedgeTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("The spine has straightened by the time it's standing"), Test.ClimbIK()->GetLedgeBendAlpha(), 0.0f, 0.2f);
 	TestTrue(TEXT("The hands held the ledge"), bHandsHeldLedge);
 	TestTrue(TEXT("Then went to the character's sides"), bHandsReachedSides);
+	TestTrue(TEXT("And it was standing by the end"), bStood);
 
 	Test.Step(0.5f, FVector::ZeroVector);
 	TestEqual(TEXT("Stops applying once on top"), Test.ClimbIK()->GetAlpha(), 0.0f);
 	TestEqual(TEXT("Stops bending once on top"), Test.ClimbIK()->GetLedgeBendAlpha(), 0.0f);
+	TestEqual(TEXT("And stays standing while the climbing state blends out"), Test.ClimbIK()->GetLedgeStandAlpha(), 1.0f);
 	return true;
 }
 

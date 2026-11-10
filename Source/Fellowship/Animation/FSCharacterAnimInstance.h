@@ -68,6 +68,11 @@ class FELLOWSHIP_API UFSCharacterAnimInstance : public UAnimInstance
 	UPROPERTY(Transient, BlueprintReadOnly, Category = "Climbing", meta = (AllowPrivateAccess = "true"))
 	float ClimbLedgeBendAlpha = 0.0f;
 
+	// How far the climbing pose has turned into standing while getting over a ledge, from 0 to 1, and still 1 after it until the next grab.
+	// The Climbing state blends its animation into the unarmed idle by this, which brings the head, arms and back to how the character stands.
+	UPROPERTY(Transient, BlueprintReadOnly, Category = "Climbing", meta = (AllowPrivateAccess = "true"))
+	float ClimbStandAlpha = 0.0f;
+
 	UPROPERTY(Transient, BlueprintReadOnly, Category = "Equipment", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UAnimSequenceBase> JumpStart;
 
