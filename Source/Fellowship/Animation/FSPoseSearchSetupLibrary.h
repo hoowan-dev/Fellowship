@@ -29,4 +29,8 @@ public:
 	// or INDEX_NONE, changing nothing, if there's no such template or this isn't the editor.
 	UFUNCTION(BlueprintCallable, Category = "Pose Search Setup")
 	static int32 AddDatabaseAnimation(UPoseSearchDatabase* Database, UObject* Animation, int32 TemplateIndex);
+
+	// Turns an entry on or off for searching, keeping its other settings. Returns false, changing nothing, if there's no such entry or this isn't the editor.
+	UFUNCTION(BlueprintCallable, Category = "Pose Search Setup")
+	static bool SetDatabaseAnimationEnabled(UPoseSearchDatabase* Database, int32 Index, bool bEnabled);
 };

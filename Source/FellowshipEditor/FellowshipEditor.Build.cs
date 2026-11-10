@@ -11,7 +11,9 @@ public class FellowshipEditor : ModuleRules
 		PrivateDependencyModuleNames.AddRange(new string[]
 		{
 			"AdvancedPreviewScene",
+			"AnimGraph",
 			"AssetDefinition",
+			"BlueprintGraph",
 			"Core",
 			"CoreUObject",
 			"Engine",

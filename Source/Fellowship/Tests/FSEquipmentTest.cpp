@@ -1046,6 +1046,25 @@ bool FFSEquipmentConsumableTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSStanceIdleDatabaseTest, "Fellowship.Equipment.Stance.IdlesOnlyPlayStandingStill", EquipmentTestFlags)
+
+bool FFSStanceIdleDatabaseTest::RunTest(const FString& Parameters)
+{
+	UFSWeaponStance* Stance = NewObject<UFSWeaponStance>();
+	UPoseSearchDatabase* Moving = NewObject<UPoseSearchDatabase>();
+	UPoseSearchDatabase* Idle = NewObject<UPoseSearchDatabase>();
+	Stance->LocomotionDatabase = Moving;
+
+	TestTrue(TEXT("Without an idle database, standing still searches the locomotion one"), Stance->GetDatabase(true) == Moving);
+	TestTrue(TEXT("As does moving"), Stance->GetDatabase(false) == Moving);
+
+	Stance->IdleDatabase = Idle;
+	TestTrue(TEXT("With one, standing still searches it"), Stance->GetDatabase(true) == Idle);
+	TestTrue(TEXT("And moving, however slowly, never does"), Stance->GetDatabase(false) == Moving);
+
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFSEquipmentAssetsTest,"Fellowship.Equipment.Assets.DrawingASwordSwitchesTheCharactersAnimation", EquipmentTestFlags)
 
 // Uses the real character and items, because a stance only works once all of its assets agree
@@ -1055,9 +1074,10 @@ bool FFSEquipmentAssetsTest::RunTest(const FString& Parameters)
 
 	UClass* CharacterClass = LoadClass<AFSCharacter>(nullptr, TEXT("/Game/Blueprints/Character/BP_FSCharacter.BP_FSCharacter_C"));
 	UFSItemDefinition* Stick = LoadObject<UFSItemDefinition>(nullptr, TEXT("/Game/Data/Items/Weapon/OHS/DA_Item_Weapon_OHS_1_Stick.DA_Item_Weapon_OHS_1_Stick"));
-	const UPoseSearchDatabase* Unarmed = LoadObject<UPoseSearchDatabase>(nullptr, TEXT("/Game/Blueprints/Character/Animation/PSD_Character.PSD_Character"));
-	const UPoseSearchDatabase* SingleSword = LoadObject<UPoseSearchDatabase>(nullptr, TEXT("/Game/Blueprints/Character/Animation/PSD_SingleSword.PSD_SingleSword"));
-	const UPoseSearchDatabase* DoubleSword = LoadObject<UPoseSearchDatabase>(nullptr, TEXT("/Game/Blueprints/Character/Animation/PSD_DoubleSword.PSD_DoubleSword"));
+	// The character stands still throughout, so each stance searches its idle database
+	const UPoseSearchDatabase* Unarmed = LoadObject<UPoseSearchDatabase>(nullptr, TEXT("/Game/Blueprints/Character/Animation/PSD_Unarmed_Idle.PSD_Unarmed_Idle"));
+	const UPoseSearchDatabase* SingleSword = LoadObject<UPoseSearchDatabase>(nullptr, TEXT("/Game/Blueprints/Character/Animation/PSD_SingleSword_Idle.PSD_SingleSword_Idle"));
+	const UPoseSearchDatabase* DoubleSword = LoadObject<UPoseSearchDatabase>(nullptr, TEXT("/Game/Blueprints/Character/Animation/PSD_DoubleSword_Idle.PSD_DoubleSword_Idle"));
 
 	if (!TestNotNull(TEXT("The character exists"), CharacterClass) || !TestNotNull(TEXT("The stick exists"), Stick)
 		|| !TestNotNull(TEXT("The unarmed database exists"), Unarmed) || !TestNotNull(TEXT("The sword database exists"), SingleSword)
@@ -1087,6 +1107,24 @@ bool FFSEquipmentAssetsTest::RunTest(const FString& Parameters)
 
 	Mesh->TickAnimation(0.01f, false);
 	TestTrue(TEXT("Sheathed, the character searches the unarmed database"), AnimInstance->GetMotionMatchingDatabase() == Unarmed);
+
+	// Moving, however slowly, searches the stance's locomotion database, which has no idles
+	const UFSWeaponStance* UnarmedStance = Equipment->GetCurrentStance();
+	Character->GetCharacterMovement()->Velocity = FVector(30.0, 0.0, 0.0);
+	Mesh->TickAnimation(0.01f, false);
+	TestTrue(TEXT("Creeping forward searches the locomotion database"), UnarmedStance && AnimInstance->GetMotionMatchingDatabase() == UnarmedStance->LocomotionDatabase);
+	bool bLocomotionHasIdle = false;
+	if (const UPoseSearchDatabase* Locomotion = UnarmedStance ? UnarmedStance->LocomotionDatabase.Get() : nullptr)
+	{
+		for (int32 Index = 0; Index < Locomotion->GetNumAnimationAssets(); ++Index)
+		{
+			bLocomotionHasIdle |= GetNameSafe(Locomotion->GetDatabaseAnimationAsset(Index)->GetAnimationAsset()).Contains(TEXT("Idle"));
+		}
+	}
+	TestFalse(TEXT("Which has no idles"), bLocomotionHasIdle);
+	Character->GetCharacterMovement()->Velocity = FVector::ZeroVector;
+	Mesh->TickAnimation(0.01f, false);
+	TestTrue(TEXT("Stopping goes back to the idle database"), AnimInstance->GetMotionMatchingDatabase() == Unarmed);
 
 	TestTrue(TEXT("The stick can be drawn"), Equipment->Draw());
 	Mesh->TickAnimation(0.01f, false);

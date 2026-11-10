@@ -45,10 +45,15 @@ void UFSCharacterAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 {
 	Super::NativeUpdateAnimation(DeltaSeconds);
 
+	// Idles only play standing still, so creeping forward never picks one
+	bHasMovementInput = MovementComponent && !MovementComponent->GetCurrentAcceleration().IsNearlyZero();
+	bIsStandingStill = !bHasMovementInput && (!MovementComponent || MovementComponent->Velocity.SizeSquared2D() < FMath::Square(StandingStillSpeed));
+
 	if (const UFSWeaponStance* Stance = Equipment ? Equipment->GetCurrentStance() : nullptr)
 	{
-		// The node keeps searching what it's told until told otherwise, and interrupting what's playing is only wanted when this changes
-		UPoseSearchDatabase* Database = Stance->LocomotionDatabase;
+		// The node keeps searching what it's told until told otherwise, and interrupting what's playing is only wanted when this changes,
+		// such as between standing still and moving
+		UPoseSearchDatabase* Database = Stance->GetDatabase(bIsStandingStill);
 		if (MotionMatchingNode && Database && Database != MotionMatchingDatabase)
 		{
 			MotionMatchingNode->SetDatabaseToSearch(Database, EPoseSearchInterruptMode::InterruptOnDatabaseChange);
@@ -74,7 +79,6 @@ void UFSCharacterAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 		Trajectory = MovementComponent->GetTrajectory();
 		bIsFalling = MovementComponent->IsFalling();
 		bIsRising = bIsFalling && MovementComponent->Velocity.Z > 0.0f;
-		bHasMovementInput = !MovementComponent->GetCurrentAcceleration().IsNearlyZero();
 
 		bIsClimbing = MovementComponent->IsClimbing();
 		ClimbMovement = FVector2D::ZeroVector;

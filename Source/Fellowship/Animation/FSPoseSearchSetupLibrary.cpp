@@ -3,6 +3,26 @@
 #include "Animation/FSPoseSearchSetupLibrary.h"
 #include "PoseSearch/PoseSearchDatabase.h"
 
+bool UFSPoseSearchSetupLibrary::SetDatabaseAnimationEnabled(UPoseSearchDatabase* Database, int32 Index, bool bEnabled)
+{
+#if WITH_EDITOR
+	if (!Database || Index < 0 || Index >= Database->GetNumAnimationAssets())
+	{
+		return false;
+	}
+
+	FPoseSearchDatabaseAnimationAsset Entry = *Database->GetDatabaseAnimationAsset(Index);
+	Entry.SetIsEnabled(bEnabled);
+
+	Database->Modify();
+	Database->SetAnimationAssetAt(Entry, Index);
+	Database->PostEditChange();
+	return true;
+#else
+	return false;
+#endif
+}
+
 bool UFSPoseSearchSetupLibrary::SetDatabaseAnimation(UPoseSearchDatabase* Database, int32 Index, UObject* Animation)
 {
 #if WITH_EDITOR

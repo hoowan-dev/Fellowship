@@ -36,6 +36,14 @@ class FELLOWSHIP_API UFSCharacterAnimInstance : public UAnimInstance
 	UPROPERTY(Transient, BlueprintReadOnly, Category = "Movement", meta = (AllowPrivateAccess = "true"))
 	bool bHasMovementInput = false;
 
+	// No movement input and slower than Standing Still Speed, which is the only time a stance's idles play
+	UPROPERTY(Transient, BlueprintReadOnly, Category = "Movement", meta = (AllowPrivateAccess = "true"))
+	bool bIsStandingStill = true;
+
+	// Below this ground speed with no movement input, the character counts as standing still
+	UPROPERTY(EditDefaultsOnly, Category = "Movement", meta = (ClampMin = "0.0", ForceUnits = "cm/s"))
+	float StandingStillSpeed = 10.0f;
+
 	UPROPERTY(Transient, BlueprintReadOnly, Category = "Climbing", meta = (AllowPrivateAccess = "true"))
 	bool bIsClimbing = false;
 
@@ -91,4 +99,5 @@ public:
 
 	FORCEINLINE const UPoseSearchDatabase* GetMotionMatchingDatabase() const { return MotionMatchingDatabase; }
 	FORCEINLINE bool HasMotionMatchingNode() const { return MotionMatchingNode != nullptr; }
+	FORCEINLINE bool IsStandingStill() const { return bIsStandingStill; }
 };

@@ -19,9 +19,17 @@ class FELLOWSHIP_API UFSWeaponStance : public UPrimaryDataAsset
 	GENERATED_BODY()
 
 public:
-	// What motion matching searches on the ground. It should use the same schema as the other stances' databases.
+	// What motion matching searches on the ground while the character is moving, or trying to. With an Idle Database, it shouldn't hold idles,
+	// so that moving slowly never plays one. It should use the same schema as the other stances' databases.
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Locomotion")
 	TObjectPtr<UPoseSearchDatabase> LocomotionDatabase;
+
+	// What motion matching searches while the character stands still: no movement input and next to no speed. Empty searches Locomotion Database then too.
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Locomotion")
+	TObjectPtr<UPoseSearchDatabase> IdleDatabase;
+
+	// The database for standing still or moving
+	UPoseSearchDatabase* GetDatabase(bool bStandingStill) const { return bStandingStill && IdleDatabase ? IdleDatabase.Get() : LocomotionDatabase.Get(); }
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Jumping")
 	TObjectPtr<UAnimSequenceBase> JumpStart;
